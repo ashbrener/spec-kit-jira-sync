@@ -56,3 +56,7 @@ build/
 
 # Spec-kit ephemera
 .specify/cache/
+
+# Wingman review data
+.reviews/*.json
+.reviews/_convergence.json
