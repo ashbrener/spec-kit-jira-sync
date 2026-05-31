@@ -1,0 +1,30 @@
+# tests/fixtures/config/jira-config.sample.yml
+#
+# PLACEHOLDER fixture for src/config.sh unit tests. Privacy (Principle IX):
+# every value here is fake — a neutral project key, made-up numeric status /
+# issue-type / transition ids. NO real Jira coordinates, site, account ids or
+# tokens. This file is committed; the real resolved config lives only in the
+# gitignored `.specify/extensions/jira/jira-config.yml`.
+jira:
+  project_key: "PROJ"
+  issue_types:
+    epic: "10001"
+    story: "10002"
+    subtask: "10003"
+  # lifecycle phase -> target status id (set via a transition POST)
+  phase_status:
+    specifying: "20001"
+    planning: "20002"
+    tasking: "20003"
+    implementing: "20004"
+    ready_to_merge: "20005"
+    merged: "20006"
+  # optional explicit transition ids; here only `implementing` is pinned so
+  # the test can exercise both the explicit-id and resolve-dynamically paths.
+  transitions:
+    implementing: "30004"
+  labels:
+    spec_prefix: "speckit-spec:"
+    repo_prefix: "speckit-repo:"
+    phase_prefix: "task-phase:"
+    lifecycle_prefix: "phase:"
