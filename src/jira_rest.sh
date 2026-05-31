@@ -160,6 +160,19 @@ jira_rest::_request() {
 
   local attempt=0
   local max=$(( JIRA_MAX_RETRIES + 1 ))   # initial try + JIRA_MAX_RETRIES retries
+
+  # Idempotency gate (codex review P1): only idempotent methods may be retried on
+  # an AMBIGUOUS failure (network timeout / 5xx), where the server may already
+  # have committed the write. A non-idempotent POST that fails ambiguously is NOT
+  # retried — retrying could duplicate an issue/comment/link (FR-008). HTTP 429 is
+  # exempt: it is rejected before processing, so it is safe to retry for any
+  # method; the reconcile's query-before-write idempotency recovers the rest.
+  local idempotent=0
+  case "${method}" in
+    GET|HEAD|PUT|DELETE) idempotent=1 ;;
+    *)                   idempotent=0 ;;   # POST (and anything else): ambiguous-unsafe
+  esac
+
   while (( attempt < max )); do
     attempt=$(( attempt + 1 ))
 
@@ -186,9 +199,16 @@ jira_rest::_request() {
       # Transport failure (DNS, TLS, timeout, connection refused). Treat as
       # transient and retry within the bound; if reads exhaust, fail closed.
       jira_rest::_log "network failure (curl rc ${curl_rc}) on ${method} ${url} [attempt ${attempt}/${max}]"
-      if (( attempt < max )); then
+      if (( attempt < max )) && (( idempotent )); then
         jira_rest::_backoff_sleep "${attempt}" ""
         continue
+      fi
+      if (( ! idempotent )); then
+        # Ambiguous non-idempotent failure: the write may have committed. Do NOT
+        # retry (risks a duplicate); fail closed and let the next reconcile,
+        # which queries before writing, converge.
+        jira_rest::_log "ambiguous ${method} network failure -> not retrying (avoid duplicate write); fail closed (rc ${JIRA_REST_RC_HTTP_ERROR})"
+        return "${JIRA_REST_RC_HTTP_ERROR}"
       fi
       if [[ "${op_class}" == "read" ]]; then
         jira_rest::_log "read unreadable after network failures -> fail closed (rc ${JIRA_REST_RC_UNREADABLE})"
@@ -202,14 +222,33 @@ jira_rest::_request() {
         cat -- "${body_file}"
         return "${JIRA_REST_RC_OK}"
         ;;
-      429|5??)
-        # Rate-limited or transient server error: bounded retry (FR-022).
+      429)
+        # Rate-limited: the request was REJECTED before processing, so retrying
+        # is safe for ANY method (including POST). Bounded retry (FR-022).
         local retry_after
         retry_after="$(jira_rest::_retry_after "${hdr_file}")"
-        jira_rest::_log "HTTP ${http_code} on ${method} ${url} [attempt ${attempt}/${max}]${retry_after:+ Retry-After=${retry_after}s}"
+        jira_rest::_log "HTTP 429 on ${method} ${url} [attempt ${attempt}/${max}]${retry_after:+ Retry-After=${retry_after}s}"
         if (( attempt < max )); then
           jira_rest::_backoff_sleep "${attempt}" "${retry_after}"
           continue
+        fi
+        jira_rest::_log "retries exhausted after ${JIRA_MAX_RETRIES} attempts on ${method} ${url} -> fail closed (rc ${JIRA_REST_RC_RETRY_EXHAUSTED})"
+        return "${JIRA_REST_RC_RETRY_EXHAUSTED}"
+        ;;
+      5??)
+        # Transient server error: AMBIGUOUS for non-idempotent writes (the server
+        # may have committed before erroring). Retry only idempotent methods; a
+        # POST 5xx fails closed to avoid a duplicate write (codex review P1).
+        local retry_after
+        retry_after="$(jira_rest::_retry_after "${hdr_file}")"
+        jira_rest::_log "HTTP ${http_code} on ${method} ${url} [attempt ${attempt}/${max}]${retry_after:+ Retry-After=${retry_after}s}"
+        if (( attempt < max )) && (( idempotent )); then
+          jira_rest::_backoff_sleep "${attempt}" "${retry_after}"
+          continue
+        fi
+        if (( ! idempotent )); then
+          jira_rest::_log "ambiguous ${method} 5xx -> not retrying (avoid duplicate write); fail closed (rc ${JIRA_REST_RC_HTTP_ERROR})"
+          return "${JIRA_REST_RC_HTTP_ERROR}"
         fi
         jira_rest::_log "retries exhausted after ${JIRA_MAX_RETRIES} attempts on ${method} ${url} -> fail closed (rc ${JIRA_REST_RC_RETRY_EXHAUSTED})"
         return "${JIRA_REST_RC_RETRY_EXHAUSTED}"
