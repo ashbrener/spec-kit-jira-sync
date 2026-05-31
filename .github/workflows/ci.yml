@@ -1,0 +1,410 @@
+# =============================================================================
+# CI for the spec-kit-jira repository itself.
+#
+# This workflow catches regressions in the bridge code that lives in THIS repo:
+#   * bash implementation under src/*.sh (parser, engine, jira-sink)
+#   * git-hook templates under templates/git-hooks/* (no .sh extension, but bash)
+#   * the consumer-side GitHub Action template at templates/github-action.yml
+#   * the extension manifest (extension.yml) and config template (config-template.yml)
+#   * AI-agent command algorithms under commands/*.md
+#   * bats unit + integration tests under tests/{unit,integration}/
+#
+# Do NOT confuse this file with templates/github-action.yml — that template is
+# what gets COPIED into a consumer repo at `specify extension add jira` time
+# and runs in the consumer's CI to drive Jira transitions on PR events.
+# This file (ci.yml) runs in OUR repo and never talks to Jira, so no
+# JIRA_API_TOKEN secret is required or read here.
+#
+# Locked technical decisions (from /speckit-plan):
+#   * Bridge implementation language: bash 4+
+#   * Allowed runtime tools: curl, jq, gh, git (preinstalled on ubuntu-latest)
+#   * Validation tooling: shellcheck, bats-core, yamllint, markdownlint-cli2
+#
+# Trigger model:
+#   * pull_request to any branch  -> gate every PR before merge
+#   * push to main                 -> guard the trunk after merge / direct push
+#
+# Permissions:
+#   `contents: read` is the minimum scope required by actions/checkout. This
+#   workflow performs no writes back to GitHub (no comments, no statuses, no
+#   labels) so every other permission scope is intentionally omitted per
+#   GitHub's least-privilege hardening guidance.
+# =============================================================================
+
+name: ci
+
+on:
+  pull_request:
+    # All branches — we want PR gating regardless of the target branch.
+    branches: ["**"]
+  push:
+    branches: [main]
+  # Manual fallback — useful when an upstream sync event silently no-ops
+  # (we hit this when ci.yml was missing on main; GitHub Actions sometimes
+  # caches the "no workflow on base" state and stops triggering on PR
+  # synchronize even after the workflow file lands on main).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel in-flight runs for the same ref when a new commit lands. Saves CI
+# minutes on rapid pushes; the latest commit is always the one we care about.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: shellcheck
+  # ---------------------------------------------------------------------------
+  # Lints every bash file in the repo. We explicitly enumerate the directories
+  # the project structure declares (src/, templates/git-hooks/, scripts/) and
+  # tell shellcheck to treat unsuffixed hook files as bash via `--shell=bash`.
+  #
+  # Why a dedicated job (not folded into the matrix below): shellcheck is a
+  # static analyser — its output doesn't depend on the bash version installed
+  # on the runner — so running it once is sufficient and keeps logs clean.
+  # ---------------------------------------------------------------------------
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        # shellcheck ships in the ubuntu-latest image, but we install
+        # explicitly so a future runner-image bump doesn't silently regress us.
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck --version
+
+      - name: Lint src/**/*.sh and scripts/**/*.sh
+        run: |
+          set -euo pipefail
+          # Collect every .sh under src/ and scripts/. Use -print0 + xargs -0
+          # so paths with spaces survive intact. If neither directory exists
+          # yet (early in the project's life), exit cleanly rather than fail.
+          files=()
+          for root in src scripts; do
+            if [[ -d "$root" ]]; then
+              while IFS= read -r -d '' f; do files+=("$f"); done \
+                < <(find "$root" -type f -name '*.sh' -print0)
+            fi
+          done
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No .sh files under src/ or scripts/ yet — skipping."
+            exit 0
+          fi
+          printf 'Linting %d file(s):\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+          shellcheck --shell=bash --severity=style --color=always "${files[@]}"
+
+      - name: Lint templates/git-hooks/* (extension-less bash scripts)
+        run: |
+          set -euo pipefail
+          # The git-hook templates ship without a .sh suffix because git
+          # invokes them by their literal hook name (post-checkout, etc).
+          # We force shellcheck to treat them as bash regardless.
+          if [[ ! -d templates/git-hooks ]]; then
+            echo "templates/git-hooks/ does not exist yet — skipping."
+            exit 0
+          fi
+          files=()
+          while IFS= read -r -d '' f; do files+=("$f"); done \
+            < <(find templates/git-hooks -type f -print0)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "templates/git-hooks/ is empty — skipping."
+            exit 0
+          fi
+          printf 'Linting %d hook(s):\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+          shellcheck --shell=bash --severity=style --color=always "${files[@]}"
+
+  # ---------------------------------------------------------------------------
+  # Job 2: yamllint
+  # ---------------------------------------------------------------------------
+  # Validates the YAML files the bridge ships (extension manifest, config
+  # template, consumer-side GitHub Action template) AND this CI workflow file
+  # itself (so we don't break our own gate with an unparseable change).
+  # ---------------------------------------------------------------------------
+  yamllint:
+    name: yamllint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install yamllint
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends yamllint
+          yamllint --version
+
+      - name: Lint YAML files
+        run: |
+          set -euo pipefail
+          # Enumerate the YAML surface area explicitly. Each file is optional
+          # at this point in the project — only lint what exists so the job
+          # passes during early scaffolding.
+          targets=(
+            extension.yml
+            config-template.yml
+            templates/github-action.yml
+            .github/workflows/ci.yml
+          )
+          existing=()
+          for f in "${targets[@]}"; do
+            if [[ -f "$f" ]]; then existing+=("$f"); fi
+          done
+          if [[ ${#existing[@]} -eq 0 ]]; then
+            echo "None of the target YAML files exist yet — skipping."
+            exit 0
+          fi
+          printf 'Linting %d YAML file(s):\n' "${#existing[@]}"
+          printf '  %s\n' "${existing[@]}"
+          # `relaxed` config tolerates long lines and minor stylistic noise
+          # while still catching real syntax / structural errors.
+          yamllint -d relaxed "${existing[@]}"
+
+  # ---------------------------------------------------------------------------
+  # Job 3: markdownlint
+  # ---------------------------------------------------------------------------
+  # Lightweight markdown linting for the docs surface area: command algorithms
+  # consumed by AI agents (must parse cleanly), root README/CHANGELOG, and the
+  # spec artifacts under specs/. Uses markdownlint-cli2 via npx — no global
+  # install, no lockfile churn.
+  # ---------------------------------------------------------------------------
+  markdownlint:
+    name: markdownlint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js (for npx markdownlint-cli2)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run markdownlint-cli2
+        run: |
+          set -euo pipefail
+          # Build the glob list dynamically so the job doesn't fail when an
+          # optional file (CONTRIBUTING.md) isn't present.
+          globs=()
+          [[ -d commands ]] && globs+=("commands/*.md")
+          [[ -f README.md ]] && globs+=("README.md")
+          [[ -f CHANGELOG.md ]] && globs+=("CHANGELOG.md")
+          [[ -f CONTRIBUTING.md ]] && globs+=("CONTRIBUTING.md")
+          [[ -d specs ]] && globs+=("specs/**/*.md")
+          if [[ ${#globs[@]} -eq 0 ]]; then
+            echo "No markdown targets present — skipping."
+            exit 0
+          fi
+          printf 'Linting globs:\n'
+          printf '  %s\n' "${globs[@]}"
+          # `--no-globs` is NOT what we want; we DO want shell globs expanded.
+          # markdownlint-cli2 accepts globs as positional arguments.
+          # Rule configuration lives in `.markdownlint-cli2.jsonc` at the repo
+          # root, which markdownlint-cli2 auto-discovers from the working
+          # directory. Keeping the config out-of-band means local
+          # `npx markdownlint-cli2` runs agree with CI.
+          npx --yes markdownlint-cli2 "${globs[@]}"
+
+  # ---------------------------------------------------------------------------
+  # Job 4: bats test matrix across {ubuntu, macOS} × {bash 4.4, bash 5.2}
+  # ---------------------------------------------------------------------------
+  # Runs the bats unit suite (and optionally the integration suite) against
+  # Bash 4.4 and Bash 5.2 on BOTH Linux and macOS runners. The dual-OS axis
+  # exists to catch BSD-vs-GNU userland regressions automatically — we've hit
+  # two BSD-awk multiline bugs that only surfaced at dogfood time (commits
+  # 1e32f29 and 2979d96). With macOS in the matrix, CI catches them first.
+  #
+  # Why source-build bash on BOTH platforms:
+  #   * ubuntu-latest ships bash 5.x; apt has no historical bash 4.4 package.
+  #   * macos-latest ships bash 3.2 (last GPLv2 release Apple will redistribute).
+  #     Homebrew exposes a single `bash` formula tracking upstream stable
+  #     (currently 5.3.x) — there is no `bash@4` or `bash@5.2` formula. So the
+  #     ONLY way to pin both versions on macOS is a source build from
+  #     ftp.gnu.org. We use the same source build on Linux for consistency.
+  #   * GNU bash 4.4 + 5.2 tarballs compile cleanly on both glibc and macOS
+  #     libSystem with the default `./configure` flags; no special toolchain.
+  #
+  # Caching: the compiled bash binary is cached per (os, bash_version) so the
+  # ~30-60s build only runs on cache miss. Cache key includes the OS to keep
+  # macOS and Linux artifacts separate (different ABIs).
+  #
+  # bats-core install:
+  #   * Linux: tarball install to ~/.local/bats, cached. (No apt package on the
+  #     ubuntu-latest image at a pinned version.)
+  #   * macOS: same tarball flow as Linux for parity. `brew install bats-core`
+  #     also works but pulls in unrelated cellar churn; the tarball is faster.
+  #
+  # Integration tests are gated on RUN_INTEGRATION_TESTS=1 because they need
+  # a real Jira API token, which this repo's CI deliberately does not have
+  # (we don't want every PR consuming live workspace quota). Forks contributing
+  # PRs would also lack the secret, so gating on env keeps those green.
+  # ---------------------------------------------------------------------------
+  bats:
+    name: bats (${{ matrix.os }}, bash ${{ matrix.bash_version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Don't cancel the whole matrix if one combo fails — we want to see all
+      # results so we can tell whether a failure is OS-specific, bash-version-
+      # specific, or universal.
+      fail-fast: false
+      matrix:
+        # Bash 4.4 = lowest version we promise to support (FR: "bash 4+").
+        # Bash 5.2 = current upstream stable; ships in ubuntu-latest.
+        os: [ubuntu-latest, macos-latest]
+        bash_version: ["4.4", "5.2"]
+        exclude:
+          # GNU bash 4.4 source (released 2016-09) doesn't compile against the
+          # modern Xcode 16.4 / Darwin 24 SDK — the `snprintf` macro in macOS's
+          # hardened `secure/_stdio.h` conflicts with bash 4.4's own `snprintf`
+          # forward declaration, leading to "conflicting types for
+          # __builtin___snprintf_chk" at compile time. Maintaining a vendored
+          # patch set for that combination isn't worth the marginal coverage —
+          # the bridge's BSD-tool portability (awk, sed) is exercised by the
+          # macos-latest × bash 5.2 combo, and bash 4.4 baseline coverage runs
+          # on ubuntu-latest × bash 4.4.
+          - os: macos-latest
+            bash_version: "4.4"
+    env:
+      # Integration tests stay off by default. To enable on a specific branch
+      # or for a manual run, set this to "1" via a workflow_dispatch input or
+      # repository variable. Forks never get credentials, so this stays unset.
+      RUN_INTEGRATION_TESTS: "0"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ----- Install build prerequisites (macOS only) ------------------------
+      # ubuntu-latest already has build-essential available via apt; macOS
+      # needs Xcode CLT (present on macos-latest by default) plus `jq` for
+      # the bridge runtime tests. `gh` and `git` ship on the runner image.
+      - name: Install runtime deps (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          set -euo pipefail
+          # jq is preinstalled on macos-latest but pin via brew for safety —
+          # idempotent if already current.
+          brew list jq >/dev/null 2>&1 || brew install jq
+          jq --version
+
+      # ----- Install bats-core (cached, both OSes) ---------------------------
+      # bats-core is a small set of bash scripts, so a tarball install + cache
+      # is faster than a package install and avoids version drift between
+      # runner images.
+      - name: Cache bats-core
+        id: cache-bats
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bats
+          # Bump this key when bumping the pinned version below. Cache is
+          # OS-keyed because the install.sh writes absolute paths in shebangs.
+          key: bats-core-1.11.0-${{ matrix.os }}
+
+      - name: Install bats-core 1.11.0
+        if: steps.cache-bats.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.local
+          curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.11.0.tar.gz \
+            | tar -xz -C /tmp
+          /tmp/bats-core-1.11.0/install.sh ~/.local/bats
+          ~/.local/bats/bin/bats --version
+
+      - name: Add bats to PATH
+        run: echo "$HOME/.local/bats/bin" >> "$GITHUB_PATH"
+
+      # ----- Build the requested bash version from source --------------------
+      # Source-build on BOTH OSes for version-exact testing. See header comment
+      # for why Homebrew can't help with pinned 4.4 / 5.2 on macOS.
+      - name: Cache bash ${{ matrix.bash_version }} build
+        id: cache-bash
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bash-${{ matrix.bash_version }}
+          # Cache key includes OS — ELF and Mach-O binaries are not portable.
+          # Bump the trailing -vN when changing build flags or source URL.
+          key: bash-${{ matrix.bash_version }}-${{ matrix.os }}-v1
+
+      - name: Install build toolchain (Linux)
+        if: matrix.os == 'ubuntu-latest' && steps.cache-bash.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential
+
+      - name: Build bash ${{ matrix.bash_version }} from source
+        if: steps.cache-bash.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          ver="${{ matrix.bash_version }}"
+          curl -fsSL "https://ftp.gnu.org/gnu/bash/bash-${ver}.tar.gz" \
+            -o "/tmp/bash-${ver}.tar.gz"
+          tar -xzf "/tmp/bash-${ver}.tar.gz" -C /tmp
+          pushd "/tmp/bash-${ver}" >/dev/null
+          # Detect parallel-build job count cross-platform: nproc on Linux,
+          # `sysctl -n hw.ncpu` on macOS.
+          if command -v nproc >/dev/null 2>&1; then
+            jobs="$(nproc)"
+          else
+            jobs="$(sysctl -n hw.ncpu)"
+          fi
+          ./configure --prefix="$HOME/.local/bash-${ver}" --quiet
+          make -j"$jobs" >/dev/null
+          make install >/dev/null
+          popd >/dev/null
+          "$HOME/.local/bash-${ver}/bin/bash" --version
+
+      - name: Expose bash ${{ matrix.bash_version }} to subsequent steps
+        run: |
+          set -euo pipefail
+          ver="${{ matrix.bash_version }}"
+          echo "BATS_BASH=$HOME/.local/bash-${ver}/bin/bash" >> "$GITHUB_ENV"
+          "$HOME/.local/bash-${ver}/bin/bash" --version
+
+      # ----- Run the test suites --------------------------------------------
+      - name: Run bats unit tests
+        run: |
+          set -euo pipefail
+          if [[ ! -d tests/unit ]]; then
+            echo "tests/unit/ does not exist yet — skipping."
+            exit 0
+          fi
+          # Force bats to invoke the matrix-selected bash. bats's libexec
+          # scripts shebang `#!/usr/bin/env bash`, so the only portable way
+          # to swap interpreters is to put the matrix bash's dir at the
+          # front of PATH so `env bash` resolves to it. Setting BASH alone
+          # is not enough — `env` ignores it. Critical on macOS where the
+          # system bash is 3.2 and rejects bash 4+ features (`declare -g`,
+          # associative arrays, etc.).
+          export PATH="$(dirname "$BATS_BASH"):$PATH"
+          export BASH="$BATS_BASH"
+          bash --version
+          bats --print-output-on-failure --recursive tests/unit
+
+      - name: Run bats integration tests
+        if: env.RUN_INTEGRATION_TESTS == '1'
+        run: |
+          set -euo pipefail
+          if [[ ! -d tests/integration ]]; then
+            echo "tests/integration/ does not exist yet — skipping."
+            exit 0
+          fi
+          export PATH="$(dirname "$BATS_BASH"):$PATH"
+          export BASH="$BATS_BASH"
+          bats --print-output-on-failure --recursive tests/integration
+
+      - name: Note skipped integration tests
+        if: env.RUN_INTEGRATION_TESTS != '1'
+        run: |
+          echo "::notice::Integration tests skipped (RUN_INTEGRATION_TESTS != 1)."
+          echo "::notice::To run them, set the env var on a dispatch or trusted branch."

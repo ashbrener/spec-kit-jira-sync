@@ -1,4 +1,58 @@
+# Secrets — never commit. The real Jira API token (Basic auth: email:token)
+# lives ONLY here, never in a tracked file. See .env.example for the shape.
 .env
-.env.*
-*.log
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Per-consumer Jira binding — holds the operator's real Jira Cloud site,
+# project key(s), account IDs + identity. The self-describing repo ships the
+# committed `config-template.yml` placeholder; the resolved `jira-config.yml`
+# is local-only so a public repo never leaks the operator's Jira coordinates.
+# Bootstrap: copy the template, run install.
+.specify/extensions/jira/jira-config.yml
+
+# Privacy-guard local deny-list — holds the operator's REAL coordinates
+# (workspace/company name, project keys, site, cloudId, accountId, email) so
+# tests/unit/no-real-identifiers.bats can scan for accidental leaks. Real
+# values must NEVER be committed; only tests/.private-deny.example ships.
+tests/.private-deny
+
+# OS detritus
 .DS_Store
+Thumbs.db
+
+# Editor / tooling
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code local-only settings (skills under .claude/skills/ are tracked)
+.claude/settings.local.json
+# Agent worktrees — ephemeral, isolated checkouts; never committed
+.claude/worktrees/
+# Local MCP server wiring — machine-specific (e.g. the Atlassian remote MCP)
+.mcp.json
+
+# Python build artefacts (validate.py venv, any Python tooling)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node build artefacts (markdownlint-cli2 via npx, any Node tooling)
+node_modules/
+dist/
+build/
+*.log
+.npm/
+.yarn/
+
+# Spec-kit ephemera
+.specify/cache/
