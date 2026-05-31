@@ -1,0 +1,42 @@
+{
+  "schema_version": "0.1.0",
+  "source": {
+    "system": "spec-kit",
+    "repo": "example-org/example-repo",
+    "generated_iso": "2026-05-31T00:00:00Z"
+  },
+  "items": [
+    {
+      "id": "001-example-spec",
+      "title": "Example spec",
+      "kind": "spec",
+      "state": "implementing",
+      "body": "A placeholder spec used by the workstate schema-validation gate.",
+      "labels": ["speckit-spec:001"],
+      "item_source": {
+        "path": "specs/001-example-spec/",
+        "last_commit_iso": "2026-05-31T00:00:00Z"
+      },
+      "notes": [
+        { "author": "parser", "timestamp_iso": "2026-05-31T00:00:00Z", "body": "Placeholder note." }
+      ],
+      "links": [
+        { "rel": "blocks", "target": "002-other-spec" }
+      ],
+      "children": [
+        {
+          "id": "task-phase:1",
+          "title": "Phase 1 — Setup",
+          "kind": "task",
+          "state": "implementing",
+          "extensions": {
+            "tasks": [
+              { "text": "Write the spec", "done": true },
+              { "text": "Implement the bridge", "done": false }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
