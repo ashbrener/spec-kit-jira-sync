@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.1.0",
+  "source": {
+    "system": "spec-kit",
+    "repo": "sample-repo",
+    "generated_iso": "2026-05-31T12:34:56+00:00"
+  },
+  "items": [
+    {
+      "id": "001-sample",
+      "title": "Sample Spec",
+      "kind": "spec",
+      "state": "implementing",
+      "labels": [
+        "speckit-spec:001"
+      ],
+      "item_source": {
+        "path": "tests/fixtures/specs/001-sample/",
+        "last_commit_iso": "2026-05-31T12:00:00+00:00"
+      },
+      "links": [],
+      "notes": [],
+      "children": [
+        {
+          "id": "001-phase-1",
+          "title": "Phase 1 — Setup",
+          "kind": "task",
+          "state": "done",
+          "extensions": {
+            "tasks": [
+              {
+                "text": "Create skeleton directories",
+                "done": true
+              },
+              {
+                "text": "[P] Configure linting and bats",
+                "done": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "001-phase-2",
+          "title": "Phase 2 — Core",
+          "kind": "task",
+          "state": "in_progress",
+          "extensions": {
+            "tasks": [
+              {
+                "text": "Implement the spec parser",
+                "done": true
+              },
+              {
+                "text": "[P] Implement the Jira sink seam",
+                "done": false
+              }
+            ]
+          }
+        }
+      ],
+      "body": "A small placeholder spec used to drive parser and workstate tests for the\nspec-kit-jira bridge. It carries no real coordinates and exists only as\non-disk fixture input."
+    }
+  ]
+}
