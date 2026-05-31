@@ -113,10 +113,34 @@ workstate::_last_commit_iso() {
         return 0
     fi
     local iso
-    iso="$(git -C "$spec_dir" log -1 --format=%cI -- "$spec_dir" 2>/dev/null || true)"
+    # The pathspec is relative to the -C working dir, so scope to that dir
+    # itself ('.'), not "$spec_dir" again: a repo-relative path would otherwise
+    # resolve under itself, match no commits, and drop the recency signal
+    # (codex review P2).
+    iso="$(git -C "$spec_dir" log -1 --format=%cI -- . 2>/dev/null || true)"
     if [[ -n "$iso" ]]; then
         printf '%s\n' "$iso"
     fi
+}
+
+# ---------------------------------------------------------------------------
+# workstate::_normalize_phase <parser_phase>
+#
+# parser::lifecycle_phase emits a richer internal vocabulary (clarifying,
+# red_team, analyzing) than the documented 6-phase lifecycle the sink's config
+# maps (data-model §3). Collapse the intermediate states onto a supported phase
+# before emission, or a spec mid-clarify/red-team/analyze would emit a state
+# config rejects with an unknown-phase error (codex review P1). The producer
+# owns its emitted vocabulary; here it chooses the documented six.
+# ---------------------------------------------------------------------------
+workstate::_normalize_phase() {
+    case "$1" in
+        clarifying)          printf 'specifying\n' ;;
+        red_team|analyzing)  printf 'implementing\n' ;;
+        specifying|planning|tasking|implementing|ready_to_merge|merged)
+                             printf '%s\n' "$1" ;;
+        *)                   printf '%s\n' "$1" ;;  # unknown: pass through; sink surfaces it
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -245,6 +269,7 @@ workstate::item_for_spec() {
     title="$(workstate::_spec_title "$spec_dir")"
     state="$(parser::lifecycle_phase "$spec_dir" || true)"
     [[ -n "$state" ]] || state="specifying"
+    state="$(workstate::_normalize_phase "$state")"
     body="$(workstate::_spec_body "$spec_dir")"
     label="speckit-spec:${feature_number}"
     path="${spec_dir}/"

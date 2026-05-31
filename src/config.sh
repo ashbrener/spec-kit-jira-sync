@@ -45,8 +45,10 @@
 # This mirrors the proven spec-kit-linear `src/config.sh` parser, swapping
 # the Linear fields (team/project/workflow-state UUIDs) for the Jira ones
 # (project key, issue-type ids, phase->status map, label prefixes).
-
-set -euo pipefail
+#
+# NOTE: a sourced library MUST NOT mutate the caller's shell options (codex
+# review P2). Shell-option ownership stays with entry points; functions here use
+# explicit error handling (config::_die) rather than relying on `set -e`.
 
 # ---------------------------------------------------------------------------
 # Module-level state. All keys are flattened "dotted" paths under the
