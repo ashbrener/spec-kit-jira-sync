@@ -109,6 +109,11 @@ declare -g _RECONCILE_OVERVIEW_WARNED=0
 # (newline-separated): `<lifecycle_phase>\t<last_touched_epoch>`.
 declare -g _RECONCILE_LIFECYCLE_ROWS=""
 
+# Per-spec workstate-item cache. reconcile::sync_spec_issue builds the neutral
+# workstate item once and stashes it here so reconcile::sync_task_phase_subissues
+# reuses it without re-parsing the spec dir. Reset on each process_spec entry.
+declare -g RECONCILE_WORKSTATE_ITEM=""
+
 # -----------------------------------------------------------------------------
 # CLI flags — populated by reconcile::parse_args.
 # -----------------------------------------------------------------------------
@@ -841,50 +846,34 @@ reconcile::subissue_state_key() {
 # =============================================================================
 
 # reconcile::sync_spec_issue <feature_number> <short_name> <spec_dir> <phase> <branch>
-#   Heart of the per-spec mutation path: compose the bridge-owned issue body
-#   and hand off to the sink to find-or-create/update the spec issue. Echoes
-#   the spec issue id for downstream sub-issue/comment reconcile. Returns
-#   non-zero on any sink failure.
+#   Heart of the per-spec mutation path: build the neutral workstate item for
+#   the spec and hand it to the sink to find-or-create/update the Story under
+#   the per-repo Epic. Echoes the spec issue key for downstream sub-issue
+#   reconcile. Returns non-zero on any sink failure.
 #
-#   TODO(US1/T023): drive title/labels/body from workstate::item_for_spec
-#   rather than recomposing tracker-shaped state here. The composition below
-#   is retained so the engine stays sourceable + drift-testable against the
-#   sink stubs; the workstate wiring is a later task.
+#   US1/T023: the title/state/body/labels are now driven from
+#   workstate::item_for_spec (the neutral internal contract) rather than
+#   recomposing tracker-shaped state inline. The item is cached on a module
+#   global so reconcile::sync_task_phase_subissues reuses it without re-parsing.
 reconcile::sync_spec_issue() {
     local feature_number="$1"
     local short_name="$2"
     local spec_dir="$3"
     local lifecycle_phase="$4"
     local feature_branch="$5"
+    : "${short_name:-}" "${lifecycle_phase:-}" "${feature_branch:-}"
 
-    # The single Jira-specific vendor lever: lifecycle phase → target status
-    # id (+ optional explicit transition id). Renamed from the sibling's
-    # config::get_workflow_state_uuid for Jira's transition semantics.
-    #
-    # Normalize first: parser::lifecycle_phase can return clarifying/red_team/
-    # analyzing, which config (the documented 6 phases) rejects with exit 2 —
-    # so resolve against the normalized phase, not the raw one (codex review P1).
-    # Drift/display elsewhere keep the raw phase (its ordinal handles the wider
-    # vocabulary); only status resolution needs the 6-phase form.
-    local status_transition resolve_phase
-    resolve_phase="$(workstate::_normalize_phase "$lifecycle_phase")"
-    status_transition="$(config::get_status_transition "$resolve_phase")"
+    # Build the neutral workstate item once (title/state/body/labels/children).
+    # The producer normalizes the lifecycle phase to the documented 6-phase
+    # vocabulary the sink's config maps, so the sink never sees clarifying/
+    # red_team/analyzing.
+    local item_json
+    if ! item_json="$(workstate::item_for_spec "$spec_dir")"; then
+        return 1
+    fi
+    # Cache for the sub-issue pass (process_spec runs them back-to-back).
+    declare -g RECONCILE_WORKSTATE_ITEM="$item_json"
 
-    # Compose the overview + memory + diagrams blocks into a final body.
-    local memory_block diagrams_block overview_block description
-    memory_block="$(reconcile::render_memory_block \
-        "$feature_number" "$short_name" "$lifecycle_phase" \
-        "$spec_dir" "$feature_branch")"
-    diagrams_block="$(reconcile::render_diagrams_block)"
-    overview_block="$(reconcile::render_overview_block "$spec_dir")"
-    description="$(reconcile::compose_issue_description \
-        "$overview_block" "$memory_block" "$diagrams_block")"
-
-    # Hand off to the sink. ensure_repo_epic + sync_spec_issue own the
-    # find-or-create/update, idempotency diff, and transition POST.
-    # TODO(US1/T023): the sink will read the composed body + status
-    # transition from the workstate item; the args below mirror the
-    # engine-sink-interface contract until that wiring lands.
     # Repo slug = basename of the repo root (the workstate source.repo
     # convention, workstate::document_for_repo). Best-effort: a non-git or
     # detached checkout degrades to the spec dir's grandparent basename.
@@ -893,30 +882,39 @@ reconcile::sync_spec_issue() {
     if [[ -z "$repo_slug" ]]; then
         repo_slug="$(basename "$(dirname "$(dirname "${spec_dir%/}")")" 2>/dev/null || true)"
     fi
-    epic_id="$(ensure_repo_epic "$repo_slug")" || true
-    : "${description:-}" "${status_transition:-}"
 
-    if ! spec_issue_id="$(sync_spec_issue \
-        "$feature_number" "$short_name" "$spec_dir" \
-        "$lifecycle_phase" "$epic_id")"; then
+    # ensure_repo_epic + sync_spec_issue own the find-or-create + transition.
+    if ! epic_id="$(ensure_repo_epic "$repo_slug")"; then
+        return 1
+    fi
+
+    if ! spec_issue_id="$(sync_spec_issue "$item_json" "$epic_id")"; then
         return 1
     fi
     printf '%s\n' "$spec_issue_id"
 }
 
 # reconcile::sync_task_phase_subissues <spec_issue_id> <feature_number> <spec_dir>
-#   For each task phase in tasks.md, find-or-create one sub-issue under the
-#   spec issue. Returns the per-phase sub-issue ids as a JSON object keyed by
-#   phase index for downstream blocking-relation reconcile.
+#   For each task phase (a workstate child), create one Subtask under the Story.
+#   Returns the per-phase sub-issue ids as a JSON object keyed by phase index
+#   for downstream blocking-relation reconcile.
 #
-#   TODO(US1/T023): drive the phase set + checklist from
-#   workstate::item_for_spec children instead of re-parsing tasks.md here.
+#   US1/T023: the phase set + per-task checklist are driven from the cached
+#   workstate item's children (kind="task") instead of re-parsing tasks.md.
 reconcile::sync_task_phase_subissues() {
     local spec_issue_id="$1"
     local feature_number="$2"
     local spec_dir="$3"
+    : "${feature_number:-}"
 
-    sync_task_phase_subissues "$spec_issue_id" "$feature_number" "$spec_dir"
+    # Reuse the item cached by reconcile::sync_spec_issue; rebuild only if the
+    # cache is somehow empty (defensive — process_spec always runs them paired).
+    local item_json="${RECONCILE_WORKSTATE_ITEM:-}"
+    if [[ -z "$item_json" ]]; then
+        item_json="$(workstate::item_for_spec "$spec_dir")" || return 1
+    fi
+
+    sync_task_phase_subissues "$spec_issue_id" "$item_json"
 }
 
 # reconcile::sync_inter_phase_blocks <phase_map> <spec_dir>
@@ -1540,6 +1538,9 @@ reconcile::process_spec() {
         summary::add error "spec ${feature_number}: no issue id resolved"
         return 0
     fi
+    # Record the Story create/update for the run summary (Principle VIII). On a
+    # fresh reconcile this is a create; idempotent diff/update is US2.
+    summary::add created "spec ${feature_number}: Story ${spec_issue_id}"
 
     # --- Task-phase sub-issues ----------------------------------------
     local phase_map
@@ -1547,6 +1548,15 @@ reconcile::process_spec() {
         "$spec_issue_id" "$feature_number" "$spec_dir")"; then
         summary::add error "spec ${feature_number}: sync_task_phase_subissues failed"
         # Continue to comments — sub-issue failures don't block the rest.
+    elif [[ -n "${phase_map:-}" && "$phase_map" != "{}" ]]; then
+        # One created row per phase Subtask, so the summary's created counter
+        # reflects Story + Subtasks (the observable fresh-mirror result).
+        local _subtask_count
+        _subtask_count="$(printf '%s' "$phase_map" | jq -r 'length' 2>/dev/null || printf '0')"
+        local _i
+        for (( _i = 0; _i < _subtask_count; _i++ )); do
+            summary::add created "spec ${feature_number}: Subtask"
+        done
     fi
 
     # --- Inter-phase blocking relations -------------------------------
