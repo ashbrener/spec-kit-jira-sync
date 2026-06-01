@@ -111,3 +111,29 @@ Adopt the **configurability**, not raw exposure:
 
 Full landscape + rationale also lives in
 `~/Code/AI/workstate-schema/PROJECT-BRIEF.md` §11 if you want the source.
+
+---
+
+## ADDENDUM (2026-06-01) — keep the sink decoupled from the source
+
+Architecture correction (full rationale: `~/Code/AI/workstate-schema/PROJECT-BRIEF.md` §14):
+
+The spec-kit parser currently lives INSIDE this repo. That's expected,
+TEMPORARY debt — but it means the sink is fused to spec-kit. The end state:
+**sinks consume `workstate` and nothing else; the spec-kit parser is extracted
+to a standalone `source-speckit` producer.**
+
+Two concrete implications for THIS build:
+1. **Expose `workstate` as a DIRECT input now.** The Jira sink must be runnable
+   from a `workstate` JSON file/stdin, not only from a specs/ tree. (Pipeline
+   should be startable one stage later: `workstate → jira`, skipping the
+   parser.) This is what lets product-mem / any non-spec-kit source feed it.
+   Cheap if workstate is already the internal contract — just expose the seam.
+2. **Keep parser ↔ sink cleanly separable.** Don't let Jira-specific concerns
+   leak into the parser, or spec-kit concerns into the sink. At the planned
+   engine-extraction step, the parser LEAVES this repo (→ source-speckit) and
+   this repo becomes a pure workstate→Jira consumer. Build so that's a move,
+   not a rewrite (origin-header the parser files; keep the boundary clean).
+
+Do NOT extract source-speckit now — finish Jira first; extraction is the
+post-Jira shared step (engine + source-speckit together).
