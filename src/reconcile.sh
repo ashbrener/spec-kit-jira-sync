@@ -154,8 +154,9 @@ Reconcile filesystem spec state into Jira (Layer D). Idempotent.
 
 Options:
   --spec NNN       Reconcile only the spec whose feature number matches NNN.
-  --all            Reconcile every specs/NNN-feature/ in the repo.
-                   (Exactly one of --spec or --all is required.)
+  --all            Reconcile every specs/NNN-feature/ in the repo. This is the
+                   DEFAULT when neither --spec nor --all is given; the two are
+                   mutually exclusive.
   --dry-run        Log every mutation that WOULD fire; issue none.
   --on-drift=V     Disposition for backward-drift (Jira ahead of disk) on a
                    non-interactive run. V is one of:
@@ -173,11 +174,13 @@ Options:
                    (default: .specify/extensions/jira/jira-config.yml).
   --help           Show this help.
 
-Exit codes:
-  0  Success (possibly with warnings).
-  1  Partial failure: some specs failed; others succeeded.
+Exit codes (monotonic escalation: 0 < 1 < 3 < 2):
+  0  Clean success — no warnings or errors.
+  1  Completed with per-spec warnings (backward-drift surfaced, missing
+     spec.md, or a skipped spec dir).
   2  Project-level config error (halt without partial mutation).
-  3  Transport failure: Jira unreachable; nothing written.
+  3  A spec failed closed (Jira unreadable / retries exhausted); nothing
+     written for it.
 EOF
 }
 
