@@ -310,11 +310,11 @@ reconcile::parse_args() {
         ARG_ALL=1
     fi
 
-    # Exactly one of --spec / --all must be supplied.
+    # --all is the DEFAULT when no --spec is given (CLI contract, cli.md): the
+    # simplest hook/operator invocation `reconcile.sh` reconciles every spec
+    # (codex review P2). Only --spec + --all together is contradictory.
     if [[ -z "$ARG_SPEC" ]] && (( ARG_ALL == 0 )); then
-        printf 'spec-kit-jira: one of --spec NNN or --all is required\n' >&2
-        reconcile::usage
-        exit 2
+        ARG_ALL=1
     fi
     if [[ -n "$ARG_SPEC" ]] && (( ARG_ALL == 1 )); then
         printf 'spec-kit-jira: --spec and --all are mutually exclusive\n' >&2
@@ -860,8 +860,15 @@ reconcile::sync_spec_issue() {
     # The single Jira-specific vendor lever: lifecycle phase → target status
     # id (+ optional explicit transition id). Renamed from the sibling's
     # config::get_workflow_state_uuid for Jira's transition semantics.
-    local status_transition
-    status_transition="$(config::get_status_transition "$lifecycle_phase")"
+    #
+    # Normalize first: parser::lifecycle_phase can return clarifying/red_team/
+    # analyzing, which config (the documented 6 phases) rejects with exit 2 —
+    # so resolve against the normalized phase, not the raw one (codex review P1).
+    # Drift/display elsewhere keep the raw phase (its ordinal handles the wider
+    # vocabulary); only status resolution needs the 6-phase form.
+    local status_transition resolve_phase
+    resolve_phase="$(workstate::_normalize_phase "$lifecycle_phase")"
+    status_transition="$(config::get_status_transition "$resolve_phase")"
 
     # Compose the overview + memory + diagrams blocks into a final body.
     local memory_block diagrams_block overview_block description
@@ -1398,7 +1405,10 @@ reconcile::pr_state_hint() {
         pr_draft="$(printf '%s' "$pr_state_raw" | jq -r '.isDraft // false')"
         if [[ "$pr_state" == "MERGED" || ( -n "$pr_merged_at" && "$pr_merged_at" != "null" ) ]]; then
             printf 'merged\n'
-        elif [[ "$pr_draft" == "false" ]]; then
+        elif [[ "$pr_state" == "OPEN" && "$pr_draft" == "false" ]]; then
+            # Only an OPEN, non-draft PR signals "ready" — a closed-but-unmerged
+            # (abandoned) PR must NOT advance the spec; fall back to artifact
+            # inference (codex review P2).
             printf 'ready\n'
         fi
         return 0
@@ -1475,14 +1485,18 @@ reconcile::process_spec() {
     # through, treat as absent, proceed), but an explicit --on-drift=abort must
     # fail closed: we cannot prove the tracker isn't ahead, so refuse the write
     # rather than risk clobbering it.
+    # A non-zero rc from the drift read means the tracker was UNREADABLE
+    # (transport / errors / malformed) — NOT "issue absent" (absence is rc 0 with
+    # empty output). We cannot prove the tracker isn't ahead, so we MUST fail
+    # closed unconditionally: record an error, promote exit 3, and skip this
+    # spec's write regardless of --on-drift. Proceeding here would overwrite
+    # state that was never read (FR-013 / Principle IV / jira-rest contract;
+    # codex review P1). An unreadable read is an error, not advisory drift.
     if (( drift_fetch_rc != 0 )); then
-        if [[ "$ARG_ON_DRIFT" == "abort" ]]; then
-            summary::add skipped "spec ${feature_number} skipped: Jira unreadable and --on-drift=abort (fail-closed; Jira unchanged)"
-            reconcile::log "spec ${feature_number}: drift fetch unavailable (rc ${drift_fetch_rc}) and --on-drift=abort; skipping write (fail-closed, Jira unchanged)"
-            return 0
-        fi
-        reconcile::log "spec ${feature_number}: drift fetch unavailable (rc ${drift_fetch_rc}); drift advisory — proceeding (treated as absent)"
-        drift_issue_json=""
+        summary::add error "spec ${feature_number}: Jira unreadable (drift read rc ${drift_fetch_rc}) — skipped, no write (fail-closed; Jira unchanged)"
+        reconcile::log "spec ${feature_number}: Jira unreadable (rc ${drift_fetch_rc}); failing closed, skipping write (Jira unchanged)"
+        reconcile::promote_exit 3
+        return 0
     fi
     drift_verdict="$(reconcile::compute_drift \
         "$feature_number" "$spec_dir" "${drift_issue_json:-}" "$lifecycle_phase")"
@@ -1721,9 +1735,14 @@ reconcile::main() {
     # Step 5 — summary emission (Principle VIII).
     summary::emit
 
-    # Step 6 — final exit code. If any errors landed, promote to 1 unless
-    # we've already promoted higher.
+    # Step 6 — final exit code (CLI contract, cli.md): 0 clean · 1 per-spec
+    # warnings (drift surfaced, missing spec.md, skipped dirs) · 3 a spec failed
+    # closed · 2 config error. promote_exit is monotonic, so an earlier 3 (a
+    # fail-closed spec) is never lowered here. A warning-only run MUST exit 1 so
+    # hooks can tell it apart from a clean run (codex review P2).
     if summary::has_errors; then
+        reconcile::promote_exit 1
+    elif (( $(summary::count warned) > 0 || $(summary::count skipped) > 0 )); then
         reconcile::promote_exit 1
     fi
 
