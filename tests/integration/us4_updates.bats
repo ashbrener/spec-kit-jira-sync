@@ -107,8 +107,8 @@ us4::register() {
   # --- US4 reads (most specific) --------------------------------------------
   # The Story's existing-link baseline (GET ...?fields=issuelinks).
   jira_shim::set_response GET "*?fields=issuelinks*" "$issuelinks_fixture" 200
-  # The comment dedup probe (GET .../comment).
-  jira_shim::set_response GET "*/comment" "$comments_fixture" 200
+  # The comment dedup probe (GET .../comment, now paginated → trailing query).
+  jira_shim::set_response GET "*/comment*" "$comments_fixture" 200
 
   # The dep-resolve search (URL carries the encoded speckit-spec:001 label) →
   # resolves target 001 to PROJ-201. Registered before the generic search.

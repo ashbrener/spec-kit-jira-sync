@@ -88,8 +88,17 @@ jira_sink::_log() {
 # isolation — from flagging the assignments as unused (SC2034).
 declare -gx JIRA_SINK_SPEC_DISPOSITION=""
 # Per-phase Subtask verdicts: a JSON object `{phase_index: disposition}` so the
-# engine can tally created vs updated vs skipped Subtasks per run.
+# engine can tally created vs updated vs skipped Subtasks per run. A phase whose
+# Subtask CREATE failed at the transport gets disposition `failed`, so the engine
+# surfaces it as an error row instead of reporting silent success — the phase is
+# un-mirrored (US5 observable failure; FR-015, Principle VIII).
 declare -gx JIRA_SINK_SUBISSUE_DISPOSITIONS="{}"
+# US5 observable-failure channel: a real TRANSITION transport failure (the POST
+# itself failed, NOT the benign "no transition available" case which is rc 0).
+# sync_spec_issue sets this to 1 so the engine surfaces a warned row + promotes
+# the exit (the Story is mirrored, but its status did not apply — warn, don't
+# fail closed). Reset to 0 per spec by the engine wrapper before each call.
+declare -gx JIRA_SINK_SPEC_TRANSITION_FAILED="0"
 
 # jira_sink::_normalize_adf <adf_json>
 #   Echo a canonical, comparison-stable form of an ADF body. Descriptions are
@@ -206,9 +215,18 @@ query_issue_full() {
 #   `[]` when the issue has no links. The block-link reconcile reads this to skip
 #   a POST whose target is already linked (FR-007: at-most-once).
 #
-#   Reads /issue/<key>?fields=issuelinks. Each issuelink carries either an
-#   `outwardIssue` or an `inwardIssue` object with a `.key`; we collect both
-#   directions so a link created from either side is recognised on re-run.
+#   Reads /issue/<key>?fields=issuelinks. Each issuelink carries a `type.name`
+#   plus either an `outwardIssue` or an `inwardIssue` with a `.key`. We retain
+#   the link TYPE and DIRECTION alongside the neighbour KEY — NOT just the key —
+#   so the dedup in sync_inter_phase_blocks compares by (rel, target) per the
+#   data-model. Collapsing to the bare key would wrongly skip a desired
+#   dependency when an UNRELATED link type, or the OPPOSITE direction, already
+#   names that same neighbour (US4 P2).
+#
+#   Output: a JSON array of `{type, dir, key}` records, where `dir` is
+#   `outward` or `inward` (the neighbour's role relative to this issue) and
+#   `type` is the link-type display name (e.g. "Blocks"). `unique` collapses
+#   identical edges.
 query_issue_blocks() {
     local key="${1:-}"
     local raw rc
@@ -220,15 +238,20 @@ query_issue_blocks() {
     if (( rc != 0 )); then
         return 3
     fi
-    local targets
-    if ! targets="$(printf '%s' "$raw" | jq -ce '
+    local edges
+    if ! edges="$(printf '%s' "$raw" | jq -ce '
         [ (.fields.issuelinks // [])[]
-          | (.outwardIssue.key // empty), (.inwardIssue.key // empty) ]
+          | (.type.name // "") as $t
+          | ( if (.outwardIssue.key // "") != ""
+                then {type: $t, dir: "outward", key: .outwardIssue.key} else empty end ),
+            ( if (.inwardIssue.key // "") != ""
+                then {type: $t, dir: "inward", key: .inwardIssue.key} else empty end )
+        ]
         | unique
     ' 2>/dev/null)"; then
         return 3
     fi
-    printf '%s\n' "$targets"
+    printf '%s\n' "$edges"
     return 0
 }
 
@@ -238,32 +261,59 @@ query_issue_blocks() {
 #   comment posting), else EMPTY. rc 3 on an unreadable read; rc 0 + empty when
 #   no comment carries the marker.
 #
-#   Reads /issue/<key>/comment. A comment body is ADF JSON; we stringify the
+#   Reads /issue/<key>/comment. The comment endpoint is PAGINATED
+#   (`{startAt,maxResults,total,comments:[…]}`); we walk pages until the marker
+#   is found or every comment has been examined. Without this, a marker living
+#   beyond the first page reads as ABSENT → the note is re-posted → a DUPLICATE
+#   comment on re-run (US4 P2). A comment body is ADF JSON; we stringify the
 #   whole body and test for the marker substring, so the marker survives whatever
 #   ADF node it was embedded in (we embed it as a trailing paragraph text run).
 query_existing_comment_body() {
     local key="${1:-}" marker="${2:-}"
-    local raw rc
-    if raw="$(jira_rest::get "issue/${key}/comment" 2>/dev/null)"; then
-        rc=0
-    else
-        rc=$?
-    fi
-    if (( rc != 0 )); then
-        return 3
-    fi
-    # Find the first comment whose ADF body, flattened to a JSON string, contains
-    # the marker. Echo that comment's {id,body}; empty (rc 0) when none match.
-    local hit
-    if ! hit="$(printf '%s' "$raw" | jq -c --arg m "$marker" '
-        [ (.comments // [])[]
-          | select((.body | tostring) | contains($m)) ]
-        | (.[0] // empty)
-    ' 2>/dev/null)"; then
-        return 3
-    fi
-    [[ -n "$hit" && "$hit" != "null" ]] || { printf ''; return 0; }
-    printf '%s\n' "$hit"
+    local start_at=0
+    # Page size is server-bounded; we request a generous page and follow the
+    # `total` to decide whether another page exists. A defensive page cap stops
+    # a malformed `total` (e.g. always-greater-than-startAt) from looping forever.
+    local page_size=100 page_guard=0
+    while (( page_guard < 1000 )); do
+        page_guard=$(( page_guard + 1 ))
+        local raw rc
+        if raw="$(jira_rest::get "issue/${key}/comment?startAt=${start_at}&maxResults=${page_size}" 2>/dev/null)"; then
+            rc=0
+        else
+            rc=$?
+        fi
+        if (( rc != 0 )); then
+            return 3
+        fi
+        # Find the first comment on THIS page whose ADF body, flattened to a JSON
+        # string, contains the marker. Echo that comment's {id,body} and stop.
+        local hit
+        if ! hit="$(printf '%s' "$raw" | jq -c --arg m "$marker" '
+            [ (.comments // [])[]
+              | select((.body | tostring) | contains($m)) ]
+            | (.[0] // empty)
+        ' 2>/dev/null)"; then
+            return 3
+        fi
+        if [[ -n "$hit" && "$hit" != "null" ]]; then
+            printf '%s\n' "$hit"
+            return 0
+        fi
+        # Advance pagination: stop when this page exhausts the reported total, or
+        # when a page returned zero comments (defensive against a missing total).
+        local total page_count
+        total="$(printf '%s' "$raw" | jq -r '(.total // 0)' 2>/dev/null || printf '0')"
+        page_count="$(printf '%s' "$raw" | jq -r '((.comments // []) | length)' 2>/dev/null || printf '0')"
+        [[ "$total" =~ ^[0-9]+$ ]] || total=0
+        [[ "$page_count" =~ ^[0-9]+$ ]] || page_count=0
+        start_at=$(( start_at + page_count ))
+        if (( page_count == 0 )) || (( start_at >= total )); then
+            break
+        fi
+    done
+    # No comment on any page carried the marker → ABSENT (rc 0, empty stdout).
+    printf ''
     return 0
 }
 
@@ -666,10 +716,14 @@ sync_spec_issue() {
         fi
 
         # Set the Story's status to match the lifecycle phase via a transition.
-        # A missing transition is surfaced (Principle VIII), never fatal.
+        # A real transport failure (transition_issue rc≠0) is surfaced via the
+        # observable-failure channel so the engine warns + promotes the exit; the
+        # benign "no transition available" case returns rc 0 and is silent (US5).
         if [[ -n "$status_transition" ]]; then
-            transition_issue "$key" "$status_transition" || \
+            if ! transition_issue "$key" "$status_transition"; then
+                JIRA_SINK_SPEC_TRANSITION_FAILED=1
                 jira_sink::_log "sync_spec_issue: transition for ${key} (phase ${state}) did not apply"
+            fi
         fi
 
         JIRA_SINK_SPEC_DISPOSITION="created"
@@ -736,6 +790,9 @@ sync_spec_issue() {
         if transition_issue "$existing_key" "$status_transition"; then
             wrote_transition=1
         else
+            # A real transport failure (rc≠0) is surfaced; "no transition
+            # available" is rc 0 and never reaches here (US5 observable failure).
+            JIRA_SINK_SPEC_TRANSITION_FAILED=1
             jira_sink::_log "sync_spec_issue: transition for ${existing_key} (phase ${state}) did not apply"
         fi
     fi
@@ -821,6 +878,10 @@ sync_task_phase_subissues() {
             local created
             if ! created="$(mutate_issue_create "$fields")"; then
                 jira_sink::_log "sync_task_phase_subissues: failed to create Subtask for phase ${phase_index}"
+                # The phase is un-mirrored — record a `failed` verdict so the
+                # engine surfaces an error row (US5: no silent success). We keep
+                # processing the remaining phases (per-phase isolation, FR-014).
+                dispositions="$(printf '%s' "$dispositions" | jq -c --arg p "$phase_index" '. + {($p): "failed"}')"
                 continue
             fi
             key="$(printf '%s' "$created" | jq -r '.key // ""' 2>/dev/null || printf '')"
@@ -857,6 +918,9 @@ sync_task_phase_subissues() {
                 diff_payload="$(printf '%s' "$diff" | jq -c '{fields: .}')"
                 if ! mutate_issue_update "$existing_key" "$diff_payload"; then
                     jira_sink::_log "sync_task_phase_subissues: update for ${existing_key} (phase ${phase_index}) failed"
+                    # Surface the un-applied phase as an error (US5: no silent
+                    # success); keep processing remaining phases (FR-014).
+                    dispositions="$(printf '%s' "$dispositions" | jq -c --arg p "$phase_index" '. + {($p): "failed"}')"
                     continue
                 fi
                 disposition="updated"
@@ -1040,17 +1104,16 @@ sync_inter_phase_blocks() {
         fi
         target_key="$(printf '%s' "$target_issues" | jq -r '(.[0].key // "")' 2>/dev/null || printf '')"
         if [[ -z "$target_key" || "$target_key" == "null" ]]; then
+            # DEFER (review-debt): a FORWARD dependency in the same --all sweep —
+            # spec A depends on spec B whose Story is created LATER this run — is
+            # absent here and skipped. It CONVERGES on the next reconcile (the
+            # engine is idempotent/re-runnable), so it is acceptable, not fixed.
             continue
         fi
 
-        # Idempotency: skip when the target is already linked (either direction).
-        if printf '%s' "$existing_targets" \
-            | jq -e --arg k "$target_key" 'index($k) != null' >/dev/null 2>&1; then
-            continue
-        fi
-
-        # Edge direction: depends_on(story→target) ⇒ target Blocks story, so
-        # inwardIssue=story, outwardIssue=target. `blocks` is the reverse.
+        # Edge direction for the CREATE payload: depends_on(story→target) ⇒ target
+        # Blocks story, so inwardIssue=story, outwardIssue=target. `blocks` is the
+        # reverse.
         local inward outward
         if [[ "$rel" == "blocks" ]]; then
             inward="$target_key"; outward="$story_key"
@@ -1058,8 +1121,31 @@ sync_inter_phase_blocks() {
             inward="$story_key"; outward="$target_key"
         fi
 
+        # Idempotency by (rel, target): skip ONLY when an edge of the SAME link
+        # TYPE already names this neighbour. We deliberately match on (type, key)
+        # and NOT on direction: Jira's reciprocal representation surfaces the SAME
+        # link as the neighbour's `inwardIssue` OR `outwardIssue` depending on
+        # which side is read, so a desired Blocks-dependency to a target is
+        # already satisfied by a Blocks edge to that target either way. The TYPE
+        # check is the real guard — an UNRELATED link type (e.g. "Relates") to the
+        # same neighbour must NOT wrongly skip the desired dependency (data-model:
+        # dedup by (rel,target); US4 P2). The retained `dir` in the edge records
+        # supports that type-scoped comparison without conflating link types.
+        if printf '%s' "$existing_targets" | jq -e \
+            --arg t "$link_type" --arg k "$target_key" \
+            'any(.[]; .type == $t and .key == $k)' \
+            >/dev/null 2>&1; then
+            continue
+        fi
+
         if jira_sink::_dry_run; then
             jira_sink::_log "DRY-RUN sync_inter_phase_blocks ${outward} ${link_type} ${inward} (no-op)"
+            # Fold the intended edge into the in-run baseline so a duplicate dep
+            # bullet resolving to the same (rel,target) is recognised as already
+            # handled this run — no second (dry-run) emission.
+            existing_targets="$(printf '%s' "$existing_targets" | jq -c \
+                --arg t "$link_type" --arg k "$target_key" \
+                '. + [{type:$t, dir:"outward", key:$k}] | unique')"
             continue
         fi
 
@@ -1073,6 +1159,13 @@ sync_inter_phase_blocks() {
             jira_sink::_log "sync_inter_phase_blocks: POST /issueLink (${outward}→${inward}) failed (rc $?)"
             return 1
         fi
+        # Update the baseline mid-run: a later dep bullet resolving to the SAME
+        # (rel,target) — e.g. two "depends on NNN" bullets, or an id and its bare
+        # feature number — must NOT POST a second identical /issueLink this run
+        # (US4 P2: dedup within one sweep, not just across runs).
+        existing_targets="$(printf '%s' "$existing_targets" | jq -c \
+            --arg t "$link_type" --arg k "$target_key" \
+            '. + [{type:$t, dir:"outward", key:$k}] | unique')"
     done
     return 0
 }

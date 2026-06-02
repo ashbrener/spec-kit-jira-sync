@@ -96,7 +96,7 @@ teardown() {
 # =============================================================================
 
 @test "query_existing_comment_body finds the comment carrying the marker (present)" {
-  jira_shim::set_response GET "*/issue/PROJ-101/comment" "$FIX/comments_present.json" 200
+  jira_shim::set_response GET "*/issue/PROJ-101/comment*" "$FIX/comments_present.json" 200
 
   run query_existing_comment_body "PROJ-101" "$CL_MARKER"
   [ "$status" -eq 0 ]
@@ -105,7 +105,7 @@ teardown() {
 }
 
 @test "query_existing_comment_body returns empty (rc 0) when no comment carries the marker (absent)" {
-  jira_shim::set_response GET "*/issue/PROJ-101/comment" "$FIX/comments_absent.json" 200
+  jira_shim::set_response GET "*/issue/PROJ-101/comment*" "$FIX/comments_absent.json" 200
 
   run query_existing_comment_body "PROJ-101" "$CL_MARKER"
   [ "$status" -eq 0 ]
@@ -113,7 +113,7 @@ teardown() {
 }
 
 @test "query_existing_comment_body propagates an unreadable read as rc 3" {
-  jira_shim::set_response GET "*/issue/PROJ-101/comment" error_401.json 401
+  jira_shim::set_response GET "*/issue/PROJ-101/comment*" error_401.json 401
 
   run query_existing_comment_body "PROJ-101" "$CL_MARKER"
   [ "$status" -eq 3 ]
@@ -124,12 +124,14 @@ teardown() {
 # query_issue_blocks — the link-set baseline
 # =============================================================================
 
-@test "query_issue_blocks returns the already-linked target keys (present)" {
+@test "query_issue_blocks returns the already-linked edges with type + direction (present)" {
   jira_shim::set_response GET "*/issue/PROJ-101*" "$FIX/links_present.json" 200
 
   run query_issue_blocks "PROJ-101"
   [ "$status" -eq 0 ]
-  [ "$(printf '%s' "$output" | jq -r 'index("PROJ-201") != null')" = "true" ]
+  # Edge shape {type,dir,key} retains link TYPE + DIRECTION (data-model dedup by
+  # (rel,target)), not just the bare neighbour key.
+  [ "$(printf '%s' "$output" | jq -r 'any(.[]; .type == "Blocks" and .dir == "outward" and .key == "PROJ-201")')" = "true" ]
 }
 
 @test "query_issue_blocks returns an empty array (rc 0) when the issue has no links (absent)" {
@@ -153,7 +155,7 @@ teardown() {
 # =============================================================================
 
 @test "sync_clarify_comments posts ONE comment carrying the stable marker (absent → create)" {
-  jira_shim::set_response GET "*/issue/PROJ-101/comment" "$FIX/comments_absent.json" 200
+  jira_shim::set_response GET "*/issue/PROJ-101/comment*" "$FIX/comments_absent.json" 200
   jira_shim::set_response POST "*/issue/PROJ-101/comment" comment_create_ok.json 201
 
   run sync_clarify_comments "PROJ-101" "$CL_ITEM"
@@ -172,7 +174,7 @@ teardown() {
 }
 
 @test "sync_clarify_comments SKIPS (no POST) when the marker is already present (re-run)" {
-  jira_shim::set_response GET "*/issue/PROJ-101/comment" "$FIX/comments_present.json" 200
+  jira_shim::set_response GET "*/issue/PROJ-101/comment*" "$FIX/comments_present.json" 200
   jira_shim::set_response POST "*/issue/PROJ-101/comment" comment_create_ok.json 201
 
   run sync_clarify_comments "PROJ-101" "$CL_ITEM"
@@ -185,7 +187,7 @@ teardown() {
 }
 
 @test "sync_clarify_comments fails closed (rc 3) when the comment read is unreadable" {
-  jira_shim::set_response GET "*/issue/PROJ-101/comment" error_401.json 401
+  jira_shim::set_response GET "*/issue/PROJ-101/comment*" error_401.json 401
   jira_shim::set_response POST "*/issue/PROJ-101/comment" comment_create_ok.json 201
 
   run sync_clarify_comments "PROJ-101" "$CL_ITEM"
@@ -256,4 +258,112 @@ teardown() {
   links="$(jira_shim::requests \
     | grep -B2 '^URL .*/issueLink$' | grep -c '^METHOD POST$' || true)"
   [ "$links" -eq 0 ] || { echo "expected 0 issueLink POSTs on fail-closed, got $links" >&2; false; }
+}
+
+# =============================================================================
+# US4 P2 — comment pagination: a marker living BEYOND page 1 is still found, so
+# the note is NOT re-posted (no duplicate comment on re-run).
+# =============================================================================
+
+@test "query_existing_comment_body paginates: marker on page 2 is found (rc 0, non-empty)" {
+  # Page 1 (startAt=0): a single foreign comment, total=2 → a second page exists.
+  jq -n '{startAt:0, maxResults:1, total:2, comments:[
+     {id:"40000", body:{type:"doc",version:1,content:[
+        {type:"paragraph",content:[{type:"text",text:"page one chatter"}]}
+     ]}}]}' >"$FIX/comments_page1.json"
+  # Page 2 (startAt=1): the comment CARRYING the marker.
+  jq -n --arg m "$CL_MARKER" '{startAt:1, maxResults:1, total:2, comments:[
+     {id:"40001", body:{type:"doc",version:1,content:[
+        {type:"paragraph",content:[{type:"text",text:$m}]}
+     ]}}]}' >"$FIX/comments_page2.json"
+
+  jira_shim::set_response GET "*/issue/PROJ-101/comment?startAt=0*" "$FIX/comments_page1.json" 200
+  jira_shim::set_response GET "*/issue/PROJ-101/comment?startAt=1*" "$FIX/comments_page2.json" 200
+
+  run query_existing_comment_body "PROJ-101" "$CL_MARKER"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  [ "$(printf '%s' "$output" | jq -r '.id')" = "40001" ]
+}
+
+@test "sync_clarify_comments posts ZERO comments when the marker is on page 2 (no duplicate)" {
+  jq -n '{startAt:0, maxResults:1, total:2, comments:[
+     {id:"40000", body:{type:"doc",version:1,content:[
+        {type:"paragraph",content:[{type:"text",text:"page one chatter"}]}
+     ]}}]}' >"$FIX/comments_page1.json"
+  jq -n --arg m "$CL_MARKER" '{startAt:1, maxResults:1, total:2, comments:[
+     {id:"40001", body:{type:"doc",version:1,content:[
+        {type:"paragraph",content:[{type:"text",text:$m}]}
+     ]}}]}' >"$FIX/comments_page2.json"
+
+  jira_shim::set_response GET "*/issue/PROJ-101/comment?startAt=0*" "$FIX/comments_page1.json" 200
+  jira_shim::set_response GET "*/issue/PROJ-101/comment?startAt=1*" "$FIX/comments_page2.json" 200
+  jira_shim::set_response POST "*/issue/PROJ-101/comment" comment_create_ok.json 201
+
+  run sync_clarify_comments "PROJ-101" "$CL_ITEM"
+  [ "$status" -eq 0 ]
+
+  # The marker was found on page 2 → at-most-once: NO new comment POST. Without
+  # pagination, page 1 alone reads as absent and the note is wrongly re-posted.
+  local posts
+  posts="$(jira_shim::requests \
+    | grep -B2 '^URL .*/issue/PROJ-101/comment$' | grep -c '^METHOD POST$' || true)"
+  [ "$posts" -eq 0 ] || { echo "expected 0 comment POSTs (marker on page 2), got $posts" >&2; false; }
+}
+
+# =============================================================================
+# US4 P2 — link dedup by (rel, target): an UNRELATED existing link type to the
+# same neighbour must NOT skip the desired dependency.
+# =============================================================================
+
+@test "sync_inter_phase_blocks still creates the dep when only an UNRELATED link type names the target" {
+  local item
+  item="$(jq -cn '{notes:[], links:[{rel:"depends_on", target:"002"}]}')"
+
+  # PROJ-201 is already linked, but via an UNRELATED type ("Relates"), not the
+  # dependency type ("Blocks"). The (rel,target) dedup must NOT treat that as the
+  # desired dependency → it must still POST the Blocks link.
+  jq -n '{fields:{issuelinks:[
+     {type:{name:"Relates"}, outwardIssue:{key:"PROJ-201"}}
+  ]}}' >"$FIX/links_unrelated_type.json"
+
+  jira_shim::set_response GET "*/issue/PROJ-101?fields=issuelinks*" "$FIX/links_unrelated_type.json" 200
+  jira_shim::set_response GET "*/search/jql*" "$FIX/dep_search.json" 200
+  jira_shim::set_response POST "*/issueLink" issue_create_ok.json 201
+
+  run sync_inter_phase_blocks "PROJ-101" "$item"
+  [ "$status" -eq 0 ]
+
+  local links
+  links="$(jira_shim::requests \
+    | grep -B2 '^URL .*/issueLink$' | grep -c '^METHOD POST$' || true)"
+  [ "$links" -eq 1 ] || { echo "expected 1 issueLink POST (unrelated type must not skip), got $links" >&2; jira_shim::requests >&2; false; }
+}
+
+# =============================================================================
+# US4 P2 — duplicate-dep-same-run: two dep bullets resolving to the SAME
+# (rel,target) must POST /issueLink exactly ONCE in one run.
+# =============================================================================
+
+@test "sync_inter_phase_blocks posts ONE /issueLink for duplicate deps to the same target in one run" {
+  local item
+  # Two dependency bullets resolving to the SAME target (the id form and its bare
+  # feature number both normalise to 002 → PROJ-201).
+  item="$(jq -cn '{notes:[], links:[
+     {rel:"depends_on", target:"002-other"},
+     {rel:"depends_on", target:"002"}
+  ]}')"
+
+  jira_shim::set_response GET "*/issue/PROJ-101?fields=issuelinks*" "$FIX/links_absent.json" 200
+  jira_shim::set_response GET "*/search/jql*" "$FIX/dep_search.json" 200
+  jira_shim::set_response POST "*/issueLink" issue_create_ok.json 201
+
+  run sync_inter_phase_blocks "PROJ-101" "$item"
+  [ "$status" -eq 0 ]
+
+  # The mid-run baseline update dedups the second bullet → exactly ONE POST.
+  local links
+  links="$(jira_shim::requests \
+    | grep -B2 '^URL .*/issueLink$' | grep -c '^METHOD POST$' || true)"
+  [ "$links" -eq 1 ] || { echo "expected 1 issueLink POST (same-run dedup), got $links" >&2; jira_shim::requests >&2; false; }
 }

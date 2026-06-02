@@ -78,8 +78,31 @@ jira_shim::set_response() {
   if [[ "$fixture" != /* ]]; then
     resolved="${JIRA_SHIM_FIXTURE_DIR}/${fixture}"
   fi
-  printf '%s\t%s\t%s\t%s\n' \
-    "$(jira_shim::_upper "$method")" "$url_glob" "$resolved" "$code" \
+  printf '%s\t%s\t%s\t%s\t%s\n' \
+    "$(jira_shim::_upper "$method")" "$url_glob" "$resolved" "$code" "0" \
+    >>"$JIRA_SHIM_RULES"
+}
+
+# -----------------------------------------------------------------------------
+# jira_shim::push_response <method> <url-glob> <fixture-path> [http_code]
+#
+# Register a ONE-SHOT rule, consumed on the next matching request and then
+# removed — so two requests to the SAME method+URL (e.g. a Story create POST
+# /issue followed by a Subtask create POST /issue) can return DIFFERENT canned
+# answers in order. One-shot rules are matched in registration order and take
+# precedence over a standing set_response rule, so push the per-call answers
+# first, then optionally set a standing fallback. Used by the US5 failed-Subtask
+# test to make the FIRST POST /issue (Story) succeed and the SECOND (Subtask)
+# fail.
+# -----------------------------------------------------------------------------
+jira_shim::push_response() {
+  local method="$1" url_glob="$2" fixture="$3" code="${4:-200}"
+  local resolved="$fixture"
+  if [[ "$fixture" != /* ]]; then
+    resolved="${JIRA_SHIM_FIXTURE_DIR}/${fixture}"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\n' \
+    "$(jira_shim::_upper "$method")" "$url_glob" "$resolved" "$code" "1" \
     >>"$JIRA_SHIM_RULES"
 }
 
@@ -176,19 +199,51 @@ jira_shim::_curl() {
   # An empty header-dump file so a caller's -D flag is honoured.
   [[ -n "$header_dump" ]] && : >"$header_dump"
 
-  # Resolve the first matching rule (method + url glob).
-  local rule_method rule_glob rule_fixture rule_code
+  # Resolve a matching rule (method + url glob). ONE-SHOT rules (5th field "1",
+  # registered via jira_shim::push_response) take precedence and are CONSUMED on
+  # match so a later request to the same method+URL gets the next queued answer;
+  # standing rules (set_response) are first-match-wins and never consumed.
+  local rule_method rule_glob rule_fixture rule_code rule_once
   local matched_fixture="" matched_code="200"
-  while IFS=$'\t' read -r rule_method rule_glob rule_fixture rule_code; do
+  local matched_once_line=0 line_no=0 found=0
+
+  # Pass 1 — one-shot rules, in registration order.
+  while IFS=$'\t' read -r rule_method rule_glob rule_fixture rule_code rule_once; do
+    line_no=$(( line_no + 1 ))
     [[ -n "$rule_method" ]] || continue
+    [[ "$rule_once" == "1" ]] || continue
     [[ "$method" == "$rule_method" ]] || continue
     # shellcheck disable=SC2053  # intentional glob match of url against the rule.
     if [[ "$url" == $rule_glob ]]; then
       matched_fixture="$rule_fixture"
       matched_code="$rule_code"
+      matched_once_line=$line_no
+      found=1
       break
     fi
   done <"$JIRA_SHIM_RULES"
+
+  # Consume the matched one-shot rule by rewriting the rules file without it.
+  if (( matched_once_line > 0 )); then
+    local tmp_rules="${JIRA_SHIM_RULES}.tmp"
+    awk -v drop="$matched_once_line" 'NR != drop' "$JIRA_SHIM_RULES" >"$tmp_rules"
+    mv "$tmp_rules" "$JIRA_SHIM_RULES"
+  fi
+
+  # Pass 2 — standing rules (only if no one-shot matched).
+  if (( found == 0 )); then
+    while IFS=$'\t' read -r rule_method rule_glob rule_fixture rule_code rule_once; do
+      [[ -n "$rule_method" ]] || continue
+      [[ "$rule_once" == "1" ]] && continue
+      [[ "$method" == "$rule_method" ]] || continue
+      # shellcheck disable=SC2053  # intentional glob match of url against the rule.
+      if [[ "$url" == $rule_glob ]]; then
+        matched_fixture="$rule_fixture"
+        matched_code="$rule_code"
+        break
+      fi
+    done <"$JIRA_SHIM_RULES"
+  fi
 
   local payload=""
   if [[ -n "$matched_fixture" && -f "$matched_fixture" ]]; then
