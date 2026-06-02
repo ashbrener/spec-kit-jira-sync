@@ -1616,7 +1616,16 @@ reconcile::process_spec() {
     # adds neither a duplicate link nor a duplicate comment (FR-007). A `|| true`
     # keeps a per-spec link/comment failure from aborting the --all sweep; the
     # sink already records the diagnostic and the run summary still emits.
+    # RECONCILE_WORKSTATE_ITEM is stashed by reconcile::sync_spec_issue, but that
+    # helper runs inside a `$(...)` command-sub above, so its `declare -g` does
+    # NOT survive into this (the process_spec) shell. Rebuild the neutral item
+    # from disk when the cache is empty — the same defensive fallback the
+    # sub-issue pass uses — so the US4 links/comments actually fire (the cached
+    # value would otherwise be empty and the whole block silently skipped).
     local _us4_item="${RECONCILE_WORKSTATE_ITEM:-}"
+    if [[ -z "$_us4_item" ]]; then
+        _us4_item="$(workstate::item_for_spec "$spec_dir" 2>/dev/null || true)"
+    fi
     if [[ -n "$_us4_item" ]]; then
         reconcile::sync_inter_phase_blocks "$spec_issue_id" "$_us4_item" || true
         reconcile::sync_clarify_comments "$spec_issue_id" "$_us4_item" || true
