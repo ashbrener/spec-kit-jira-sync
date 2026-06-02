@@ -7,11 +7,14 @@
 # contract in specs/001-core-bridge/contracts/workstate.md): every parser-emitted
 # `workstate` document MUST validate against the published Draft-2020-12 schema
 # before any write. jq cannot do full JSON-Schema validation, so the authoritative
-# check is python3 + jsonschema (the schema repo's validate.py approach).
+# check is python + jsonschema, provisioned the way the schema repo's validate.sh
+# does it: uv (preferred, PEP 668-safe) → a throwaway venv → skip. See
+# tests/helpers/schema.bash for the resolver.
 #
 # This gate validates every tests/fixtures/workstate/*.json against the schema and
-# FAILS if any does not conform. When python3/jsonschema is unavailable it `skip`s
-# cleanly, so CI without python still passes (D9: no runtime python dependency).
+# FAILS if any does not conform. When no jsonschema-capable runner is available it
+# `skip`s cleanly, so CI without a python toolchain still passes (D9: no runtime
+# python dependency).
 #
 # Privacy (Principle IX): the shipped fixture uses placeholders only — example-org
 # repo slugs, generic spec titles — never real Jira coordinates or PII.
@@ -27,8 +30,8 @@ setup() {
 # Validate a single JSON document against the schema with python + jsonschema.
 # Prints jsonschema's error report on failure. Returns the validator's status.
 _validate_one() {
-  local py="$1" schema="$2" doc="$3"
-  "$py" - "$schema" "$doc" <<'PY'
+  local schema="$1" doc="$2"
+  schema::run "$schema" "$doc" <<'PY'
 import json, sys
 import jsonschema
 
@@ -47,9 +50,9 @@ PY
 }
 
 @test "workstate fixtures conform to the published Draft-2020-12 schema" {
-  local py schema
-  py="$(schema::python)" \
-    || skip "python3 with jsonschema unavailable — authoritative schema check skipped"
+  local schema
+  schema::available \
+    || skip "no jsonschema-capable runner (uv / venv / python3) — authoritative schema check skipped"
   schema="$(schema::path)" \
     || skip "workstate.schema.json not found — set WORKSTATE_SCHEMA to point at it"
 
@@ -70,7 +73,7 @@ PY
 
   local failed=0
   for f in "${fixtures[@]}"; do
-    run _validate_one "$py" "$schema" "$f"
+    run _validate_one "$schema" "$f"
     if [ "$status" -ne 0 ]; then
       failed=1
       echo "FAIL: ${f}"

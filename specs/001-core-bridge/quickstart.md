@@ -6,8 +6,9 @@ gitignored `.env`; this file uses placeholders.
 ## 1. Prerequisites
 
 - `bash` 4.4+, `curl`, `jq`, `git`, `gh`
-- Dev/CI: `bats`, `shellcheck`, `yamllint`, `markdownlint-cli2`,
-  `python3` + `jsonschema` (workstate validation)
+- Dev/CI: `bats`, `shellcheck`, `yamllint`, `markdownlint-cli2`. For workstate
+  validation, [`uv`](https://docs.astral.sh/uv/) (preferred — PEP 668-safe, no
+  global install) or a `python3` able to build a throwaway venv. Never bare `pip`.
 
 ## 2. Credentials (gitignored `.env`)
 
@@ -45,7 +46,17 @@ error.
 ```bash
 # parser emits workstate; validate against the published schema
 src/reconcile.sh --spec 001 --dry-run --emit-workstate > /tmp/ws.json
-python3 ~/Code/AI/workstate-schema/.venv/bin/... validate   # or the repo's validate.py
+
+# The schema repo ships a one-command, zero-setup validator that auto-selects uv
+# (preferred) else a throwaway venv — never bare pip:
+~/Code/AI/workstate-schema/validate.sh
+
+# Equivalent ad-hoc check of a single doc (uv provisions jsonschema ephemerally):
+uv run --with jsonschema python -c '
+import json, sys, jsonschema
+schema = json.load(open(sys.argv[1])); doc = json.load(open(sys.argv[2]))
+jsonschema.Draft202012Validator(schema).validate(doc)
+' ~/Code/AI/workstate-schema/schema/workstate.schema.json /tmp/ws.json
 ```
 
 ## 6. Run the tests (the real gate)
