@@ -409,16 +409,21 @@ ensure_repo_epic() {
     label="${repo_prefix}${repo_slug}"
 
     # Find-or-create: an existing Epic with the repo label is reused (idempotent).
-    local existing existing_key
-    if existing="$(query_spec_issue "$label" "$project")"; then
-        existing_key="$(printf '%s' "$existing" | jq -r '(.[0].key // "")' 2>/dev/null || printf '')"
-        if [[ -n "$existing_key" && "$existing_key" != "null" ]]; then
-            printf '%s\n' "$existing_key"
-            return 0
-        fi
+    # An UNREADABLE lookup (rc 3) MUST fail closed — we cannot prove the Epic is
+    # absent, so creating one would risk a duplicate (codex review P1 / FR-013 /
+    # Principle IV). Only a clean rc-0 "no match" is a genuine absence → create.
+    local existing existing_key lookup_rc=0
+    existing="$(query_spec_issue "$label" "$project")" || lookup_rc=$?
+    if (( lookup_rc != 0 )); then
+        jira_sink::_log "ensure_repo_epic: repo Epic lookup unreadable (rc ${lookup_rc}); failing closed (no create)"
+        return 3
     fi
-    # (rc≠0 from query is unreadable; we still attempt a create below in US1's
-    # fresh path — a present Epic would have been returned above.)
+    existing_key="$(printf '%s' "$existing" | jq -r '(.[0].key // "")' 2>/dev/null || printf '')"
+    if [[ -n "$existing_key" && "$existing_key" != "null" ]]; then
+        printf '%s\n' "$existing_key"
+        return 0
+    fi
+    # rc 0 + no match = genuine absence → create below.
 
     local fields
     fields="$(jq -cn \

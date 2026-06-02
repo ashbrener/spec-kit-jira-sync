@@ -896,7 +896,13 @@ reconcile::sync_spec_issue() {
     fi
 
     # ensure_repo_epic + sync_spec_issue own the find-or-create + transition.
+    # A failed ensure_repo_epic is fail-closed (e.g. an unreadable Epic lookup,
+    # rc 3): surface it as an error and promote exit 3 — the per-spec loop
+    # ignores process_spec's return, so a bare `return 1` would skip the spec
+    # silently and still exit 0 (Principle VIII / FR-015: no silent skip).
     if ! epic_id="$(ensure_repo_epic "$repo_slug")"; then
+        summary::add error "spec ${feature_number}: repo Epic unreadable/unresolved — skipped, no write (fail-closed; Jira unchanged)"
+        reconcile::promote_exit 3
         return 1
     fi
 
