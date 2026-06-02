@@ -27,7 +27,7 @@ sibling `~/Code/AI/speckit-linear/src/` with an origin-noting header (PLAN.md §
 ## Phase 1: Setup
 
 - [x] T001 Create source/test skeleton: `src/`, `tests/unit/`, `tests/integration/`, `tests/helpers/`, `tests/fixtures/{specs,workstate,jira_responses}/` at repo root
-- [ ] T002 [P] Add a CI-parity runner `scripts/check.sh` (shellcheck `--severity=style`, yamllint `-d relaxed`, markdownlint-cli2, bats) mirroring `.github/workflows/ci.yml`
+- [x] T002 [P] Add a CI-parity runner `scripts/check.sh` (shellcheck `--severity=style`, yamllint `-d relaxed`, markdownlint-cli2, bats) mirroring `.github/workflows/ci.yml`
 
 ---
 
@@ -120,21 +120,21 @@ sibling `~/Code/AI/speckit-linear/src/` with an origin-noting header (PLAN.md §
 **Independent test**: Simulate unreadable Jira and sustained 429; assert zero writes for the affected spec and accurate summary + exit code.
 
 - [x] T039 [P] [US5] Unit test `tests/unit/failclosed.bats` — rc 3 read → no write + error row; 429 exhaustion → fail closed; missing `spec.md` → warning, others still mirrored
-- [ ] T040 [US5] Implement fail-closed propagation in `src/reconcile.sh` (rc 3 from any read aborts that spec's write, records an error row, continues other specs)
-- [ ] T041 [US5] Implement bounded 429/5xx backoff (honor `Retry-After`, jittered exponential, capped, default 5 tries → fail closed) in `src/jira_rest.sh`
-- [ ] T042 [US5] Wire the structured summary + monotonic exit-code escalation (`promote_exit`: 0<1<3<2) in `src/reconcile.sh` + `src/summary.sh`
-- [ ] T043 [US5] Integration test `tests/integration/us5_failclosed.bats` — unreadable Jira (no writes), 429 exhaustion (fail closed), missing `spec.md` (warn + continue)
+- [x] T040 [US5] Implement fail-closed propagation in `src/reconcile.sh` (rc 3 from any read aborts that spec's write, records an error row, continues other specs)
+- [x] T041 [US5] Implement bounded 429/5xx backoff (honor `Retry-After`, jittered exponential, capped, default 5 tries → fail closed) in `src/jira_rest.sh`
+- [x] T042 [US5] Wire the structured summary + monotonic exit-code escalation (`promote_exit`: 0<1<3<2) in `src/reconcile.sh` + `src/summary.sh`
+- [x] T043 [US5] Integration test `tests/integration/us5_failclosed.bats` — unreadable Jira (no writes), 429 exhaustion (fail closed), missing `spec.md` (warn + continue)
 
 ---
 
 ## Phase 8: Polish & Cross-Cutting
 
-- [ ] T044 [P] `--dry-run` preview parity test `tests/unit/dryrun.bats` — preview reports the same actions a live run performs, writes nothing
-- [ ] T045 [P] shellcheck `--severity=style` clean across all `src/*.sh`; fix findings
-- [ ] T046 [P] Extend `tests/fixtures/` privacy review; confirm `tests/unit/no-real-identifiers.bats` stays green over new fixtures (placeholders only)
+- [x] T044 [P] `--dry-run` preview parity test `tests/unit/dryrun.bats` — preview reports the same actions a live run performs, writes nothing
+- [x] T045 [P] shellcheck `--severity=style` clean across all `src/*.sh`; fix findings
+- [x] T046 [P] Extend `tests/fixtures/` privacy review; confirm `tests/unit/no-real-identifiers.bats` stays green over new fixtures (placeholders only)
 - [x] T047 [P] Author `config-template.yml` (committed placeholder mirror of `jira-config.yml`) and a `README.md` (placeholders only)
-- [ ] T048 [P] Update `CHANGELOG.md` (Unreleased: core bridge — parser→workstate→jira-sink reconcile)
-- [ ] T049 Run the exact CI locally via `scripts/check.sh` (shellcheck + yamllint + markdownlint + bats unit) and fix to green before pushing
+- [x] T048 [P] Update `CHANGELOG.md` (Unreleased: core bridge — parser→workstate→jira-sink reconcile)
+- [x] T049 Run the exact CI locally via `scripts/check.sh` (shellcheck + yamllint + markdownlint + bats unit) and fix to green before pushing
 
 ---
 
