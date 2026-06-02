@@ -17,11 +17,22 @@ survive compaction and get folded at the right phase. Status updated as folded.
   Now fails closed (rc 3) on a non-zero lookup; `process_spec` surfaces it as an
   error row + promotes exit 3 (observable; the per-spec loop ignores the return).
 
-## Routed forward
-- ⏭️ **[P1] `_fetch_drift_issue_json`: shape the drift read for the comparator**
-  (status / phase labels / updated, exactly as `compute_drift` expects). → **US3**
-  (drift read + recency) — that phase wires the real drift read.
-- ⏭️ **[P2] Propagate transition transport failures** (currently logged to stderr,
-  not summary-visible). → **US5** (observable failure).
-- ⏭️ **[P2] Propagate failed Subtask creates** (currently `continue`d with a log,
-  not surfaced in the summary). → **US5** (observable failure).
+## Resolved by US3 (drift read, `2df14f6`)
+- ✅ **[P1] `_fetch_drift_issue_json`: shape the drift read for the comparator** —
+  the sink now emits the engine's contract (`updatedAt` ISO-normalized,
+  `labels.nodes[].name`, `state.type`); drift now fires for Jira (us3_drift gate).
+
+## Still routed to US5 (observable failure)
+- ⏭️ **[P2] Propagate transition transport failures** (logged to stderr, not
+  summary-visible).
+- ⏭️ **[P2] Propagate failed Subtask creates** (`continue`d with a log, not
+  surfaced in the summary).
+
+## Engine debt — fix at the engine-extraction / hardening step
+- 🔧 **`git_helpers::iso_to_epoch` misparses fractional-second ISO timestamps**
+  on BSD/macOS (e.g. Jira's `…000+0000`). US3 worked around it SINK-SIDE by
+  normalizing the timestamp before it reaches the engine, so drift/recency works
+  today. The shared `git_helpers` (copied from spec-kit-linear) should be
+  hardened at the source when the engine is extracted, so any producer feeding
+  fractional-second timestamps parses robustly. Until then every sink must
+  normalize — a latent trap (flagged by the US3 agent).
