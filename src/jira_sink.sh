@@ -227,18 +227,27 @@ query_existing_comment_body() {
 
 # _fetch_drift_issue_json <feature_number>
 #   The drift gate's read. Locate the freshest spec Story (`speckit-spec:NNN`,
-#   scoped to this repo's project) and echo `{status, labels, updated}`, or
-#   EMPTY (rc 0) when the issue is genuinely ABSENT. rc 3 ONLY on a real
-#   unreadable read.
+#   scoped to this repo's project) and echo the issue reshaped into the ENGINE'S
+#   drift contract, or EMPTY (rc 0) when the issue is genuinely ABSENT. rc 3
+#   ONLY on a real unreadable read.
 #
 #   A brand-new spec is ABSENT, not unreadable: the engine fails closed on
 #   rc 3, so absent MUST be rc 0 + empty output or no spec would ever get
 #   created on a fresh reconcile.
 #
-#   The engine's compute_drift consumes only `.updatedAt`, `.state.type`, and
-#   the `phase:*` labels (Linear-shaped). For US1 the fresh path returns absent;
-#   shaping the present-issue JSON into that schema is left minimal here (the
-#   real drift recency mapping is US3).
+#   ENGINE CONTRACT (US3): reconcile::compute_drift /
+#   reconcile::_tracker_phase_token are COPIED VERBATIM from spec-kit-linear and
+#   read a Linear-shaped object — `.updatedAt`, `.labels.nodes[].name` (filtering
+#   `phase:*`), and `.state.type == "completed"` → merged. The SINK adapts to
+#   that contract (the engine is NEVER touched, so the planned shared-engine
+#   extraction stays mechanical) by reshaping Jira's native fields:
+#       updatedAt ← fields.updated
+#       labels    ← { nodes: [ {name: <each fields.labels[] string>} ] }
+#       state     ← { type: (fields.status.statusCategory.key == "done"
+#                              ? "completed" : "open") }
+#   US1 already stamps a `phase:<state>` label on the Story, so
+#   _tracker_phase_token reads the tracker phase straight from labels.nodes[]; a
+#   done-category status carrying no phase label degrades to `merged`.
 _fetch_drift_issue_json() {
     local feature_number="${1:-}"
     local spec_prefix project label
@@ -265,14 +274,47 @@ _fetch_drift_issue_json() {
         return 0
     fi
 
-    # Present: shape the freshest match into the engine's drift schema. The JQL
-    # ordered newest-first, so element 0 is freshest.
+    # Present: reshape the freshest match into the engine's Linear-shaped drift
+    # schema. The JQL ordered newest-first, so element 0 is freshest. Jira's
+    # native fields are mapped to the contract the engine reads verbatim:
+    #   * updatedAt ← fields.updated (the tracker recency key compute_drift uses),
+    #     NORMALISED to the engine's expected `%cI` ISO spelling. Jira emits
+    #     `2026-05-26T09:41:00.000+0000` (fractional seconds + colon-less zone);
+    #     git_helpers::iso_to_epoch (engine side, untouched) parses the git `%cI`
+    #     form `2026-05-26T09:41:00+00:00`, so the sink strips the fractional
+    #     seconds and reinserts the offset colon here. Without this, recency
+    #     mis-parses and the corroborating recency signal never fires.
+    #   * labels.nodes[].name ← each string in fields.labels[] (so the engine's
+    #     `phase:*` filter finds the lifecycle phase US1 stamped on the Story)
+    #   * state.type ← "completed" iff the status's statusCategory is the done
+    #     category (Jira's terminal bucket), else "open" — _tracker_phase_token
+    #     reads `state.type == "completed"` as the no-phase-label `merged` signal.
     printf '%s' "$issues" | jq -c '
+        # Normalise a Jira timestamp to the engine'\''s %cI ISO spelling:
+        # drop optional .fff fractional seconds, and turn a trailing Z or
+        # ±HHMM zone into ±HH:MM. A value that does not match is passed through.
+        def norm_ts:
+            if . == null then null
+            else
+                gsub("\\.[0-9]+"; "")
+                | if test("Z$") then sub("Z$"; "+00:00")
+                  elif test("[+-][0-9]{4}$")
+                  then sub("(?<o>[+-][0-9]{2})(?<m>[0-9]{2})$"; "\(.o):\(.m)")
+                  else . end
+            end;
         .[0] as $i
         | {
-            updated: ($i.fields.updated // null),
-            status:  ($i.fields.status // null),
-            labels:  ($i.fields.labels // [])
+            updatedAt: (($i.fields.updated // null) | norm_ts),
+            labels: {
+                nodes: ((($i.fields.labels) // []) | map({name: .}))
+            },
+            state: {
+                type: (
+                    if (($i.fields.status.statusCategory.key) // "")
+                        | ascii_downcase == "done"
+                    then "completed" else "open" end
+                )
+            }
           }
     ' 2>/dev/null || return 3
     return 0

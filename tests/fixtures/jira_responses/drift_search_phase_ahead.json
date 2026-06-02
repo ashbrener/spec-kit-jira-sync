@@ -1,0 +1,23 @@
+{
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 1,
+  "issues": [
+    {
+      "id": "10310",
+      "key": "PROJ-310",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10310",
+      "fields": {
+        "summary": "310 — tracker ahead by phase",
+        "issuetype": { "id": "10002", "name": "Story", "subtask": false },
+        "status": {
+          "id": "20004",
+          "name": "In Progress",
+          "statusCategory": { "id": 4, "key": "indeterminate", "name": "In Progress" }
+        },
+        "labels": ["speckit-spec:310", "phase:implementing"],
+        "updated": "2026-05-26T09:31:00.000+0000"
+      }
+    }
+  ]
+}
