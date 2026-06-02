@@ -175,6 +175,93 @@ workstate::_phase_state() {
 }
 
 # ---------------------------------------------------------------------------
+# workstate::_notes_json <spec_dir>
+#
+# Builds the item's `notes[]` array (kind=comment annotations) from the spec's
+# recorded clarification/decision sessions under `## Clarifications`. One note
+# per `### Session YYYY-MM-DD` block: `{ body, timestamp_iso }` where body is the
+# session heading + its verbatim bullet lines (Markdown) and timestamp_iso is the
+# session date. These map to at-most-once Jira comments in the sink (US4 /
+# FR-007). Echoes a JSON array (possibly `[]`). Built entirely with jq (no
+# string splicing) so bullet text is always well-formed JSON.
+# ---------------------------------------------------------------------------
+workstate::_notes_json() {
+    local spec_dir="${1%/}"
+    local spec_md="${spec_dir}/spec.md"
+    [[ -s "$spec_md" ]] || { printf '[]'; return 0; }
+
+    local note_objs=()
+    local session_date _bullet_count
+    while IFS=$'\t' read -r session_date _bullet_count; do
+        : "${_bullet_count:-}"
+        [[ -n "$session_date" ]] || continue
+        local bullets body note
+        bullets="$(parser::clarify_session_bullets "$spec_md" "$session_date")"
+        body="$(printf '### Session %s\n\n%s' "$session_date" "$bullets")"
+        note="$(jq -n \
+            --arg ts "${session_date}T00:00:00+00:00" \
+            --arg body "$body" \
+            '{ timestamp_iso: $ts, body: $body }')"
+        note_objs+=("$note")
+    done < <(parser::clarify_sessions "$spec_md")
+
+    if (( ${#note_objs[@]} > 0 )); then
+        printf '%s\n' "${note_objs[@]}" | jq -cs '.'
+    else
+        printf '[]'
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# workstate::_links_json <spec_dir>
+#
+# Builds the item's `links[]` array (typed non-containment relations) from the
+# spec's cross-spec dependency declarations. Convention: a `## Dependencies`
+# section in spec.md whose bullets name a rel + a target feature number, e.g.
+#     - depends_on: 002
+#     - blocks: 003-other-spec
+# Each becomes `{ rel, target }` (target = the bare feature number / spec id).
+# These map to Jira issue links in the sink (US4 / FR-007). Echoes a JSON array
+# (possibly `[]`). Unknown rels pass through (the sink acts only on
+# `depends_on`/`blocks`).
+# ---------------------------------------------------------------------------
+workstate::_links_json() {
+    local spec_dir="${1%/}"
+    local spec_md="${spec_dir}/spec.md"
+    [[ -s "$spec_md" ]] || { printf '[]'; return 0; }
+
+    local rows
+    rows="$(awk '
+        /^## Dependencies[[:space:]]*$/ { in_section = 1; next }
+        /^## / { if (in_section) in_section = 0; next }
+        in_section && /^-[[:space:]]+/ {
+            line = $0
+            sub(/^-[[:space:]]+/, "", line)
+            ci = index(line, ":")
+            if (ci == 0) next
+            rel = substr(line, 1, ci - 1)
+            target = substr(line, ci + 1)
+            gsub(/[[:space:]]/, "", rel)
+            sub(/^[[:space:]]+/, "", target)
+            sub(/[[:space:]]+$/, "", target)
+            if (rel != "" && target != "") {
+                printf "%s\t%s\n", rel, target
+            }
+        }
+    ' "$spec_md")"
+
+    [[ -n "$rows" ]] || { printf '[]'; return 0; }
+
+    printf '%s\n' "$rows" | jq -R -s '
+        [ split("\n")[]
+          | select(length > 0)
+          | split("\t")
+          | { rel: .[0], target: .[1] }
+        ]
+    '
+}
+
+# ---------------------------------------------------------------------------
 # workstate::_phase_child <feature_number> <phase_index> <phase_name> <tasks_md>
 #
 # Emits the JSON object for one task-phase child (kind="task") on stdout:
@@ -265,7 +352,7 @@ workstate::item_for_spec() {
     fi
 
     local item_id="${feature_number}-${short_name}"
-    local title state body label path last_commit_iso
+    local title state body label path last_commit_iso notes_json links_json
     title="$(workstate::_spec_title "$spec_dir")"
     state="$(parser::lifecycle_phase "$spec_dir" || true)"
     [[ -n "$state" ]] || state="specifying"
@@ -274,6 +361,11 @@ workstate::item_for_spec() {
     label="speckit-spec:${feature_number}"
     path="${spec_dir}/"
     last_commit_iso="$(workstate::_last_commit_iso "$spec_dir")"
+    # Clarify/decision sessions → notes[]; cross-spec deps → links[] (US4).
+    notes_json="$(workstate::_notes_json "$spec_dir")"
+    [[ -n "$notes_json" ]] || notes_json='[]'
+    links_json="$(workstate::_links_json "$spec_dir")"
+    [[ -n "$links_json" ]] || links_json='[]'
 
     # Build the children[] array from the task phases (may be empty).
     local children_json='[]'
@@ -301,6 +393,8 @@ workstate::item_for_spec() {
         --arg label "$label" \
         --arg path "$path" \
         --arg last_commit_iso "$last_commit_iso" \
+        --argjson notes "$notes_json" \
+        --argjson links "$links_json" \
         --argjson children "$children_json" \
         '{
             id: $id,
@@ -313,8 +407,8 @@ workstate::item_for_spec() {
                 + (if $last_commit_iso == "" then {}
                    else { last_commit_iso: $last_commit_iso } end)
             ),
-            links: [],
-            notes: [],
+            links: $links,
+            notes: $notes,
             children: $children
         }
         + (if $body == "" then {} else { body: $body } end)'
