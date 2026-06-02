@@ -250,7 +250,7 @@ query_existing_comment_body() {
 #   done-category status carrying no phase label degrades to `merged`.
 _fetch_drift_issue_json() {
     local feature_number="${1:-}"
-    local spec_prefix project label
+    local spec_prefix project label lifecycle_prefix
     # Config getters halt (exit 2) on a missing key; in a fresh reconcile config
     # is already loaded + validated, so these resolve. Guard defensively so a
     # contract test that forgot to load config fails closed rather than exits.
@@ -260,6 +260,14 @@ _fetch_drift_issue_json() {
         return 3
     fi
     label="${spec_prefix}${feature_number}"
+    # The lifecycle label prefix is operator-configurable, but the engine's drift
+    # comparator (_tracker_phase_token) only knows the fixed `phase:` contract.
+    # The reshape below translates `<lifecycle_prefix><state>` → `phase:<state>`
+    # so a non-default prefix (e.g. `stage:`) still surfaces the tracker phase —
+    # otherwise drift is missed and even --on-drift=abort could overwrite an
+    # ahead Story (codex review P1).
+    lifecycle_prefix="$(config::get labels.lifecycle_prefix 2>/dev/null || true)"
+    [[ -n "$lifecycle_prefix" ]] || lifecycle_prefix="phase:"
 
     local issues
     if ! issues="$(query_spec_issue "$label" "$project")"; then
@@ -289,7 +297,7 @@ _fetch_drift_issue_json() {
     #   * state.type ← "completed" iff the status's statusCategory is the done
     #     category (Jira's terminal bucket), else "open" — _tracker_phase_token
     #     reads `state.type == "completed"` as the no-phase-label `merged` signal.
-    printf '%s' "$issues" | jq -c '
+    printf '%s' "$issues" | jq -c --arg lp "$lifecycle_prefix" '
         # Normalise a Jira timestamp to the engine'\''s %cI ISO spelling:
         # drop optional .fff fractional seconds, and turn a trailing Z or
         # ±HHMM zone into ±HH:MM. A value that does not match is passed through.
@@ -306,7 +314,9 @@ _fetch_drift_issue_json() {
         | {
             updatedAt: (($i.fields.updated // null) | norm_ts),
             labels: {
-                nodes: ((($i.fields.labels) // []) | map({name: .}))
+                nodes: ((($i.fields.labels) // [])
+                    | map(if startswith($lp) then "phase:" + ltrimstr($lp) else . end)
+                    | map({name: .}))
             },
             state: {
                 type: (

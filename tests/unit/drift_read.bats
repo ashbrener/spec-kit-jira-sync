@@ -182,3 +182,27 @@ _init_repo_with_spec() {
   [[ "$output" == *"fired=0"* ]]
   [[ "$output" == *"phase_drift=0"* ]]
 }
+
+@test "non-default lifecycle_prefix is translated to the engine's phase: contract (codex P1)" {
+  # A board configured with labels.lifecycle_prefix=stage: writes `stage:<state>`
+  # labels; the engine's _tracker_phase_token only knows `phase:*`. The reshape
+  # MUST translate the configured prefix or backward-drift is silently missed and
+  # even --on-drift=abort could overwrite an ahead Story (codex review P1).
+  CONFIG_VALUES[labels.lifecycle_prefix]="stage:"
+
+  local fx="$BATS_TEST_TMPDIR/stage_story.json"
+  printf '%s\n' '{"issues":[{"key":"PROJ-7","fields":{"updated":"2026-05-26T09:31:00.000+0000","labels":["speckit-spec:330","stage:ready_to_merge"],"status":{"statusCategory":{"key":"indeterminate"}}}}]}' > "$fx"
+  jira_shim::set_response GET "*/search/jql*" "$fx" 200
+
+  local reshaped
+  reshaped="$(_fetch_drift_issue_json 330)"
+  [ -n "$reshaped" ]
+
+  # The stage: lifecycle label becomes phase:; the spec label passes through.
+  run jq -r '.labels.nodes | map(.name) | sort | join(",")' <<<"$reshaped"
+  [ "$output" = "phase:ready_to_merge,speckit-spec:330" ]
+
+  # And the engine can now read the tracker phase from the reshaped object.
+  run reconcile::_tracker_phase_token "$reshaped"
+  [ "$output" = "ready_to_merge" ]
+}
