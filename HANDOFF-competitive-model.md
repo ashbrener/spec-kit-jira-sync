@@ -79,6 +79,21 @@ They map old config keys → new (e.g. `hierarchy.epic_type` →
 `mapping.spec_artifact`). We'll rename our config too — build in a small
 migration/alias path now so we don't break early users later.
 
+### 4. OPTIONAL L0 narrative super-level (new, 2026-06-02 — see PROJECT-BRIEF §16)
+A unified 5-level model now spans both sinks: an OPTIONAL level ABOVE the spec
+for the human narrative requirement ("build a login"). The shared mapping
+grammar must allow a level above `spec`, not just remap the existing three.
+**Jira-side primitive:** L0 → **Initiative** — BUT Initiative is Jira Premium
+(Advanced Roadmaps) only. So on a free/standard instance L0 **degrades**: fold
+the narrative onto the Epic and demote repo-grouping to a label. (Linear hosts
+this for free via Milestone; Jira is the constrained sink here.) Source for the
+narrative already exists in `spec.md`'s `**Input**: User description` line — no
+fabrication. Ship **OFF by default**; when on, populate from `Input:`
+(narrative≈spec 1:1) or operator-supplied grouping (1:many) — NEVER infer it.
+Keep `spec→Story` as the drift-anchored work-unit. This belongs in the
+configurable-mapping handoff batch (post-engine), designed-for-from-the-start
+so it isn't retrofitted.
+
 ---
 
 ## The discipline (DON'T copy them blindly)
