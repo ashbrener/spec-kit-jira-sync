@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="300" viewBox="0 0 920 300" role="img" aria-label="spec-kit-jira architecture: specs to parser to workstate to reconcile engine to jira sink to Jira REST">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="neutral" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f6feb"/>
+      <stop offset="1" stop-color="#1158c7"/>
+    </linearGradient>
+    <linearGradient id="sink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2684ff"/>
+      <stop offset="1" stop-color="#0052cc"/>
+    </linearGradient>
+    <linearGradient id="fs" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#30363d"/>
+      <stop offset="1" stop-color="#21262d"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+  <rect width="920" height="300" rx="14" fill="url(#bg)"/>
+  <text x="32" y="44" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="22" font-weight="700" fill="#e6edf3">spec-kit-jira</text>
+  <text x="32" y="66" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12.5" fill="#8b949e">a real sync engine — idempotent · drift-aware · fail-closed</text>
+
+  <!-- vendor-neutral lane label -->
+  <rect x="160" y="96" width="430" height="150" rx="12" fill="none" stroke="#30363d" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="170" y="116" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11" fill="#58a6ff" letter-spacing="1">VENDOR-NEUTRAL ENGINE</text>
+
+  <!-- jira lane label -->
+  <rect x="606" y="96" width="282" height="150" rx="12" fill="none" stroke="#1f3a5f" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="616" y="116" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11" fill="#79c0ff" letter-spacing="1">JIRA-SPECIFIC SINK</text>
+
+  <!-- boxes row -->
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+    <!-- specs -->
+    <rect x="22" y="150" width="120" height="56" rx="10" fill="url(#fs)" stroke="#3d444d"/>
+    <text x="82" y="176" text-anchor="middle" font-size="13" font-weight="600" fill="#e6edf3">specs/NNN-*</text>
+    <text x="82" y="194" text-anchor="middle" font-size="10.5" fill="#8b949e">spec · plan · tasks</text>
+
+    <!-- parser -->
+    <rect x="178" y="150" width="112" height="56" rx="10" fill="url(#neutral)"/>
+    <text x="234" y="176" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">parser</text>
+    <text x="234" y="194" text-anchor="middle" font-size="10.5" fill="#cfe3ff">infer phase</text>
+
+    <!-- workstate -->
+    <rect x="320" y="150" width="118" height="56" rx="10" fill="url(#neutral)"/>
+    <text x="379" y="172" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">workstate</text>
+    <text x="379" y="190" text-anchor="middle" font-size="10.5" fill="#cfe3ff">neutral JSON</text>
+
+    <!-- engine -->
+    <rect x="468" y="150" width="112" height="56" rx="10" fill="url(#neutral)"/>
+    <text x="524" y="172" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">reconcile</text>
+    <text x="524" y="190" text-anchor="middle" font-size="10.5" fill="#cfe3ff">drift · idempotent</text>
+
+    <!-- sink -->
+    <rect x="618" y="150" width="112" height="56" rx="10" fill="url(#sink)"/>
+    <text x="674" y="172" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">jira-sink</text>
+    <text x="674" y="190" text-anchor="middle" font-size="10.5" fill="#d6e6ff">workstate→REST</text>
+
+    <!-- jira -->
+    <rect x="762" y="150" width="116" height="56" rx="10" fill="url(#sink)"/>
+    <text x="820" y="172" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">Jira REST</text>
+    <text x="820" y="190" text-anchor="middle" font-size="10.5" fill="#d6e6ff">Epic·Story·Subtask</text>
+  </g>
+
+  <!-- arrows -->
+  <g stroke="#8b949e" stroke-width="2" fill="none">
+    <line x1="142" y1="178" x2="176" y2="178" marker-end="url(#arrow)"/>
+    <line x1="290" y1="178" x2="318" y2="178" marker-end="url(#arrow)"/>
+    <line x1="438" y1="178" x2="466" y2="178" marker-end="url(#arrow)"/>
+    <line x1="580" y1="178" x2="616" y2="178" marker-end="url(#arrow)"/>
+    <line x1="730" y1="178" x2="760" y2="178" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- seam caption -->
+  <text x="598" y="238" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6e7681">the seam: one interface — swap the sink, reuse the engine</text>
+
+  <!-- footer trust strip -->
+  <text x="32" y="282" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11.5" fill="#7d8590">filesystem is the single source of truth · Jira is a read-only mirror · re-runnable any number of times</text>
+</svg>
