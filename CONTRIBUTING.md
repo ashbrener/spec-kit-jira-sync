@@ -7,8 +7,10 @@ project principles) before substantial changes.
 ## Developer setup
 
 Runtime tools: `bash` 4.4+, `curl`, `jq`, `git`, `gh`.
-Dev/test tools: `bats`, `shellcheck`, `yamllint`, `markdownlint-cli2`, and
-`python3` + `jsonschema` (for `workstate` schema validation).
+Dev/test tools: `bats`, `shellcheck`, `yamllint`, `markdownlint-cli2`. For
+`workstate` schema validation, [`uv`](https://docs.astral.sh/uv/) (preferred —
+PEP 668-safe, no global install) or a `python3` able to build a throwaway venv;
+never bare `pip`. The schema gate provisions `jsonschema` ephemerally via `uv`.
 
 Credentials for live runs go ONLY in a gitignored `.env` (never committed):
 
