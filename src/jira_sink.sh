@@ -84,6 +84,51 @@ jira_sink::_log() {
     printf 'spec-kit-jira: sink: %s\n' "$*" >&2
 }
 
+# -----------------------------------------------------------------------------
+# US2 disposition channel.
+#
+# The orchestrators (sync_spec_issue / sync_task_phase_subissues) own the
+# find-or-create-or-update decision; the engine's process_spec needs to know
+# whether the result was a CREATE, an UPDATE, or a no-op SKIP so its run summary
+# distinguishes created / updated / skipped (FR-008, FR-015). The orchestrators
+# stash that verdict on these module globals (function stdout stays reserved for
+# the issue key / phase-map the engine reads back), and process_spec reads them
+# right after the call.
+#   value ∈ { created | updated | skipped }
+# Exported because reconcile.sh (a separate file across the engine↔sink seam)
+# reads them; `export` also keeps shellcheck — which scans this file in
+# isolation — from flagging the assignments as unused (SC2034).
+declare -gx JIRA_SINK_SPEC_DISPOSITION=""
+# Per-phase Subtask verdicts: a JSON object `{phase_index: disposition}` so the
+# engine can tally created vs updated vs skipped Subtasks per run.
+declare -gx JIRA_SINK_SUBISSUE_DISPOSITIONS="{}"
+
+# jira_sink::_normalize_adf <adf_json>
+#   Echo a canonical, comparison-stable form of an ADF body. Descriptions are
+#   ADF JSON whose key order is not significant; two semantically-identical
+#   bodies MUST compare EQUAL so an unchanged re-run produces no update (the
+#   SC-017 zero-churn guarantee). `jq -S -c` sorts object keys recursively and
+#   strips insignificant whitespace, so a round-tripped Jira body and a freshly
+#   rendered one collapse to the same string. A non-JSON / empty input echoes
+#   the empty string (so two absent bodies also compare equal).
+jira_sink::_normalize_adf() {
+    local raw="${1:-}"
+    [[ -n "$raw" && "$raw" != "null" ]] || { printf ''; return 0; }
+    printf '%s' "$raw" | jq -S -c '.' 2>/dev/null || printf ''
+}
+
+# jira_sink::_labels_equal <desired_json> <current_json>
+#   Return 0 iff the two JSON arrays of label strings are set-equal (order
+#   insignificant). Used so a re-run whose desired labels match the issue's
+#   current labels produces no `labels` diff entry.
+jira_sink::_labels_equal() {
+    local desired="${1:-[]}" current="${2:-[]}"
+    local d c
+    d="$(printf '%s' "$desired" | jq -S -c '(. // []) | unique' 2>/dev/null || printf '[]')"
+    c="$(printf '%s' "$current" | jq -S -c '(. // []) | unique' 2>/dev/null || printf '[]')"
+    [[ "$d" == "$c" ]]
+}
+
 # =============================================================================
 # Read (idempotency + drift)  — engine-sink-interface.md §Read
 #
@@ -139,6 +184,31 @@ query_subissue_for_phase() {
     local parent_key="${1:-}" phase_label="${2:-}"
     jira_sink::_search_issues \
         "parent = \"${parent_key}\" AND labels = \"${phase_label}\""
+}
+
+# query_issue_full <key>
+#   GET /issue/<key>?fields=summary,description,labels,status,parent and echo
+#   the `.fields` object (so the idempotent diff can compare summary /
+#   description / labels / status against the disk-derived desired). A JQL
+#   `/search/jql` result omits `description`, so the diff needs this targeted
+#   read. rc 3 on an unreadable read; the engine fails closed on it.
+query_issue_full() {
+    local key="${1:-}"
+    local raw rc
+    if raw="$(jira_rest::get "issue/${key}?fields=summary,description,labels,status,parent" 2>/dev/null)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    if (( rc != 0 )); then
+        return 3
+    fi
+    local fields
+    if ! fields="$(printf '%s' "$raw" | jq -ce '.fields // {}' 2>/dev/null)"; then
+        return 3
+    fi
+    printf '%s\n' "$fields"
+    return 0
 }
 
 # query_issue_blocks <issue_id>  — US4 stub (issue links).
@@ -377,11 +447,21 @@ ensure_repo_epic() {
 }
 
 # sync_spec_issue <item_json> <epic_key>
-#   Compose a Story under the repo Epic from the workstate item: summary
-#   `NNN — <title>`, description via adf::from_markdown(body), labels
-#   (speckit-spec:NNN + phase:<state> + item labels), parent = epic key. Create
-#   it (US1 fresh path) then set status via config::get_status_transition +
-#   transition_issue. Echo the Story key.
+#   Idempotently mirror the spec as a Story under the repo Epic. Compose the
+#   desired Story from the workstate item: summary `NNN — <title>`, description
+#   via adf::from_markdown(body), labels (speckit-spec:NNN + phase:<state> +
+#   item labels), parent = epic key. Then:
+#     * ABSENT (query_spec_issue → []) → CREATE the Story (the US1 fresh path)
+#       and set status via config::get_status_transition + transition_issue.
+#     * PRESENT → compute the desired-vs-current DIFF (summary, description,
+#       labels, parent). Only CHANGED fields enter the diff; an all-unchanged
+#       spec yields `{}` → mutate_issue_update no-ops → ZERO writes (FR-008,
+#       SC-017). Then reconcile STATUS: transition ONLY when the current status
+#       differs from the desired one (so an operator's manual status change in
+#       Jira is restored, US2 acceptance #2 — but a matching status fires no
+#       transition).
+#   Echoes the Story key. Records the create/update/skip verdict on
+#   JIRA_SINK_SPEC_DISPOSITION for the engine's summary.
 #
 #   The engine drives this from workstate::item_for_spec (see reconcile.sh
 #   process_spec wiring), so the title/state/body/labels all come off the item.
@@ -417,53 +497,150 @@ sync_spec_issue() {
     local description
     description="$(adf::from_markdown "$body")"
 
-    # Assemble the create payload. parent links the Story under the repo Epic.
-    local fields
-    fields="$(jq -cn \
-        --arg project "$project" \
-        --arg itype "$story_type" \
-        --arg parent "$epic_key" \
-        --arg summary "$summary" \
-        --argjson description "$description" \
-        --argjson labels "$labels_json" \
-        '{fields:(
-            {
-                project:     {key: $project},
-                issuetype:   {id: $itype},
-                summary:     $summary,
-                description: $description,
-                labels:      $labels
-            }
-            + (if ($parent | length) > 0 then {parent: {key: $parent}} else {} end)
-        )}')"
-
-    local created key
-    if ! created="$(mutate_issue_create "$fields")"; then
-        jira_sink::_log "sync_spec_issue: failed to create Story for spec ${feature_number}"
-        return 1
-    fi
-    key="$(printf '%s' "$created" | jq -r '.key // ""' 2>/dev/null || printf '')"
-    if [[ -z "$key" || "$key" == "null" ]]; then
-        jira_sink::_log "sync_spec_issue: created Story has no key"
-        return 1
-    fi
-
-    # Set the Story's status to match the lifecycle phase via a transition. A
-    # missing transition is surfaced (Principle VIII), never fatal.
-    local status_transition
+    # The desired status id the lifecycle phase maps to (vendor lever). The
+    # config getter may hand us `<status-id>\t<transition-id>`; the status id
+    # is the part before the tab. Empty when the phase has no status mapping.
+    local status_transition="" desired_status_id=""
     if status_transition="$(config::get_status_transition "$state" 2>/dev/null)"; then
-        transition_issue "$key" "$status_transition" || \
-            jira_sink::_log "sync_spec_issue: transition for ${key} (phase ${state}) did not apply"
+        desired_status_id="${status_transition%%$'\t'*}"
     fi
 
-    printf '%s\n' "$key"
+    # --- Find-or-create-or-update ----------------------------------------
+    # query_spec_issue fails closed (rc 3) on an unreadable read; propagate
+    # that so the engine's fail-closed contract holds (no blind create).
+    local existing existing_key
+    if ! existing="$(query_spec_issue "$spec_label" "$project")"; then
+        jira_sink::_log "sync_spec_issue: spec ${feature_number} lookup unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    existing_key="$(printf '%s' "$existing" | jq -r '(.[0].key // "")' 2>/dev/null || printf '')"
+
+    if [[ -z "$existing_key" || "$existing_key" == "null" ]]; then
+        # ABSENT → create (US1 fresh path), then set status.
+        local fields
+        fields="$(jq -cn \
+            --arg project "$project" \
+            --arg itype "$story_type" \
+            --arg parent "$epic_key" \
+            --arg summary "$summary" \
+            --argjson description "$description" \
+            --argjson labels "$labels_json" \
+            '{fields:(
+                {
+                    project:     {key: $project},
+                    issuetype:   {id: $itype},
+                    summary:     $summary,
+                    description: $description,
+                    labels:      $labels
+                }
+                + (if ($parent | length) > 0 then {parent: {key: $parent}} else {} end)
+            )}')"
+
+        local created key
+        if ! created="$(mutate_issue_create "$fields")"; then
+            jira_sink::_log "sync_spec_issue: failed to create Story for spec ${feature_number}"
+            return 1
+        fi
+        key="$(printf '%s' "$created" | jq -r '.key // ""' 2>/dev/null || printf '')"
+        if [[ -z "$key" || "$key" == "null" ]]; then
+            jira_sink::_log "sync_spec_issue: created Story has no key"
+            return 1
+        fi
+
+        # Set the Story's status to match the lifecycle phase via a transition.
+        # A missing transition is surfaced (Principle VIII), never fatal.
+        if [[ -n "$status_transition" ]]; then
+            transition_issue "$key" "$status_transition" || \
+                jira_sink::_log "sync_spec_issue: transition for ${key} (phase ${state}) did not apply"
+        fi
+
+        JIRA_SINK_SPEC_DISPOSITION="created"
+        printf '%s\n' "$key"
+        return 0
+    fi
+
+    # PRESENT → diff the desired against the current and update only the delta.
+    # Read the full issue (the JQL search omits description) for the diff.
+    local current
+    if ! current="$(query_issue_full "$existing_key")"; then
+        jira_sink::_log "sync_spec_issue: spec ${feature_number} (${existing_key}) read unreadable; failing closed (rc 3)"
+        return 3
+    fi
+
+    local cur_summary cur_description cur_labels cur_parent cur_status_id
+    cur_summary="$(printf '%s' "$current" | jq -r '.summary // ""' 2>/dev/null || printf '')"
+    cur_description="$(printf '%s' "$current" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+    cur_labels="$(printf '%s' "$current" | jq -c '.labels // []' 2>/dev/null || printf '[]')"
+    cur_parent="$(printf '%s' "$current" | jq -r '.parent.key // ""' 2>/dev/null || printf '')"
+    cur_status_id="$(printf '%s' "$current" | jq -r '.status.id // ""' 2>/dev/null || printf '')"
+
+    # Build the diff field-by-field; unchanged fields MUST NOT appear (so an
+    # all-unchanged spec yields `{}` and mutate_issue_update no-ops).
+    local diff='{}'
+    if [[ "$summary" != "$cur_summary" ]]; then
+        diff="$(printf '%s' "$diff" | jq -c --arg s "$summary" '. + {summary: $s}')"
+    fi
+    # ADF descriptions are key-order-insensitive — normalize both sides before
+    # comparing so a semantically-identical body produces no diff entry.
+    local desired_desc_norm current_desc_norm
+    desired_desc_norm="$(jira_sink::_normalize_adf "$description")"
+    current_desc_norm="$(jira_sink::_normalize_adf "$cur_description")"
+    if [[ "$desired_desc_norm" != "$current_desc_norm" ]]; then
+        diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+    fi
+    if ! jira_sink::_labels_equal "$labels_json" "$cur_labels"; then
+        diff="$(printf '%s' "$diff" | jq -c --argjson l "$labels_json" '. + {labels: $l}')"
+    fi
+    # Re-parent only when an Epic is known AND the current parent differs.
+    if [[ -n "$epic_key" && "$epic_key" != "$cur_parent" ]]; then
+        diff="$(printf '%s' "$diff" | jq -c --arg p "$epic_key" '. + {parent: {key: $p}}')"
+    fi
+
+    # mutate_issue_update no-ops on an empty diff (idempotency), so an
+    # all-unchanged spec performs ZERO field writes here.
+    local diff_payload
+    diff_payload="$(printf '%s' "$diff" | jq -c '{fields: .}')"
+    local wrote_update=0
+    if [[ "$diff" != "{}" ]]; then
+        if ! mutate_issue_update "$existing_key" "$diff_payload"; then
+            jira_sink::_log "sync_spec_issue: update for ${existing_key} (spec ${feature_number}) failed"
+            return 1
+        fi
+        wrote_update=1
+    fi
+
+    # Reconcile STATUS: transition ONLY when the current status differs from the
+    # desired one. A matching status fires NO transition (zero churn); a
+    # mismatch (e.g. an operator hand-edited the Story status in Jira) restores
+    # the disk-derived status (US2 acceptance #2).
+    local wrote_transition=0
+    if [[ -n "$desired_status_id" && "$desired_status_id" != "$cur_status_id" ]]; then
+        if transition_issue "$existing_key" "$status_transition"; then
+            wrote_transition=1
+        else
+            jira_sink::_log "sync_spec_issue: transition for ${existing_key} (phase ${state}) did not apply"
+        fi
+    fi
+
+    if (( wrote_update == 1 || wrote_transition == 1 )); then
+        JIRA_SINK_SPEC_DISPOSITION="updated"
+    else
+        JIRA_SINK_SPEC_DISPOSITION="skipped"
+    fi
+    printf '%s\n' "$existing_key"
+    return 0
 }
 
 # sync_task_phase_subissues <story_key> <item_json>
-#   For each workstate child (a task phase), create a Subtask under the Story:
-#   issue_types.subtask, parent = Story key, label task-phase:N, body rendered
-#   as an ADF taskList from child.extensions.tasks (research D3). Echo the
-#   `{phase_index → subtask_key}` map as JSON for downstream block reconcile.
+#   Idempotently mirror each workstate child (a task phase) as a Subtask under
+#   the Story. Per phase: query_subissue_for_phase(story, task-phase:N).
+#     * ABSENT → CREATE the Subtask (issue_types.subtask, parent = Story key,
+#       label task-phase:N, body an ADF taskList from child.extensions.tasks).
+#     * PRESENT → DIFF the desired summary/description/labels against the
+#       current and update only the delta; an unchanged phase yields `{}` →
+#       no write (zero churn). ADF bodies are normalized before comparing.
+#   Echoes the `{phase_index → subtask_key}` map for downstream block reconcile,
+#   and records the per-phase verdict on JIRA_SINK_SUBISSUE_DISPOSITIONS.
 sync_task_phase_subissues() {
     local story_key="${1:-}" item_json="${2:-}"
 
@@ -472,8 +649,9 @@ sync_task_phase_subissues() {
     subtask_type="$(config::get issue_types.subtask)"
     phase_prefix="$(config::get labels.phase_prefix)"
 
-    # Build the phase→subtask map incrementally. Children are processed in order.
+    # Build the phase→subtask map + the per-phase disposition map incrementally.
     local map='{}'
+    local dispositions='{}'
     local children_count i
     children_count="$(printf '%s' "$item_json" | jq -r '(.children // []) | length' 2>/dev/null || printf '0')"
 
@@ -492,34 +670,90 @@ sync_task_phase_subissues() {
         description="$(jq -cn --argjson tl "$body" '{version:1,type:"doc",content:[$tl]}')"
 
         local phase_label="${phase_prefix}${phase_index}"
-        local fields
-        fields="$(jq -cn \
-            --arg project "$project" \
-            --arg itype "$subtask_type" \
-            --arg parent "$story_key" \
-            --arg summary "$child_title" \
-            --argjson description "$description" \
-            --arg label "$phase_label" \
-            '{fields:{
-                project:     {key: $project},
-                issuetype:   {id: $itype},
-                parent:      {key: $parent},
-                summary:     $summary,
-                description: $description,
-                labels:      [$label]
-            }}')"
+        local desired_labels_json
+        desired_labels_json="$(jq -cn --arg label "$phase_label" '[$label]')"
 
-        local created key
-        if ! created="$(mutate_issue_create "$fields")"; then
-            jira_sink::_log "sync_task_phase_subissues: failed to create Subtask for phase ${phase_index}"
-            continue
+        # Find-or-create-or-update the Subtask for this phase.
+        local existing existing_key key disposition
+        if ! existing="$(query_subissue_for_phase "$story_key" "$phase_label")"; then
+            jira_sink::_log "sync_task_phase_subissues: phase ${phase_index} lookup unreadable; failing closed (rc 3)"
+            return 3
         fi
-        key="$(printf '%s' "$created" | jq -r '.key // ""' 2>/dev/null || printf '')"
+        existing_key="$(printf '%s' "$existing" | jq -r '(.[0].key // "")' 2>/dev/null || printf '')"
+
+        if [[ -z "$existing_key" || "$existing_key" == "null" ]]; then
+            # ABSENT → create.
+            local fields
+            fields="$(jq -cn \
+                --arg project "$project" \
+                --arg itype "$subtask_type" \
+                --arg parent "$story_key" \
+                --arg summary "$child_title" \
+                --argjson description "$description" \
+                --argjson labels "$desired_labels_json" \
+                '{fields:{
+                    project:     {key: $project},
+                    issuetype:   {id: $itype},
+                    parent:      {key: $parent},
+                    summary:     $summary,
+                    description: $description,
+                    labels:      $labels
+                }}')"
+
+            local created
+            if ! created="$(mutate_issue_create "$fields")"; then
+                jira_sink::_log "sync_task_phase_subissues: failed to create Subtask for phase ${phase_index}"
+                continue
+            fi
+            key="$(printf '%s' "$created" | jq -r '.key // ""' 2>/dev/null || printf '')"
+            disposition="created"
+        else
+            # PRESENT → diff desired vs current; update only the delta.
+            key="$existing_key"
+            local current
+            if ! current="$(query_issue_full "$existing_key")"; then
+                jira_sink::_log "sync_task_phase_subissues: phase ${phase_index} (${existing_key}) read unreadable; failing closed (rc 3)"
+                return 3
+            fi
+            local cur_summary cur_description cur_labels
+            cur_summary="$(printf '%s' "$current" | jq -r '.summary // ""' 2>/dev/null || printf '')"
+            cur_description="$(printf '%s' "$current" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+            cur_labels="$(printf '%s' "$current" | jq -c '.labels // []' 2>/dev/null || printf '[]')"
+
+            local diff='{}'
+            if [[ "$child_title" != "$cur_summary" ]]; then
+                diff="$(printf '%s' "$diff" | jq -c --arg s "$child_title" '. + {summary: $s}')"
+            fi
+            local desired_desc_norm current_desc_norm
+            desired_desc_norm="$(jira_sink::_normalize_adf "$description")"
+            current_desc_norm="$(jira_sink::_normalize_adf "$cur_description")"
+            if [[ "$desired_desc_norm" != "$current_desc_norm" ]]; then
+                diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+            fi
+            if ! jira_sink::_labels_equal "$desired_labels_json" "$cur_labels"; then
+                diff="$(printf '%s' "$diff" | jq -c --argjson l "$desired_labels_json" '. + {labels: $l}')"
+            fi
+
+            if [[ "$diff" != "{}" ]]; then
+                local diff_payload
+                diff_payload="$(printf '%s' "$diff" | jq -c '{fields: .}')"
+                if ! mutate_issue_update "$existing_key" "$diff_payload"; then
+                    jira_sink::_log "sync_task_phase_subissues: update for ${existing_key} (phase ${phase_index}) failed"
+                    continue
+                fi
+                disposition="updated"
+            else
+                disposition="skipped"
+            fi
+        fi
+
         if [[ -n "$key" && "$key" != "null" ]]; then
             map="$(printf '%s' "$map" | jq -c --arg p "$phase_index" --arg k "$key" '. + {($p): $k}')"
+            dispositions="$(printf '%s' "$dispositions" | jq -c --arg p "$phase_index" --arg d "$disposition" '. + {($p): $d}')"
         fi
     done
 
+    JIRA_SINK_SUBISSUE_DISPOSITIONS="$dispositions"
     printf '%s\n' "$map"
 }
 

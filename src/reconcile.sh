@@ -114,6 +114,15 @@ declare -g _RECONCILE_LIFECYCLE_ROWS=""
 # reuses it without re-parsing the spec dir. Reset on each process_spec entry.
 declare -g RECONCILE_WORKSTATE_ITEM=""
 
+# Sink-disposition channel (US2). The sink orchestrators run inside `$(...)`
+# command substitutions (a subshell), so the create/update/skip verdicts they
+# record on JIRA_SINK_* globals do NOT propagate back to process_spec. The
+# subshell CAN, however, write to a file whose path the parent set. The engine
+# wrappers append `spec\t<disposition>` / `subtask\t<disposition>` lines here;
+# process_spec reads them to tally created vs updated vs skipped (FR-008,
+# FR-015). Path is (re)assigned per process_spec entry; empty = channel unused.
+declare -g RECONCILE_DISPOSITION_FILE=""
+
 # -----------------------------------------------------------------------------
 # CLI flags — populated by reconcile::parse_args.
 # -----------------------------------------------------------------------------
@@ -891,8 +900,28 @@ reconcile::sync_spec_issue() {
         return 1
     fi
 
-    if ! spec_issue_id="$(sync_spec_issue "$item_json" "$epic_id")"; then
-        return 1
+    # Call sync_spec_issue in the CURRENT shell (stdout captured via a tempfile,
+    # NOT a `$(...)` subshell) so its JIRA_SINK_SPEC_DISPOSITION global survives.
+    # A command-sub subshell would discard the verdict (US2 summary accounting).
+    local _out_file _rc
+    _out_file="$(mktemp "${TMPDIR:-/tmp}/reconcile-out.XXXXXX")"
+    JIRA_SINK_SPEC_DISPOSITION=""
+    # `set -e`-safe rc capture: a bare `cmd; rc=$?` aborts under set -e when cmd
+    # fails before the rc line runs, so capture via the if/else fork.
+    if sync_spec_issue "$item_json" "$epic_id" >"$_out_file"; then
+        _rc=0
+    else
+        _rc=$?
+    fi
+    spec_issue_id="$(cat "$_out_file")"
+    rm -f "$_out_file"
+    if (( _rc != 0 )); then
+        return "$_rc"
+    fi
+    # Surface the sink's create/update/skip verdict to process_spec.
+    if [[ -n "${RECONCILE_DISPOSITION_FILE:-}" ]]; then
+        printf 'spec\t%s\n' "${JIRA_SINK_SPEC_DISPOSITION:-created}" \
+            >>"$RECONCILE_DISPOSITION_FILE"
     fi
     printf '%s\n' "$spec_issue_id"
 }
@@ -917,7 +946,32 @@ reconcile::sync_task_phase_subissues() {
         item_json="$(workstate::item_for_spec "$spec_dir")" || return 1
     fi
 
-    sync_task_phase_subissues "$spec_issue_id" "$item_json"
+    # Call the sink in the CURRENT shell (stdout via a tempfile, NOT `$(...)`)
+    # so its JIRA_SINK_SUBISSUE_DISPOSITIONS global survives for the verdict
+    # accounting; a command-sub subshell would discard it.
+    local _out_file _rc phase_map
+    _out_file="$(mktemp "${TMPDIR:-/tmp}/reconcile-sub.XXXXXX")"
+    JIRA_SINK_SUBISSUE_DISPOSITIONS="{}"
+    if sync_task_phase_subissues "$spec_issue_id" "$item_json" >"$_out_file"; then
+        _rc=0
+    else
+        _rc=$?
+    fi
+    phase_map="$(cat "$_out_file")"
+    rm -f "$_out_file"
+    if (( _rc != 0 )); then
+        return "$_rc"
+    fi
+
+    # Surface the per-phase create/update/skip verdicts to process_spec via the
+    # disposition file (one `subtask\t<verdict>` line per phase).
+    if [[ -n "${RECONCILE_DISPOSITION_FILE:-}" ]]; then
+        printf '%s' "${JIRA_SINK_SUBISSUE_DISPOSITIONS:-{}}" \
+            | jq -r 'to_entries[] | "subtask\t" + .value' 2>/dev/null \
+            >>"$RECONCILE_DISPOSITION_FILE" || true
+    fi
+
+    printf '%s\n' "$phase_map"
 }
 
 # reconcile::sync_inter_phase_blocks <phase_map> <spec_dir>
@@ -1529,6 +1583,14 @@ reconcile::process_spec() {
         summary::add warned "spec ${feature_number}: ${line_count} task line(s) outside any ## Phase header"
     fi
 
+    # --- Sink disposition channel -------------------------------------
+    # The sink orchestrators run in command-sub subshells, so they report their
+    # create/update/skip verdicts via this per-spec tempfile (read below to
+    # drive summary::add). Cleaned up on process_spec exit.
+    RECONCILE_DISPOSITION_FILE="$(mktemp "${TMPDIR:-/tmp}/reconcile-disp.XXXXXX")"
+    # shellcheck disable=SC2064  # expand the path NOW so the trap removes THIS file.
+    trap "rm -f '${RECONCILE_DISPOSITION_FILE}'" RETURN
+
     # --- Spec issue find-or-create/update -----------------------------
     local spec_issue_id
     if ! spec_issue_id="$(reconcile::sync_spec_issue \
@@ -1541,9 +1603,16 @@ reconcile::process_spec() {
         summary::add error "spec ${feature_number}: no issue id resolved"
         return 0
     fi
-    # Record the Story create/update for the run summary (Principle VIII). On a
-    # fresh reconcile this is a create; idempotent diff/update is US2.
-    summary::add created "spec ${feature_number}: Story ${spec_issue_id}"
+    # Record the Story create/update/skip for the run summary (Principle VIII,
+    # FR-008/FR-015). A fresh spec is `created`; an unchanged re-run is `skipped`
+    # (zero churn); a diff/status correction is `updated`.
+    local _spec_disp
+    _spec_disp="$(grep -m1 $'^spec\t' "$RECONCILE_DISPOSITION_FILE" 2>/dev/null | cut -f2 || true)"
+    case "$_spec_disp" in
+        updated) summary::add updated "spec ${feature_number}: Story ${spec_issue_id}" ;;
+        skipped) summary::add skipped "spec ${feature_number}: Story ${spec_issue_id} unchanged" ;;
+        *)       summary::add created "spec ${feature_number}: Story ${spec_issue_id}" ;;
+    esac
 
     # --- Task-phase sub-issues ----------------------------------------
     local phase_map
@@ -1551,15 +1620,18 @@ reconcile::process_spec() {
         "$spec_issue_id" "$feature_number" "$spec_dir")"; then
         summary::add error "spec ${feature_number}: sync_task_phase_subissues failed"
         # Continue to comments — sub-issue failures don't block the rest.
-    elif [[ -n "${phase_map:-}" && "$phase_map" != "{}" ]]; then
-        # One created row per phase Subtask, so the summary's created counter
-        # reflects Story + Subtasks (the observable fresh-mirror result).
-        local _subtask_count
-        _subtask_count="$(printf '%s' "$phase_map" | jq -r 'length' 2>/dev/null || printf '0')"
-        local _i
-        for (( _i = 0; _i < _subtask_count; _i++ )); do
-            summary::add created "spec ${feature_number}: Subtask"
-        done
+    else
+        # One summary row per phase Subtask, keyed by the sink's per-phase
+        # verdict, so the counters reflect created vs updated vs unchanged
+        # Subtasks (FR-008). A skip is silent churn-wise but still tallied.
+        local _disp
+        while IFS=$'\t' read -r _ _disp; do
+            case "$_disp" in
+                updated) summary::add updated "spec ${feature_number}: Subtask" ;;
+                skipped) summary::add skipped "spec ${feature_number}: Subtask unchanged" ;;
+                created) summary::add created "spec ${feature_number}: Subtask" ;;
+            esac
+        done < <(grep $'^subtask\t' "$RECONCILE_DISPOSITION_FILE" 2>/dev/null || true)
     fi
 
     # --- Inter-phase blocking relations -------------------------------
