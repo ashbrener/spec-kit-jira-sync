@@ -993,8 +993,16 @@ sync_inter_phase_blocks() {
     project="$(config::get project_key)"
     spec_prefix="$(config::get labels.spec_prefix)"
     # The Jira issue-link type name. Configurable; defaults to the built-in
-    # "Blocks" type every Jira site ships.
-    link_type="$(config::get links.block_type 2>/dev/null || true)"
+    # "Blocks" type every Jira site ships. config::get HALTS (exit 2) on a
+    # missing key, and that `exit` fires from the command-substitution subshell
+    # BEFORE any trailing `|| true` can run — so under the engine's `set -e` a
+    # `$(... || true)` assignment would STILL abort the whole reconcile when the
+    # optional `links` block is absent (the common case: data-model leaves it
+    # unset). Probe inside an `if` (which suppresses errexit for the tested
+    # command) so a missing key degrades to the built-in default instead.
+    if ! link_type="$(config::get links.block_type 2>/dev/null)"; then
+        link_type=""
+    fi
     [[ -n "$link_type" ]] || link_type="Blocks"
 
     # Read the Story's existing link set ONCE (idempotency baseline). rc 3 fails
