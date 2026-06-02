@@ -912,6 +912,9 @@ reconcile::sync_spec_issue() {
     local _out_file _rc
     _out_file="$(mktemp "${TMPDIR:-/tmp}/reconcile-out.XXXXXX")"
     JIRA_SINK_SPEC_DISPOSITION=""
+    # Reset the US5 transition-failure channel before the call so a stale value
+    # from a prior spec cannot leak into this one's verdict.
+    JIRA_SINK_SPEC_TRANSITION_FAILED=0
     # `set -e`-safe rc capture: a bare `cmd; rc=$?` aborts under set -e when cmd
     # fails before the rc line runs, so capture via the if/else fork.
     if sync_spec_issue "$item_json" "$epic_id" >"$_out_file"; then
@@ -928,6 +931,12 @@ reconcile::sync_spec_issue() {
     if [[ -n "${RECONCILE_DISPOSITION_FILE:-}" ]]; then
         printf 'spec\t%s\n' "${JIRA_SINK_SPEC_DISPOSITION:-created}" \
             >>"$RECONCILE_DISPOSITION_FILE"
+        # A real transition TRANSPORT failure (the POST failed, not the benign
+        # "no transition available" case) surfaces as its own disposition line so
+        # process_spec can warn + promote the exit (US5 observable failure).
+        if [[ "${JIRA_SINK_SPEC_TRANSITION_FAILED:-0}" == "1" ]]; then
+            printf 'spec-transition\tfailed\n' >>"$RECONCILE_DISPOSITION_FILE"
+        fi
     fi
     printf '%s\n' "$spec_issue_id"
 }
@@ -1589,6 +1598,14 @@ reconcile::process_spec() {
         skipped) summary::add skipped "spec ${feature_number}: Story ${spec_issue_id} unchanged" ;;
         *)       summary::add created "spec ${feature_number}: Story ${spec_issue_id}" ;;
     esac
+    # A real status-TRANSITION transport failure (not the benign no-transition
+    # case) is surfaced as a warning + promotes the exit (US5 observable failure):
+    # the Story is mirrored but its lifecycle status did not apply, so warn the
+    # operator rather than silently logging to stderr (FR-015, Principle VIII).
+    if grep -q $'^spec-transition\tfailed' "$RECONCILE_DISPOSITION_FILE" 2>/dev/null; then
+        summary::add warned "spec ${feature_number}: Story ${spec_issue_id} status transition failed (transport) — status not applied"
+        reconcile::promote_exit 1
+    fi
 
     # --- Task-phase sub-issues ----------------------------------------
     local phase_map
@@ -1606,6 +1623,15 @@ reconcile::process_spec() {
                 updated) summary::add updated "spec ${feature_number}: Subtask" ;;
                 skipped) summary::add skipped "spec ${feature_number}: Subtask unchanged" ;;
                 created) summary::add created "spec ${feature_number}: Subtask" ;;
+                failed)
+                    # A phase Subtask create/update failed at the transport: the
+                    # phase is un-mirrored. Surface it (US5 observable failure;
+                    # FR-015, Principle VIII) and promote the exit — the sink
+                    # continued the other phases, so this is a partial failure,
+                    # not a fail-closed read (≥1, not 3).
+                    summary::add error "spec ${feature_number}: a task-phase Subtask did not mirror (write failed) — Jira may be incomplete"
+                    reconcile::promote_exit 1
+                    ;;
             esac
         done < <(grep $'^subtask\t' "$RECONCILE_DISPOSITION_FILE" 2>/dev/null || true)
     fi
@@ -1613,22 +1639,51 @@ reconcile::process_spec() {
     # --- Cross-spec dependency links + clarify comments (US4) ----------
     # Both are driven from the cached neutral workstate item (its links[] and
     # notes[]) — the sink owns the idempotent at-most-once create so a re-run
-    # adds neither a duplicate link nor a duplicate comment (FR-007). A `|| true`
-    # keeps a per-spec link/comment failure from aborting the --all sweep; the
-    # sink already records the diagnostic and the run summary still emits.
+    # adds neither a duplicate link nor a duplicate comment (FR-007).
     # RECONCILE_WORKSTATE_ITEM is stashed by reconcile::sync_spec_issue, but that
     # helper runs inside a `$(...)` command-sub above, so its `declare -g` does
     # NOT survive into this (the process_spec) shell. Rebuild the neutral item
     # from disk when the cache is empty — the same defensive fallback the
     # sub-issue pass uses — so the US4 links/comments actually fire (the cached
     # value would otherwise be empty and the whole block silently skipped).
+    #
+    # US5 observable failure: a failed link/comment read or write must SURFACE
+    # (summary::add) AND promote the exit — NOT be swallowed by `|| true`. The
+    # old `|| true` discarded an unreadable rc 3 (or a POST failure), letting the
+    # run exit 0 after silently skipping required comments/links. We capture each
+    # rc and, on failure, add an error row + promote (3 when the failure was an
+    # unreadable read — the sink's fail-closed rc 3; otherwise ≥1 for a write/
+    # transport failure). Per-spec continuation is PRESERVED: each call is
+    # independent, and the spec is NOT aborted (FR-014/FR-015, Principle VIII).
     local _us4_item="${RECONCILE_WORKSTATE_ITEM:-}"
     if [[ -z "$_us4_item" ]]; then
         _us4_item="$(workstate::item_for_spec "$spec_dir" 2>/dev/null || true)"
     fi
     if [[ -n "$_us4_item" ]]; then
-        reconcile::sync_inter_phase_blocks "$spec_issue_id" "$_us4_item" || true
-        reconcile::sync_clarify_comments "$spec_issue_id" "$_us4_item" || true
+        local _us4_rc
+        _us4_rc=0
+        reconcile::sync_inter_phase_blocks "$spec_issue_id" "$_us4_item" || _us4_rc=$?
+        if (( _us4_rc != 0 )); then
+            if (( _us4_rc == 3 )); then
+                summary::add error "spec ${feature_number}: cross-spec links unreadable — fail-closed, links not reconciled (Jira may be incomplete)"
+                reconcile::promote_exit 3
+            else
+                summary::add error "spec ${feature_number}: cross-spec link write failed — a dependency link was not created (Jira may be incomplete)"
+                reconcile::promote_exit 1
+            fi
+        fi
+
+        _us4_rc=0
+        reconcile::sync_clarify_comments "$spec_issue_id" "$_us4_item" || _us4_rc=$?
+        if (( _us4_rc != 0 )); then
+            if (( _us4_rc == 3 )); then
+                summary::add error "spec ${feature_number}: clarify comments unreadable — fail-closed, comments not reconciled (Jira may be incomplete)"
+                reconcile::promote_exit 3
+            else
+                summary::add error "spec ${feature_number}: clarify comment write failed — a note was not mirrored (Jira may be incomplete)"
+                reconcile::promote_exit 1
+            fi
+        fi
     fi
 
     # --- Record lifecycle for the Project Status aggregate ------------

@@ -247,12 +247,88 @@ us5::register_writes_ok() {
   [[ "$emitted" == *"Jira unreadable"* ]]
 }
 
-# --- DEFERRED observability placeholders (visible coverage gap) ---------------
+# --- (5) Transition transport failure → warned row + exit promoted ------------
 
-@test "transition transport failure is surfaced as an error (DEFERRED)" {
-  skip "US5-impl: observability P2 (review-debt.md)"
+@test "transition transport failure is surfaced (warned row + exit promoted)" {
+  cd "$WORKDIR"
+
+  # Fresh mirror: every READ is ABSENT so the Story is CREATEd, then its status
+  # transition POSTs. The sample spec resolves to `implementing`, which the
+  # config pins to explicit transition id 30004 → transition_issue POSTs the
+  # transition DIRECTLY (no GET resolution). We make THAT POST fail (500): a real
+  # transport failure, NOT the benign "no transition available" rc-0 case. The
+  # Story create itself succeeds (so the spec is still mirrored).
+  jira_shim::set_response GET "*/search/jql*" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/search_absent.json" 200
+  jira_shim::set_response POST "*/rest/api/3/issue" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 201
+  jira_shim::set_response PUT "*/issue/*" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 204
+  # The transition POST fails at the transport (500 → jira_rest rc 5 → rc 1).
+  jira_shim::set_response POST "*/issue/*/transitions" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/error_401.json" 500
+
+  summary::start "us5 transition-fail"
+  reconcile::process_spec "specs/001-sample"
+
+  # The transition transport failure is surfaced as a WARNED row naming the spec
+  # + the transition (not just a stderr log), and the run exit is promoted (≥1).
+  run summary::count warned
+  [ "$output" -ge 1 ]
+
+  local emitted
+  emitted="$(summary::emit 2>&1)"
+  [[ "$emitted" == *"spec 001"* ]]
+  [[ "$emitted" == *"transition failed"* ]]
+
+  # The Story was still created (the spec is mirrored; warn, don't fail closed),
+  # and the run exit was promoted to a non-zero warning code.
+  run summary::count created
+  [ "$output" -ge 1 ]
+  [ "$RECONCILE_EXIT_CODE" -ge 1 ]
 }
 
-@test "failed Subtask create is surfaced as an error (DEFERRED)" {
-  skip "US5-impl: observability P2 (review-debt.md)"
+# --- (6) Failed Subtask create → error row + exit promoted --------------------
+
+@test "failed Subtask create is surfaced as an error (error row + exit promoted)" {
+  cd "$WORKDIR"
+
+  # Fresh mirror: reads ABSENT so the Epic + Story CREATE, the Story status
+  # transition succeeds, but the FIRST task-phase Subtask CREATE fails at the
+  # transport. Story and Subtask creates share `POST /rest/api/3/issue`, so we
+  # QUEUE one-shot answers in order: the Epic create (POST /issue) succeeds, the
+  # Story create (POST /issue) succeeds, then the next POST /issue (the first
+  # Subtask) fails (500). A standing fallback covers any further creates.
+  jira_shim::set_response GET "*/search/jql*" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/search_absent.json" 200
+  jira_shim::set_response POST "*/issue/*/transitions" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 204
+  jira_shim::set_response PUT "*/issue/*" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 204
+
+  # Ordered POST /issue answers: Epic OK, Story OK, first Subtask FAILS (500).
+  jira_shim::push_response POST "*/rest/api/3/issue" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 201
+  jira_shim::push_response POST "*/rest/api/3/issue" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 201
+  jira_shim::push_response POST "*/rest/api/3/issue" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/error_401.json" 500
+  # Standing fallback for any remaining phase creates (succeed).
+  jira_shim::set_response POST "*/rest/api/3/issue" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 201
+
+  summary::start "us5 subtask-fail"
+  reconcile::process_spec "specs/001-sample"
+
+  # The un-mirrored phase is surfaced as an ERROR row (no silent success), and
+  # the run exit is promoted (partial failure → ≥1, not the fail-closed 3).
+  run summary::count error
+  [ "$output" -ge 1 ]
+
+  local emitted
+  emitted="$(summary::emit 2>&1)"
+  [[ "$emitted" == *"spec 001"* ]]
+  [[ "$emitted" == *"Subtask"* ]]
+
+  [ "$RECONCILE_EXIT_CODE" -ge 1 ]
 }
