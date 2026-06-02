@@ -26,7 +26,7 @@ sibling `~/Code/AI/speckit-linear/src/` with an origin-noting header (PLAN.md §
 
 ## Phase 1: Setup
 
-- [ ] T001 Create source/test skeleton: `src/`, `tests/unit/`, `tests/integration/`, `tests/helpers/`, `tests/fixtures/{specs,workstate,jira_responses}/` at repo root
+- [x] T001 Create source/test skeleton: `src/`, `tests/unit/`, `tests/integration/`, `tests/helpers/`, `tests/fixtures/{specs,workstate,jira_responses}/` at repo root
 - [ ] T002 [P] Add a CI-parity runner `scripts/check.sh` (shellcheck `--severity=style`, yamllint `-d relaxed`, markdownlint-cli2, bats) mirroring `.github/workflows/ci.yml`
 
 ---
@@ -35,23 +35,23 @@ sibling `~/Code/AI/speckit-linear/src/` with an origin-noting header (PLAN.md §
 
 **Engine copy (unchanged, origin-headed — PLAN.md §3):**
 
-- [ ] T003 [P] Copy `~/Code/AI/speckit-linear/src/git_helpers.sh` → `src/git_helpers.sh` with an origin header (`# ORIGIN: copied unchanged from spec-kit-linear/src/git_helpers.sh @ <sha> — shared engine, pending extraction`)
-- [ ] T004 [P] Copy `~/Code/AI/speckit-linear/src/summary.sh` → `src/summary.sh` with the same origin header
-- [ ] T005 [P] Copy `~/Code/AI/speckit-linear/src/parser.sh` → `src/parser.sh` with origin header (reused reader; adapted to emit workstate in T007)
-- [ ] T006 Extract + copy the ENGINE half of `~/Code/AI/speckit-linear/src/reconcile.sh` → `src/reconcile.sh` with origin header — keep `compute_drift`, `_phase_ordinal`, `_drift_verdict_field`, `_drift_disposition`, `_drift_prompt`, recency gate, lifecycle aggregation, `promote_exit`, arg/spec enumeration; replace every writer call with a sourced sink-interface call (stub for now)
+- [x] T003 [P] Copy `~/Code/AI/speckit-linear/src/git_helpers.sh` → `src/git_helpers.sh` with an origin header (`# ORIGIN: copied unchanged from spec-kit-linear/src/git_helpers.sh @ <sha> — shared engine, pending extraction`)
+- [x] T004 [P] Copy `~/Code/AI/speckit-linear/src/summary.sh` → `src/summary.sh` with the same origin header
+- [x] T005 [P] Copy `~/Code/AI/speckit-linear/src/parser.sh` → `src/parser.sh` with origin header (reused reader; adapted to emit workstate in T007)
+- [x] T006 Extract + copy the ENGINE half of `~/Code/AI/speckit-linear/src/reconcile.sh` → `src/reconcile.sh` with origin header — keep `compute_drift`, `_phase_ordinal`, `_drift_verdict_field`, `_drift_disposition`, `_drift_prompt`, recency gate, lifecycle aggregation, `promote_exit`, arg/spec enumeration; replace every writer call with a sourced sink-interface call (stub for now)
 
 **Adapted config + workstate contract:**
 
-- [ ] T007 Implement `src/workstate.sh` — build schema-valid `workstate` items from `src/parser.sh` output (spec→item kind=spec, phase→children kind=task, tasks under `children[].extensions.tasks`); jq structural checks per `contracts/workstate.md`
-- [ ] T008 Adapt `src/config.sh` to load/validate the gitignored `.specify/extensions/jira/jira-config.yml` per `data-model.md` §2 (project key, issue-type ids, `phase_status` map, label prefixes); a missing/invalid binding is a project-level config error (exit 2)
-- [ ] T009 [P] Add the workstate schema-validation test gate `tests/unit/workstate_schema.bats` (validate emitted fixtures against `~/Code/AI/workstate-schema/schema/workstate.schema.json` via `python3 -m jsonschema`)
+- [x] T007 Implement `src/workstate.sh` — build schema-valid `workstate` items from `src/parser.sh` output (spec→item kind=spec, phase→children kind=task, tasks under `children[].extensions.tasks`); jq structural checks per `contracts/workstate.md`
+- [x] T008 Adapt `src/config.sh` to load/validate the gitignored `.specify/extensions/jira/jira-config.yml` per `data-model.md` §2 (project key, issue-type ids, `phase_status` map, label prefixes); a missing/invalid binding is a project-level config error (exit 2)
+- [x] T009 [P] Add the workstate schema-validation test gate `tests/unit/workstate_schema.bats` (validate emitted fixtures against `~/Code/AI/workstate-schema/schema/workstate.schema.json` via `python3 -m jsonschema`)
 
 **Sink infrastructure (REST client, ADF, mock):**
 
-- [ ] T010 Implement `src/jira_rest.sh` — thin curl+jq client: Basic auth from `.env`, `GET/POST/PUT`, JQL search; fail-closed read returns rc 3; per `contracts/jira-rest.md`
-- [ ] T011 [P] Implement `src/adf.sh` — minimal Markdown→ADF (paragraphs, headings, bullet/ordered lists, `taskList`, code, links) + body truncation
-- [ ] T012 Build the curl-shim test harness `tests/helpers/jira-shim.bash` — shadow `curl`, return fixture JSON keyed by method+URL, record requests for assertions (mirrors sibling; research D10)
-- [ ] T013 [P] Seed base fixtures in `tests/fixtures/jira_responses/` (`myself_ok.json`, `search_absent.json`, `issue_create_ok.json`, `transitions.json`, `401.json`, `429.json`) and `tests/fixtures/specs/` (a placeholder multi-phase spec)
+- [x] T010 Implement `src/jira_rest.sh` — thin curl+jq client: Basic auth from `.env`, `GET/POST/PUT`, JQL search; fail-closed read returns rc 3; per `contracts/jira-rest.md`
+- [x] T011 [P] Implement `src/adf.sh` — minimal Markdown→ADF (paragraphs, headings, bullet/ordered lists, `taskList`, code, links) + body truncation
+- [x] T012 Build the curl-shim test harness `tests/helpers/jira-shim.bash` — shadow `curl`, return fixture JSON keyed by method+URL, record requests for assertions (mirrors sibling; research D10)
+- [x] T013 [P] Seed base fixtures in `tests/fixtures/jira_responses/` (`myself_ok.json`, `search_absent.json`, `issue_create_ok.json`, `transitions.json`, `401.json`, `429.json`) and `tests/fixtures/specs/` (a placeholder multi-phase spec)
 
 ---
 
@@ -60,17 +60,17 @@ sibling `~/Code/AI/speckit-linear/src/` with an origin-noting header (PLAN.md §
 **Goal**: One reconcile turns a repo's specs into an Epic + Stories + per-phase Subtasks.
 **Independent test**: Run reconcile over the mock; assert an Epic, a Story per spec (correct status + labels), and a Subtask per phase with a taskList.
 
-- [ ] T014 [P] [US1] Unit test `tests/unit/epic.bats` — `ensure_repo_epic` finds existing Epic by `speckit-repo:<slug>` else creates one (curl-shim)
-- [ ] T015 [P] [US1] Unit test `tests/unit/sync_spec_issue.bats` — Story created under Epic with summary, ADF description, `speckit-spec:NNN` + `phase:*` labels, and status set via transition
-- [ ] T016 [P] [US1] Unit test `tests/unit/subtasks.bats` — `sync_task_phase_subissues` creates one Subtask per phase with an ADF `taskList` matching `tasks.md`
-- [ ] T017 [US1] Implement `mutate_issue_create` / `mutate_issue_update` in `src/jira_sink.sh` (POST/PUT `/issue`; skip update when diff is `{}`)
-- [ ] T018 [US1] Implement `config::get_status_transition` (in `src/config.sh`) + `transition_issue` (in `src/jira_sink.sh`) — resolve target status id, POST the matching transition (global-transition fast path, research D6)
-- [ ] T019 [US1] Implement `resolve_labels` in `src/jira_sink.sh` (passthrough names; auto-apply `speckit-spec:*`/`task-phase:*`/`speckit-repo:*`)
-- [ ] T020 [US1] Implement `ensure_repo_epic` in `src/jira_sink.sh` (find/create Epic by repo label; return id)
-- [ ] T021 [US1] Implement `sync_spec_issue` in `src/jira_sink.sh` (Story under Epic; description via `src/adf.sh`; labels; status via `transition_issue`)
-- [ ] T022 [US1] Implement `sync_task_phase_subissues` in `src/jira_sink.sh` (Subtasks + ADF taskList; parent linkage)
-- [ ] T023 [US1] Wire the create path in `src/reconcile.sh` orchestration (enumerate specs → workstate → ensure_repo_epic → sync_spec_issue → sync_task_phase_subissues → summary)
-- [ ] T024 [US1] Integration test `tests/integration/us1_fresh.bats` — fresh reconcile over the mock creates Epic + Stories + Subtasks; summary reports correct created counts
+- [x] T014 [P] [US1] Unit test `tests/unit/epic.bats` — `ensure_repo_epic` finds existing Epic by `speckit-repo:<slug>` else creates one (curl-shim)
+- [x] T015 [P] [US1] Unit test `tests/unit/sync_spec_issue.bats` — Story created under Epic with summary, ADF description, `speckit-spec:NNN` + `phase:*` labels, and status set via transition
+- [x] T016 [P] [US1] Unit test `tests/unit/subtasks.bats` — `sync_task_phase_subissues` creates one Subtask per phase with an ADF `taskList` matching `tasks.md`
+- [x] T017 [US1] Implement `mutate_issue_create` / `mutate_issue_update` in `src/jira_sink.sh` (POST/PUT `/issue`; skip update when diff is `{}`)
+- [x] T018 [US1] Implement `config::get_status_transition` (in `src/config.sh`) + `transition_issue` (in `src/jira_sink.sh`) — resolve target status id, POST the matching transition (global-transition fast path, research D6)
+- [x] T019 [US1] Implement `resolve_labels` in `src/jira_sink.sh` (passthrough names; auto-apply `speckit-spec:*`/`task-phase:*`/`speckit-repo:*`)
+- [x] T020 [US1] Implement `ensure_repo_epic` in `src/jira_sink.sh` (find/create Epic by repo label; return id)
+- [x] T021 [US1] Implement `sync_spec_issue` in `src/jira_sink.sh` (Story under Epic; description via `src/adf.sh`; labels; status via `transition_issue`)
+- [x] T022 [US1] Implement `sync_task_phase_subissues` in `src/jira_sink.sh` (Subtasks + ADF taskList; parent linkage)
+- [x] T023 [US1] Wire the create path in `src/reconcile.sh` orchestration (enumerate specs → workstate → ensure_repo_epic → sync_spec_issue → sync_task_phase_subissues → summary)
+- [x] T024 [US1] Integration test `tests/integration/us1_fresh.bats` — fresh reconcile over the mock creates Epic + Stories + Subtasks; summary reports correct created counts
 
 **Checkpoint**: US1 delivers the MVP — a working fresh mirror.
 
@@ -81,10 +81,10 @@ sibling `~/Code/AI/speckit-linear/src/` with an origin-noting header (PLAN.md §
 **Goal**: Re-running against unchanged input performs zero writes.
 **Independent test**: Run twice; assert the second run writes nothing and reuses the Epic.
 
-- [ ] T025 [P] [US2] Unit test `tests/unit/queries.bats` — `query_spec_issue` / `query_subissue_for_phase` / `query_existing_comment_body` JQL lookups (curl-shim)
-- [ ] T026 [US2] Implement `query_spec_issue`, `query_subissue_for_phase`, `query_existing_comment_body` in `src/jira_sink.sh` (JQL by label/parent, newest-first)
-- [ ] T027 [US2] Implement idempotent diffing in the `sync_*` paths (compute current-vs-desired; emit empty update `{}` → skip) in `src/jira_sink.sh`
-- [ ] T028 [US2] Integration test `tests/integration/us2_idempotent.bats` — second unchanged run = 0 created / 0 updated, Epic reused; a manually-edited status is corrected back to disk
+- [x] T025 [P] [US2] Unit test `tests/unit/queries.bats` — `query_spec_issue` / `query_subissue_for_phase` / `query_existing_comment_body` JQL lookups (curl-shim)
+- [x] T026 [US2] Implement `query_spec_issue`, `query_subissue_for_phase`, `query_existing_comment_body` in `src/jira_sink.sh` (JQL by label/parent, newest-first)
+- [x] T027 [US2] Implement idempotent diffing in the `sync_*` paths (compute current-vs-desired; emit empty update `{}` → skip) in `src/jira_sink.sh`
+- [x] T028 [US2] Integration test `tests/integration/us2_idempotent.bats` — second unchanged run = 0 created / 0 updated, Epic reused; a manually-edited status is corrected back to disk
 
 ---
 
@@ -93,11 +93,11 @@ sibling `~/Code/AI/speckit-linear/src/` with an origin-noting header (PLAN.md §
 **Goal**: When Jira is ahead of disk, surface a warning and honor proceed/abort; never silently clobber.
 **Independent test**: Make the mock's issue phase/recency ahead of disk; assert a drift WARNING and that `--on-drift` is honored.
 
-- [ ] T029 [P] [US3] Unit test `tests/unit/drift.bats` — `_fetch_drift_issue_json` returns status/updated/labels (rc 3 on unreadable) and feeds the engine's `compute_drift`
-- [ ] T030 [US3] Implement `_fetch_drift_issue_json` in `src/jira_sink.sh` (read-only; rc 3 when Jira unreadable — the fail-closed signal)
-- [ ] T031 [US3] Wire the engine's `compute_drift` + `_drift_disposition` + `--on-drift=proceed|abort` into `src/reconcile.sh` (per-spec, before write)
-- [ ] T032 [US3] Emit named backward-drift WARNING rows (spec, disk phase, Jira phase, firing signal) via `src/summary.sh` in `src/reconcile.sh`
-- [ ] T033 [US3] Integration test `tests/integration/us3_drift.bats` — phase-ahead drift, recency drift, and abort-leaves-Jira-unchanged
+- [x] T029 [P] [US3] Unit test `tests/unit/drift.bats` — `_fetch_drift_issue_json` returns status/updated/labels (rc 3 on unreadable) and feeds the engine's `compute_drift`
+- [x] T030 [US3] Implement `_fetch_drift_issue_json` in `src/jira_sink.sh` (read-only; rc 3 when Jira unreadable — the fail-closed signal)
+- [x] T031 [US3] Wire the engine's `compute_drift` + `_drift_disposition` + `--on-drift=proceed|abort` into `src/reconcile.sh` (per-spec, before write)
+- [x] T032 [US3] Emit named backward-drift WARNING rows (spec, disk phase, Jira phase, firing signal) via `src/summary.sh` in `src/reconcile.sh`
+- [x] T033 [US3] Integration test `tests/integration/us3_drift.bats` — phase-ahead drift, recency drift, and abort-leaves-Jira-unchanged
 
 ---
 
@@ -132,7 +132,7 @@ sibling `~/Code/AI/speckit-linear/src/` with an origin-noting header (PLAN.md §
 - [ ] T044 [P] `--dry-run` preview parity test `tests/unit/dryrun.bats` — preview reports the same actions a live run performs, writes nothing
 - [ ] T045 [P] shellcheck `--severity=style` clean across all `src/*.sh`; fix findings
 - [ ] T046 [P] Extend `tests/fixtures/` privacy review; confirm `tests/unit/no-real-identifiers.bats` stays green over new fixtures (placeholders only)
-- [ ] T047 [P] Author `config-template.yml` (committed placeholder mirror of `jira-config.yml`) and a `README.md` (placeholders only)
+- [x] T047 [P] Author `config-template.yml` (committed placeholder mirror of `jira-config.yml`) and a `README.md` (placeholders only)
 - [ ] T048 [P] Update `CHANGELOG.md` (Unreleased: core bridge — parser→workstate→jira-sink reconcile)
 - [ ] T049 Run the exact CI locally via `scripts/check.sh` (shellcheck + yamllint + markdownlint + bats unit) and fix to green before pushing
 
