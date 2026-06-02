@@ -106,11 +106,11 @@ sibling `~/Code/AI/speckit-linear/src/` with an origin-noting header (PLAN.md §
 **Goal**: Spec evolution (phase, tasks, clarifications, deps) reflects in Jira; untouched fields unchanged.
 **Independent test**: Mutate a mirrored spec on disk; assert only the changed attributes update.
 
-- [ ] T034 [P] [US4] Unit test `tests/unit/comments_links.bats` — `sync_clarify_comments` dedup by marker; `sync_inter_phase_blocks` issue links
-- [ ] T035 [US4] Implement `mutate_comment_create` + `sync_clarify_comments` (ADF body, marker-prefix dedup, at-most-once) in `src/jira_sink.sh`
-- [ ] T036 [US4] Implement `query_issue_blocks` + `sync_inter_phase_blocks` (POST `/issueLink`; reconcile, no duplicates) in `src/jira_sink.sh`
-- [ ] T037 [US4] Implement update-on-change in `src/reconcile.sh` (status transition on phase change; new Subtask on new phase; checklist refresh)
-- [ ] T038 [US4] Integration test `tests/integration/us4_updates.bats` — phase change transitions, new-phase Subtask added, clarification comment not duplicated on re-run
+- [x] T034 [P] [US4] Unit test `tests/unit/comments_links.bats` — `sync_clarify_comments` dedup by marker; `sync_inter_phase_blocks` issue links
+- [x] T035 [US4] Implement `mutate_comment_create` + `sync_clarify_comments` (ADF body, marker-prefix dedup, at-most-once) in `src/jira_sink.sh`
+- [x] T036 [US4] Implement `query_issue_blocks` + `sync_inter_phase_blocks` (POST `/issueLink`; reconcile, no duplicates) in `src/jira_sink.sh`
+- [x] T037 [US4] Implement update-on-change in `src/reconcile.sh` (status transition on phase change; new Subtask on new phase; checklist refresh)
+- [x] T038 [US4] Integration test `tests/integration/us4_updates.bats` — phase change transitions, new-phase Subtask added, clarification comment not duplicated on re-run
 
 ---
 
@@ -119,7 +119,7 @@ sibling `~/Code/AI/speckit-linear/src/` with an origin-noting header (PLAN.md §
 **Goal**: Unreadable Jira / exhausted retries → no writes, clear error, non-zero exit; every run emits a structured summary.
 **Independent test**: Simulate unreadable Jira and sustained 429; assert zero writes for the affected spec and accurate summary + exit code.
 
-- [ ] T039 [P] [US5] Unit test `tests/unit/failclosed.bats` — rc 3 read → no write + error row; 429 exhaustion → fail closed; missing `spec.md` → warning, others still mirrored
+- [x] T039 [P] [US5] Unit test `tests/unit/failclosed.bats` — rc 3 read → no write + error row; 429 exhaustion → fail closed; missing `spec.md` → warning, others still mirrored
 - [ ] T040 [US5] Implement fail-closed propagation in `src/reconcile.sh` (rc 3 from any read aborts that spec's write, records an error row, continues other specs)
 - [ ] T041 [US5] Implement bounded 429/5xx backoff (honor `Retry-After`, jittered exponential, capped, default 5 tries → fail closed) in `src/jira_rest.sh`
 - [ ] T042 [US5] Wire the structured summary + monotonic exit-code escalation (`promote_exit`: 0<1<3<2) in `src/reconcile.sh` + `src/summary.sh`
