@@ -980,61 +980,31 @@ reconcile::sync_task_phase_subissues() {
     printf '%s\n' "$phase_map"
 }
 
-# reconcile::sync_inter_phase_blocks <phase_map> <spec_dir>
-#   Wire blocking relations between task-phase sub-issues. We parse
-#   `Phase N depends on Phase M` style hints from plan.md and tasks.md.
-#   The sink owns the idempotent block-link reconcile.
+# reconcile::sync_inter_phase_blocks <spec_issue_id> <item_json>
+#   Wire cross-spec dependency links (US4). The neutral workstate item carries
+#   the dependency edges on its `links[]` (rel `depends_on`/`blocks`, target a
+#   spec id / feature number); the sink owns resolving each target to its
+#   mirrored Story and the idempotent get-links → link-delta reconcile. Driven
+#   from the item — not re-parsed from disk — so the sink stays the single
+#   contract (FR-020). A no-link item is a sink no-op.
 reconcile::sync_inter_phase_blocks() {
-    local phase_map="$1"
-    local spec_dir="$2"
+    local spec_issue_id="$1"
+    local item_json="$2"
 
-    # Read plan.md + tasks.md text and search for "Phase N depends on
-    # Phase M" patterns. Case-insensitive, tolerant of em-dash and
-    # colon separators. We emit one "<from>\t<to>" line per dep
-    # (Phase M blocks Phase N → from=M, to=N).
-    local deps
-    deps="$({
-        for f in "${spec_dir%/}/plan.md" "${spec_dir%/}/tasks.md"; do
-            [[ -f "$f" ]] || continue
-            grep -iE 'Phase[[:space:]]+[0-9]+[[:space:]]+depends[[:space:]]+on[[:space:]]+Phase[[:space:]]+[0-9]+' "$f" 2>/dev/null || true
-        done
-    } | awk '
-        {
-            match($0, /[Pp]hase[[:space:]]+[0-9]+[[:space:]]+depends[[:space:]]+on[[:space:]]+[Pp]hase[[:space:]]+[0-9]+/)
-            if (RSTART == 0) next
-            seg = substr($0, RSTART, RLENGTH)
-            n = split(seg, parts, /[^0-9]+/)
-            from = ""; to = ""
-            for (i = 1; i <= n; i++) {
-                if (parts[i] != "") {
-                    if (to == "") { to = parts[i] }
-                    else if (from == "") { from = parts[i] }
-                }
-            }
-            if (from != "" && to != "") {
-                printf "%s\t%s\n", from, to
-            }
-        }' | sort -u)"
-
-    if [[ -z "$deps" ]]; then
-        return 0
-    fi
-
-    # Hand the resolved dependency edges + phase→subissue map to the sink,
-    # which owns the idempotent get-blocks → diff → link delta.
-    sync_inter_phase_blocks "$phase_map" "$deps"
+    sync_inter_phase_blocks "$spec_issue_id" "$item_json"
 }
 
-# reconcile::sync_clarify_comments <spec_issue_id> <spec_dir>
-#   For every `### Session YYYY-MM-DD` block under ## Clarifications, post
-#   (idempotently) one comment on the spec issue with the session's Q/A
-#   bullets. Idempotency is via a leading marker; the sink owns the
-#   at-most-once create.
+# reconcile::sync_clarify_comments <spec_issue_id> <item_json>
+#   Post (idempotently) one comment per recorded clarify/decision session. The
+#   neutral workstate item carries the sessions on its `notes[]`
+#   (`{body,timestamp_iso}`); the sink derives a stable hidden marker per note so
+#   a re-run finds the existing comment and skips it (at-most-once, FR-007).
+#   Driven from the item — the sink owns the at-most-once create.
 reconcile::sync_clarify_comments() {
     local spec_issue_id="$1"
-    local spec_dir="$2"
+    local item_json="$2"
 
-    sync_clarify_comments "$spec_issue_id" "$spec_dir"
+    sync_clarify_comments "$spec_issue_id" "$item_json"
 }
 
 # =============================================================================
@@ -1640,13 +1610,17 @@ reconcile::process_spec() {
         done < <(grep $'^subtask\t' "$RECONCILE_DISPOSITION_FILE" 2>/dev/null || true)
     fi
 
-    # --- Inter-phase blocking relations -------------------------------
-    if [[ -n "${phase_map:-}" && "$phase_map" != "{}" ]]; then
-        reconcile::sync_inter_phase_blocks "$phase_map" "$spec_dir" || true
+    # --- Cross-spec dependency links + clarify comments (US4) ----------
+    # Both are driven from the cached neutral workstate item (its links[] and
+    # notes[]) — the sink owns the idempotent at-most-once create so a re-run
+    # adds neither a duplicate link nor a duplicate comment (FR-007). A `|| true`
+    # keeps a per-spec link/comment failure from aborting the --all sweep; the
+    # sink already records the diagnostic and the run summary still emits.
+    local _us4_item="${RECONCILE_WORKSTATE_ITEM:-}"
+    if [[ -n "$_us4_item" ]]; then
+        reconcile::sync_inter_phase_blocks "$spec_issue_id" "$_us4_item" || true
+        reconcile::sync_clarify_comments "$spec_issue_id" "$_us4_item" || true
     fi
-
-    # --- Clarify session comments -------------------------------------
-    reconcile::sync_clarify_comments "$spec_issue_id" "$spec_dir" || true
 
     # --- Record lifecycle for the Project Status aggregate ------------
     # A drift `abort` returns before this point, so an operator-skipped spec

@@ -55,20 +55,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/adf.sh"
 # config::* getters it calls fail closed if config was never loaded.
 
 # -----------------------------------------------------------------------------
-# Stub helpers (still used by the US4 functions left as stubs)
+# Helpers
 # -----------------------------------------------------------------------------
-
-# jira_sink::_unimplemented <fn>
-#   Common diagnostic for an unimplemented WRITE. Logs to stderr (never
-#   stdout — stdout is reserved for the id/JSON the engine reads on success)
-#   and returns rc 1 (a clear non-zero, distinct from the read fail-closed
-#   rc 3). Under DRY_RUN the caller short-circuits to a no-op success BEFORE
-#   reaching here, so this only fires on a real (non-dry-run) write attempt.
-jira_sink::_unimplemented() {
-    local fn="${1:-jira_sink}"
-    printf 'spec-kit-jira: sink: %s not implemented (US4)\n' "$fn" >&2
-    return 1
-}
 
 # jira_sink::_dry_run
 #   Return 0 iff the engine is in --dry-run mode. Reads DRY_RUN (the sink's
@@ -211,18 +199,72 @@ query_issue_full() {
     return 0
 }
 
-# query_issue_blocks <issue_id>  — US4 stub (issue links).
-#   Returns a JSON array of linked issue ids. Left fail-closed until US4 so the
-#   block-link reconcile is never driven from an unimplemented read.
+# query_issue_blocks <issue_key>
+#   GET the Story's issuelinks and echo the SET of already-linked target issue
+#   KEYS as a JSON array (both inward and outward neighbours — a link's presence
+#   is symmetric for idempotency purposes). rc 3 on an unreadable read; rc 0 +
+#   `[]` when the issue has no links. The block-link reconcile reads this to skip
+#   a POST whose target is already linked (FR-007: at-most-once).
+#
+#   Reads /issue/<key>?fields=issuelinks. Each issuelink carries either an
+#   `outwardIssue` or an `inwardIssue` object with a `.key`; we collect both
+#   directions so a link created from either side is recognised on re-run.
 query_issue_blocks() {
-    printf 'spec-kit-jira: sink: query_issue_blocks not implemented (US4) — failing closed (rc 3)\n' >&2
-    return 3
+    local key="${1:-}"
+    local raw rc
+    if raw="$(jira_rest::get "issue/${key}?fields=issuelinks" 2>/dev/null)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    if (( rc != 0 )); then
+        return 3
+    fi
+    local targets
+    if ! targets="$(printf '%s' "$raw" | jq -ce '
+        [ (.fields.issuelinks // [])[]
+          | (.outwardIssue.key // empty), (.inwardIssue.key // empty) ]
+        | unique
+    ' 2>/dev/null)"; then
+        return 3
+    fi
+    printf '%s\n' "$targets"
+    return 0
 }
 
-# query_existing_comment_body <issue_id> <marker>  — US4 stub (comments).
+# query_existing_comment_body <issue_key> <marker>
+#   GET the issue's comments and echo the FIRST comment whose rendered body text
+#   contains the stable hidden <marker> (the dedup probe for FR-007 at-most-once
+#   comment posting), else EMPTY. rc 3 on an unreadable read; rc 0 + empty when
+#   no comment carries the marker.
+#
+#   Reads /issue/<key>/comment. A comment body is ADF JSON; we stringify the
+#   whole body and test for the marker substring, so the marker survives whatever
+#   ADF node it was embedded in (we embed it as a trailing paragraph text run).
 query_existing_comment_body() {
-    printf 'spec-kit-jira: sink: query_existing_comment_body not implemented (US4) — failing closed (rc 3)\n' >&2
-    return 3
+    local key="${1:-}" marker="${2:-}"
+    local raw rc
+    if raw="$(jira_rest::get "issue/${key}/comment" 2>/dev/null)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    if (( rc != 0 )); then
+        return 3
+    fi
+    # Find the first comment whose ADF body, flattened to a JSON string, contains
+    # the marker. Echo that comment's {id,body}; empty (rc 0) when none match.
+    local hit
+    if ! hit="$(printf '%s' "$raw" | jq -c --arg m "$marker" '
+        [ (.comments // [])[]
+          | select((.body | tostring) | contains($m)) ]
+        | (.[0] // empty)
+    ' 2>/dev/null)"; then
+        return 3
+    fi
+    [[ -n "$hit" && "$hit" != "null" ]] || { printf ''; return 0; }
+    printf '%s\n' "$hit"
+    return 0
 }
 
 # _fetch_drift_issue_json <feature_number>
@@ -381,14 +423,33 @@ mutate_issue_update() {
     return 0
 }
 
-# mutate_comment_create <issue_id> <body_adf>  — US4 stub (comments).
+# mutate_comment_create <issue_key> <body_adf>
+#   POST /issue/<key>/comment with `{body: <ADF doc>}`; echo `{id}` of the
+#   created comment. Under DRY_RUN, log + synthesize a stable placeholder. The
+#   caller (sync_clarify_comments) has already proven the comment is absent via
+#   query_existing_comment_body, so this only fires for a genuinely new note.
 mutate_comment_create() {
+    local key="${1:-}" body_adf="${2:-}"
     if jira_sink::_dry_run; then
-        jira_sink::_log "DRY-RUN mutate_comment_create (no-op)"
+        jira_sink::_log "DRY-RUN mutate_comment_create ${key} (no-op)"
         printf '{"id":"dry-run-comment-id"}\n'
         return 0
     fi
-    jira_sink::_unimplemented mutate_comment_create
+    # Wrap the ADF body in the comment payload `{body: <doc>}` (Jira REST v3).
+    local payload
+    payload="$(jq -cn --argjson b "$body_adf" '{body: $b}' 2>/dev/null)" || {
+        jira_sink::_log "mutate_comment_create: malformed ADF body for ${key}"
+        return 1
+    }
+    local resp
+    if ! resp="$(jira_rest::post "issue/${key}/comment" "$payload")"; then
+        jira_sink::_log "mutate_comment_create: POST /issue/${key}/comment failed (rc $?)"
+        return 1
+    fi
+    printf '%s' "$resp" | jq -c '{id: .id}' 2>/dev/null || {
+        jira_sink::_log "mutate_comment_create: malformed comment response"
+        return 1
+    }
 }
 
 # transition_issue <key> <target_status_id>
@@ -814,22 +875,198 @@ sync_task_phase_subissues() {
     printf '%s\n' "$map"
 }
 
-# sync_inter_phase_blocks <phase_map> <deps>  — US4 stub (issue links).
-sync_inter_phase_blocks() {
-    if jira_sink::_dry_run; then
-        jira_sink::_log "DRY-RUN sync_inter_phase_blocks (no-op)"
-        return 0
-    fi
-    jira_sink::_unimplemented sync_inter_phase_blocks
+# =============================================================================
+# US4 marker scheme (FR-007 — at-most-once comments + idempotent links).
+#
+# A clarify/decision NOTE is mirrored as ONE comment carrying a stable HIDDEN
+# marker derived from the note's content (timestamp + body). On re-run,
+# query_existing_comment_body finds the marker and the note is SKIPPED — so a
+# note appears at most once regardless of how often reconcile runs. The marker
+# is a short, opaque hash so it neither leaks PII nor changes between runs for an
+# unchanged note.
+#
+# A cross-spec LINK is idempotent structurally: query_issue_blocks reports the
+# already-linked target keys, and sync_inter_phase_blocks POSTs /issueLink ONLY
+# for a target not already present — so a re-run adds nothing.
+# =============================================================================
+
+# jira_sink::_note_marker <note_json>
+#   Echo the stable hidden marker for a workstate note `{body,timestamp_iso}`.
+#   Derived from timestamp_iso + body via a content hash so it is identical
+#   across runs for an unchanged note and distinct for a different one. Shape:
+#   `[speckit-note:<12-hex>]` — embedded as a trailing text run in the comment
+#   ADF so query_existing_comment_body can substring-match it.
+jira_sink::_note_marker() {
+    local note_json="${1:-}"
+    local digest
+    # Hash the (timestamp_iso \n body) tuple. cksum is POSIX and dependency-free;
+    # we fold it to a short hex token. The exact algorithm is irrelevant — only
+    # stability (same input → same token) and low collision risk matter here.
+    digest="$(printf '%s' "$note_json" \
+        | jq -r '((.timestamp_iso // "") + "\n" + (.body // ""))' 2>/dev/null \
+        | cksum | awk '{ printf "%08x%04x", $1, ($2 % 65536) }')"
+    printf '[speckit-note:%s]' "$digest"
 }
 
-# sync_clarify_comments <story_id> <spec_dir>  — US4 stub (comments).
+# sync_clarify_comments <story_key> <item_json>
+#   For each workstate note on the spec item, post ONE comment idempotently:
+#     1. Compute the note's stable hidden marker.
+#     2. query_existing_comment_body(story, marker) — PRESENT → SKIP (the note
+#        was already mirrored on a prior run; at-most-once, FR-007).
+#     3. ABSENT → render the note body (Markdown→ADF), append the hidden marker
+#        as a trailing paragraph, and mutate_comment_create.
+#   An unreadable comment read (rc 3) fails closed for the whole call (we cannot
+#   prove a note is absent, so posting could duplicate it). A note with an empty
+#   body is skipped. Returns 0 on success; rc 3 fails closed.
 sync_clarify_comments() {
-    if jira_sink::_dry_run; then
-        jira_sink::_log "DRY-RUN sync_clarify_comments (no-op)"
-        return 0
+    local story_key="${1:-}" item_json="${2:-}"
+
+    local notes_count i
+    notes_count="$(printf '%s' "$item_json" | jq -r '(.notes // []) | length' 2>/dev/null || printf '0')"
+    [[ "$notes_count" =~ ^[0-9]+$ ]] || notes_count=0
+
+    for (( i = 0; i < notes_count; i++ )); do
+        local note note_body marker
+        note="$(printf '%s' "$item_json" | jq -c --argjson n "$i" '.notes[$n]' 2>/dev/null)"
+        note_body="$(printf '%s' "$note" | jq -r '.body // ""' 2>/dev/null || printf '')"
+        # Skip an empty-bodied note (nothing to mirror).
+        [[ -n "$note_body" ]] || continue
+
+        marker="$(jira_sink::_note_marker "$note")"
+
+        # Idempotency probe. rc 3 (unreadable) fails closed — we cannot prove the
+        # comment is absent, so a blind post could duplicate it.
+        local existing
+        if ! existing="$(query_existing_comment_body "$story_key" "$marker")"; then
+            jira_sink::_log "sync_clarify_comments: comment read for ${story_key} unreadable; failing closed (rc 3)"
+            return 3
+        fi
+        if [[ -n "$existing" ]]; then
+            # Already mirrored — at-most-once: skip.
+            continue
+        fi
+
+        # Render the note body to ADF and append the hidden marker as a trailing
+        # paragraph so a future run finds it. The marker text is opaque (a hash),
+        # carrying no PII.
+        local doc marked_doc
+        doc="$(adf::from_markdown "$note_body")"
+        marked_doc="$(jq -cn --argjson d "$doc" --arg m "$marker" '
+            .version = $d.version
+            | .type = $d.type
+            | .content = ($d.content + [
+                {type:"paragraph", content:[{type:"text", text:$m}]}
+              ])
+        ' 2>/dev/null)" || marked_doc="$doc"
+
+        if ! mutate_comment_create "$story_key" "$marked_doc" >/dev/null; then
+            jira_sink::_log "sync_clarify_comments: comment create for ${story_key} failed"
+            return 1
+        fi
+    done
+    return 0
+}
+
+# sync_inter_phase_blocks <story_key> <item_json>
+#   For each cross-spec dependency link on the spec item (rel `depends_on` or
+#   `blocks`) whose target resolves to a mirrored spec Story, POST /issueLink —
+#   but ONLY when that target is not already linked. query_issue_blocks reports
+#   the Story's current link set first, so a re-run adds nothing (FR-007).
+#
+#   A link's `target` is a feature number (or a spec id `NNN-<slug>`); we resolve
+#   it to the mirrored Story's key via query_spec_issue(speckit-spec:NNN). A
+#   target that is NOT mirrored yet is skipped (nothing to link to). An
+#   unreadable link/resolve read (rc 3) fails closed for the whole call.
+#
+#   The issuelink `type` name maps the rel: `blocks`/`depends_on` → "Blocks".
+#   `inwardIssue`/`outwardIssue` are assigned so the edge direction matches the
+#   rel: depends_on(story→target) means TARGET blocks STORY.
+sync_inter_phase_blocks() {
+    local story_key="${1:-}" item_json="${2:-}"
+
+    local links_count i
+    links_count="$(printf '%s' "$item_json" | jq -r '(.links // []) | length' 2>/dev/null || printf '0')"
+    [[ "$links_count" =~ ^[0-9]+$ ]] || links_count=0
+    (( links_count > 0 )) || return 0
+
+    local project spec_prefix link_type
+    project="$(config::get project_key)"
+    spec_prefix="$(config::get labels.spec_prefix)"
+    # The Jira issue-link type name. Configurable; defaults to the built-in
+    # "Blocks" type every Jira site ships.
+    link_type="$(config::get links.block_type 2>/dev/null || true)"
+    [[ -n "$link_type" ]] || link_type="Blocks"
+
+    # Read the Story's existing link set ONCE (idempotency baseline). rc 3 fails
+    # closed — we cannot prove a target is unlinked, so a blind POST could
+    # duplicate the link.
+    local existing_targets
+    if ! existing_targets="$(query_issue_blocks "$story_key")"; then
+        jira_sink::_log "sync_inter_phase_blocks: link read for ${story_key} unreadable; failing closed (rc 3)"
+        return 3
     fi
-    jira_sink::_unimplemented sync_clarify_comments
+
+    for (( i = 0; i < links_count; i++ )); do
+        local link rel target
+        link="$(printf '%s' "$item_json" | jq -c --argjson n "$i" '.links[$n]' 2>/dev/null)"
+        rel="$(printf '%s' "$link" | jq -r '.rel // ""' 2>/dev/null || printf '')"
+        target="$(printf '%s' "$link" | jq -r '.target // ""' 2>/dev/null || printf '')"
+        # Only dependency rels become issue links (other rels are out of scope).
+        case "$rel" in
+            depends_on|blocks) : ;;
+            *) continue ;;
+        esac
+        [[ -n "$target" ]] || continue
+
+        # Normalise the target to a feature number (the leading NNN of an id).
+        local target_num="${target%%-*}"
+        [[ "$target_num" =~ ^[0-9]+$ ]] || continue
+        local target_label="${spec_prefix}${target_num}"
+
+        # Resolve the target's mirrored Story key. rc 3 fails closed; an absent
+        # target (not yet mirrored) is skipped (nothing to link to).
+        local target_issues target_key
+        if ! target_issues="$(query_spec_issue "$target_label" "$project")"; then
+            jira_sink::_log "sync_inter_phase_blocks: target ${target_label} lookup unreadable; failing closed (rc 3)"
+            return 3
+        fi
+        target_key="$(printf '%s' "$target_issues" | jq -r '(.[0].key // "")' 2>/dev/null || printf '')"
+        if [[ -z "$target_key" || "$target_key" == "null" ]]; then
+            continue
+        fi
+
+        # Idempotency: skip when the target is already linked (either direction).
+        if printf '%s' "$existing_targets" \
+            | jq -e --arg k "$target_key" 'index($k) != null' >/dev/null 2>&1; then
+            continue
+        fi
+
+        # Edge direction: depends_on(story→target) ⇒ target Blocks story, so
+        # inwardIssue=story, outwardIssue=target. `blocks` is the reverse.
+        local inward outward
+        if [[ "$rel" == "blocks" ]]; then
+            inward="$target_key"; outward="$story_key"
+        else
+            inward="$story_key"; outward="$target_key"
+        fi
+
+        if jira_sink::_dry_run; then
+            jira_sink::_log "DRY-RUN sync_inter_phase_blocks ${outward} ${link_type} ${inward} (no-op)"
+            continue
+        fi
+
+        local payload
+        payload="$(jq -cn \
+            --arg type "$link_type" \
+            --arg inward "$inward" \
+            --arg outward "$outward" \
+            '{type:{name:$type}, inwardIssue:{key:$inward}, outwardIssue:{key:$outward}}')"
+        if ! jira_rest::post "issueLink" "$payload" >/dev/null; then
+            jira_sink::_log "sync_inter_phase_blocks: POST /issueLink (${outward}→${inward}) failed (rc $?)"
+            return 1
+        fi
+    done
+    return 0
 }
 
 # =============================================================================
