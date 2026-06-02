@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 420" role="img" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <title>spec-kit to Jira mapping</title>
+  <desc>Default mapping from the neutral workstate structure (repo, spec, task phase, tasks) to the Jira issue hierarchy (Epic contains Story contains Subtask holding an ADF checklist).</desc>
+
+  <defs>
+    <filter id="ds" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" flood-color="#1f2328" flood-opacity="0.14"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#8c959f"/>
+    </marker>
+  </defs>
+
+  <!-- canvas -->
+  <rect x="0.5" y="0.5" width="859" height="419" rx="16" fill="#ffffff" stroke="#d0d7de"/>
+
+  <!-- ================= COLUMN LANES ================= -->
+  <rect x="40" y="64" width="300" height="312" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-dasharray="4 3"/>
+  <rect x="500" y="64" width="320" height="312" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-dasharray="4 3"/>
+
+  <!-- column headers -->
+  <text x="56" y="50" font-size="10" fill="#57606a" letter-spacing="0.5">WORKSTATE (NEUTRAL)</text>
+  <text x="516" y="50" font-size="10" fill="#57606a" letter-spacing="0.5">JIRA</text>
+
+  <!-- ================= LEFT: workstate nested stack ================= -->
+  <!-- repo -->
+  <g>
+    <rect x="64" y="92" width="252" height="56" rx="12" fill="#ffffff" stroke="#0d9488" stroke-width="1.6" filter="url(#ds)"/>
+    <text x="82" y="118" font-size="13" font-weight="600" fill="#1f2328">repo</text>
+    <text x="82" y="135" font-size="11" fill="#57606a">spec-kit project root</text>
+  </g>
+  <!-- spec -->
+  <g>
+    <rect x="64" y="160" width="252" height="56" rx="12" fill="#ffffff" stroke="#0d9488" stroke-width="1.6" filter="url(#ds)"/>
+    <text x="82" y="186" font-size="13" font-weight="600" fill="#1f2328">spec</text>
+    <text x="82" y="203" font-size="11" fill="#57606a">specs/NNN-feature</text>
+  </g>
+  <!-- task phase -->
+  <g>
+    <rect x="64" y="228" width="252" height="56" rx="12" fill="#ffffff" stroke="#0d9488" stroke-width="1.6" filter="url(#ds)"/>
+    <text x="82" y="254" font-size="13" font-weight="600" fill="#1f2328">task phase</text>
+    <text x="82" y="271" font-size="11" fill="#57606a">grouped from tasks.md</text>
+  </g>
+  <!-- tasks[] -->
+  <g>
+    <rect x="64" y="296" width="252" height="56" rx="12" fill="#ffffff" stroke="#0d9488" stroke-width="1.6" filter="url(#ds)"/>
+    <text x="82" y="322" font-size="13" font-weight="600" fill="#1f2328">tasks[]</text>
+    <text x="82" y="339" font-size="11" fill="#57606a">individual task items</text>
+  </g>
+
+  <!-- ================= RIGHT: Jira containment hierarchy ================= -->
+  <!-- Epic (outer) -->
+  <rect x="524" y="84" width="272" height="280" rx="12" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.6" filter="url(#ds)"/>
+  <text x="540" y="106" font-size="13" font-weight="600" fill="#1f2328">Epic</text>
+  <text x="540" y="122" font-size="11" fill="#57606a">repo-level container</text>
+
+  <!-- Story (nested in Epic) -->
+  <rect x="540" y="132" width="240" height="220" rx="12" fill="#fbfcfd" stroke="#22a559" stroke-width="1.6"/>
+  <text x="556" y="154" font-size="13" font-weight="600" fill="#1f2328">Story</text>
+  <text x="556" y="170" font-size="11" fill="#57606a">one per spec</text>
+
+  <!-- Subtask (nested in Story) -->
+  <rect x="556" y="180" width="208" height="160" rx="12" fill="#fbfcfd" stroke="#2f81f7" stroke-width="1.6"/>
+  <text x="572" y="202" font-size="13" font-weight="600" fill="#1f2328">Subtask</text>
+  <text x="572" y="218" font-size="11" fill="#57606a">one per task phase</text>
+
+  <!-- ADF checklist (nested in Subtask) -->
+  <rect x="572" y="228" width="176" height="100" rx="12" fill="#fbfcfd" stroke="#6e7781" stroke-width="1.6"/>
+  <text x="586" y="248" font-size="11" font-weight="600" fill="#1f2328">ADF checklist</text>
+
+  <!-- checklist row 1: checked -->
+  <rect x="586" y="258" width="11" height="11" rx="3" fill="#22a559"/>
+  <path d="M588.5,263.5 L590.5,265.5 L594.5,261" fill="none" stroke="#ffffff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="604" y="267" font-size="11" fill="#57606a">T001 parse specs</text>
+
+  <!-- checklist row 2: checked -->
+  <rect x="586" y="276" width="11" height="11" rx="3" fill="#22a559"/>
+  <path d="M588.5,281.5 L590.5,283.5 L594.5,279" fill="none" stroke="#ffffff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="604" y="285" font-size="11" fill="#57606a">T002 emit workstate</text>
+
+  <!-- checklist row 3: unchecked -->
+  <rect x="586.5" y="294.5" width="10" height="10" rx="3" fill="#ffffff" stroke="#6e7781" stroke-width="1.2"/>
+  <text x="604" y="303" font-size="11" fill="#57606a">T003 reconcile sink</text>
+
+  <!-- ================= MAPPING ARROWS (left -> right) ================= -->
+  <g stroke="#8c959f" stroke-width="1.8" fill="none">
+    <line x1="316" y1="120" x2="522" y2="98" marker-end="url(#arrow)"/>
+    <line x1="316" y1="188" x2="538" y2="146" marker-end="url(#arrow)"/>
+    <line x1="316" y1="256" x2="554" y2="194" marker-end="url(#arrow)"/>
+    <line x1="316" y1="324" x2="570" y2="276" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- arrow labels on white pills -->
+  <g>
+    <rect x="378" y="98" width="86" height="18" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+    <text x="421" y="111" text-anchor="middle" font-size="11" fill="#57606a">repo &#8594; Epic</text>
+
+    <rect x="376" y="156" width="90" height="18" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+    <text x="421" y="169" text-anchor="middle" font-size="11" fill="#57606a">spec &#8594; Story</text>
+
+    <rect x="362" y="214" width="118" height="18" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+    <text x="421" y="227" text-anchor="middle" font-size="11" fill="#57606a">task phase &#8594; Subtask</text>
+
+    <rect x="366" y="282" width="110" height="18" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+    <text x="421" y="295" text-anchor="middle" font-size="11" fill="#57606a">tasks &#8594; checklist</text>
+  </g>
+
+  <!-- ================= CAPTION ================= -->
+  <text x="430" y="398" text-anchor="middle" font-size="11" fill="#57606a">Default mapping &#8212; configurable (roadmap).</text>
+</svg>

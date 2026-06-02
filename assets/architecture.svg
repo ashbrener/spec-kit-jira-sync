@@ -1,83 +1,98 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="920" height="300" viewBox="0 0 920 300" role="img" aria-label="spec-kit-jira architecture: specs to parser to workstate to reconcile engine to jira sink to Jira REST">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 360" role="img" font-family="ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <title>spec-kit-jira architecture pipeline</title>
+  <desc>Left-to-right pipeline: spec-kit source files are read by a parser into a neutral workstate JSON contract, which the vendor-neutral reconcile engine drives into a Jira-specific sink that mirrors to Jira REST. The filesystem is the source of truth; Jira is a read-only mirror.</desc>
+
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#0d1117"/>
-      <stop offset="1" stop-color="#161b22"/>
-    </linearGradient>
-    <linearGradient id="neutral" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1f6feb"/>
-      <stop offset="1" stop-color="#1158c7"/>
-    </linearGradient>
-    <linearGradient id="sink" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2684ff"/>
-      <stop offset="1" stop-color="#0052cc"/>
-    </linearGradient>
-    <linearGradient id="fs" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#30363d"/>
-      <stop offset="1" stop-color="#21262d"/>
-    </linearGradient>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0 0L10 5L0 10z" fill="#8b949e"/>
+    <filter id="ds" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" flood-color="#1f2328" flood-opacity="0.14"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#8c959f"/>
     </marker>
   </defs>
 
-  <rect width="920" height="300" rx="14" fill="url(#bg)"/>
-  <text x="32" y="44" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="22" font-weight="700" fill="#e6edf3">spec-kit-jira</text>
-  <text x="32" y="66" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12.5" fill="#8b949e">a real sync engine — idempotent · drift-aware · fail-closed</text>
+  <!-- canvas -->
+  <rect x="0.5" y="0.5" width="979" height="359" rx="16" fill="#ffffff" stroke="#d0d7de"/>
 
-  <!-- vendor-neutral lane label -->
-  <rect x="160" y="96" width="430" height="150" rx="12" fill="none" stroke="#30363d" stroke-width="1.5" stroke-dasharray="5 4"/>
-  <text x="170" y="116" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11" fill="#58a6ff" letter-spacing="1">VENDOR-NEUTRAL ENGINE</text>
+  <!-- heading -->
+  <text x="40" y="50" font-size="17" font-weight="700" fill="#1f2328">spec-kit-jira</text>
+  <text x="40" y="70" font-size="11.5" fill="#57606a">specs in, a Jira mirror out — one neutral contract between them</text>
 
-  <!-- jira lane label -->
-  <rect x="606" y="96" width="282" height="150" rx="12" fill="none" stroke="#1f3a5f" stroke-width="1.5" stroke-dasharray="5 4"/>
-  <text x="616" y="116" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11" fill="#79c0ff" letter-spacing="1">JIRA-SPECIFIC SINK</text>
+  <!-- ===================== LANES ===================== -->
+  <!-- PRODUCER lane: parser + workstate -->
+  <rect x="176" y="120" width="296" height="150" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-dasharray="4 3"/>
+  <text x="192" y="142" font-size="10" font-weight="600" fill="#57606a" letter-spacing="0.5">PRODUCER (SPEC-KIT)</text>
 
-  <!-- boxes row -->
-  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
-    <!-- specs -->
-    <rect x="22" y="150" width="120" height="56" rx="10" fill="url(#fs)" stroke="#3d444d"/>
-    <text x="82" y="176" text-anchor="middle" font-size="13" font-weight="600" fill="#e6edf3">specs/NNN-*</text>
-    <text x="82" y="194" text-anchor="middle" font-size="10.5" fill="#8b949e">spec · plan · tasks</text>
+  <!-- THE BRIDGE lane: reconcile engine + jira-sink -->
+  <rect x="492" y="120" width="312" height="150" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-dasharray="4 3"/>
+  <text x="508" y="142" font-size="10" font-weight="600" fill="#57606a" letter-spacing="0.5">THE BRIDGE</text>
 
-    <!-- parser -->
-    <rect x="178" y="150" width="112" height="56" rx="10" fill="url(#neutral)"/>
-    <text x="234" y="176" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">parser</text>
-    <text x="234" y="194" text-anchor="middle" font-size="10.5" fill="#cfe3ff">infer phase</text>
-
-    <!-- workstate -->
-    <rect x="320" y="150" width="118" height="56" rx="10" fill="url(#neutral)"/>
-    <text x="379" y="172" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">workstate</text>
-    <text x="379" y="190" text-anchor="middle" font-size="10.5" fill="#cfe3ff">neutral JSON</text>
-
-    <!-- engine -->
-    <rect x="468" y="150" width="112" height="56" rx="10" fill="url(#neutral)"/>
-    <text x="524" y="172" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">reconcile</text>
-    <text x="524" y="190" text-anchor="middle" font-size="10.5" fill="#cfe3ff">drift · idempotent</text>
-
-    <!-- sink -->
-    <rect x="618" y="150" width="112" height="56" rx="10" fill="url(#sink)"/>
-    <text x="674" y="172" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">jira-sink</text>
-    <text x="674" y="190" text-anchor="middle" font-size="10.5" fill="#d6e6ff">workstate→REST</text>
-
-    <!-- jira -->
-    <rect x="762" y="150" width="116" height="56" rx="10" fill="url(#sink)"/>
-    <text x="820" y="172" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">Jira REST</text>
-    <text x="820" y="190" text-anchor="middle" font-size="10.5" fill="#d6e6ff">Epic·Story·Subtask</text>
+  <!-- ===================== ARROWS ===================== -->
+  <!-- node row: y 168..222 (height 54), connector centerline y=195 -->
+  <g stroke="#8c959f" stroke-width="1.8" fill="none">
+    <line x1="160" y1="195" x2="194" y2="195" marker-end="url(#arrow)"/>
+    <line x1="320" y1="195" x2="348" y2="195" marker-end="url(#arrow)"/>
+    <line x1="474" y1="195" x2="508" y2="195" marker-end="url(#arrow)"/>
+    <line x1="636" y1="195" x2="664" y2="195" marker-end="url(#arrow)"/>
+    <line x1="790" y1="195" x2="826" y2="195" marker-end="url(#arrow)"/>
   </g>
 
-  <!-- arrows -->
-  <g stroke="#8b949e" stroke-width="2" fill="none">
-    <line x1="142" y1="178" x2="176" y2="178" marker-end="url(#arrow)"/>
-    <line x1="290" y1="178" x2="318" y2="178" marker-end="url(#arrow)"/>
-    <line x1="438" y1="178" x2="466" y2="178" marker-end="url(#arrow)"/>
-    <line x1="580" y1="178" x2="616" y2="178" marker-end="url(#arrow)"/>
-    <line x1="730" y1="178" x2="760" y2="178" marker-end="url(#arrow)"/>
+  <!-- ===================== NODES ===================== -->
+
+  <!-- 1. source : specs/NNN-*/  (x 32, w 128) accent #64748b -->
+  <g>
+    <rect x="32" y="168" width="128" height="54" rx="12" fill="#ffffff" stroke="#64748b" stroke-width="1.6" filter="url(#ds)"/>
+    <rect x="44" y="168" width="104" height="4" rx="2" fill="#64748b"/>
+    <text x="96" y="196" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">specs/NNN-*/</text>
+    <text x="96" y="212" text-anchor="middle" font-size="11" fill="#57606a">spec · plan · tasks</text>
   </g>
 
-  <!-- seam caption -->
-  <text x="598" y="238" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6e7681">the seam: one interface — swap the sink, reuse the engine</text>
+  <!-- 2. parser  (x 194, w 126) accent #7c3aed -->
+  <g>
+    <rect x="194" y="168" width="126" height="54" rx="12" fill="#ffffff" stroke="#7c3aed" stroke-width="1.6" filter="url(#ds)"/>
+    <rect x="206" y="168" width="102" height="4" rx="2" fill="#7c3aed"/>
+    <text x="257" y="196" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">parser</text>
+    <text x="257" y="212" text-anchor="middle" font-size="11" fill="#57606a">read &amp; infer</text>
+  </g>
 
-  <!-- footer trust strip -->
-  <text x="32" y="282" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11.5" fill="#7d8590">filesystem is the single source of truth · Jira is a read-only mirror · re-runnable any number of times</text>
+  <!-- 3. workstate  NEUTRAL BUS — larger + teal (x 348, w 126, taller) accent #0d9488 -->
+  <g>
+    <rect x="348" y="160" width="126" height="70" rx="12" fill="#ffffff" stroke="#0d9488" stroke-width="2" filter="url(#ds)"/>
+    <rect x="360" y="160" width="102" height="4" rx="2" fill="#0d9488"/>
+    <text x="411" y="190" text-anchor="middle" font-size="14" font-weight="600" fill="#0d9488">workstate</text>
+    <text x="411" y="207" text-anchor="middle" font-size="11" fill="#57606a">neutral JSON</text>
+    <text x="411" y="221" text-anchor="middle" font-size="11" fill="#57606a">contract</text>
+  </g>
+
+  <!-- 4. reconcile engine — vendor-neutral (x 508, w 128) accent #4f46e5 -->
+  <g>
+    <rect x="508" y="168" width="128" height="54" rx="12" fill="#ffffff" stroke="#4f46e5" stroke-width="1.6" filter="url(#ds)"/>
+    <rect x="520" y="168" width="104" height="4" rx="2" fill="#4f46e5"/>
+    <text x="572" y="194" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">reconcile engine</text>
+    <text x="572" y="210" text-anchor="middle" font-size="11" fill="#57606a">vendor-neutral</text>
+  </g>
+
+  <!-- engine differentiator badge -->
+  <rect x="508" y="234" width="128" height="20" rx="10" fill="#eef0fd" stroke="#4f46e5" stroke-opacity="0.35"/>
+  <text x="572" y="248" text-anchor="middle" font-size="9.5" font-weight="600" fill="#4f46e5">idempotent · drift-aware · fail-closed</text>
+
+  <!-- 5. jira-sink — Jira-specific (x 664, w 126) accent #0052cc -->
+  <g>
+    <rect x="664" y="168" width="126" height="54" rx="12" fill="#ffffff" stroke="#0052cc" stroke-width="1.6" filter="url(#ds)"/>
+    <rect x="676" y="168" width="102" height="4" rx="2" fill="#0052cc"/>
+    <text x="727" y="194" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">jira-sink</text>
+    <text x="727" y="210" text-anchor="middle" font-size="11" fill="#57606a">Jira-specific</text>
+  </g>
+
+  <!-- 6. Jira REST · your board  (x 826, w 122) accent #0052cc -->
+  <g>
+    <rect x="826" y="168" width="122" height="54" rx="12" fill="#ffffff" stroke="#0052cc" stroke-width="1.6" filter="url(#ds)"/>
+    <rect x="838" y="168" width="98" height="4" rx="2" fill="#0052cc"/>
+    <text x="887" y="194" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">Jira REST</text>
+    <text x="887" y="210" text-anchor="middle" font-size="11" fill="#57606a">your board</text>
+  </g>
+
+  <!-- ===================== BOTTOM CAPTION ===================== -->
+  <line x1="40" y1="312" x2="940" y2="312" stroke="#d0d7de" stroke-width="1"/>
+  <text x="490" y="333" text-anchor="middle" font-size="11" fill="#57606a">Filesystem is the source of truth — Jira is a read-only mirror.</text>
 </svg>

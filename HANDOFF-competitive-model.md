@@ -21,8 +21,8 @@ strictly dominating — their flexible model + our safe engine.
 
 ## The competitive landscape (why this matters)
 
-| Tool | Stars | State | What it actually is |
-|---|---|---|---|
+| Tool | Stars / state | What it actually is |
+|---|---|---|
 | `schpet/linear-cli` | 746, active | a CLI for humans/agents (list/create issues). NOT sync, NOT specs. Adjacent. |
 | `kovetskiy/mark` | 1470, active | markdown→Confluence. Different target. |
 | **`mbachorik/spec-kit-jira`** | **27, quiet ~2mo** | **our direct twin. 3 markdown command files + config + README. NO src/, NO tests, NO engine.** It's a PROMPT that tells an AI agent to call a Jira MCP server. "Status sync" = agent reads a checkbox and POSTs — no idempotency, no drift, no fail-closed. |
@@ -51,6 +51,7 @@ workstate was meant to enable — they've essentially designed our config file
 for us):
 
 ### 1. Configurable artifact mapping (THE big one — do not skip)
+
 Do NOT hardcode spec→Epic, phase→Story, task→sub-issue. Real Jira instances
 vary enormously (Epic Link vs native parent vs Initiative→Epic→Story). Expose:
 
@@ -64,10 +65,12 @@ mapping:
     phase_task:  "Parent"    # how a task links to its phase
     spec_task:   "Epic Link" # direct task→spec link when 2-level
 ```
+
 Relationship options to support: `Parent`, `Epic Link`, `Relates`, `Blocks`,
 `Implements`, `is child of`, `none`.
 
 ### 2. 2-level mode (collapse tasks into a checklist)
+
 When `task_artifact` is `""`/`"none"`: do NOT create individual task issues.
 Instead embed the tasks as a **checklist in the Phase/Story description**. Many
 teams don't want 40 sub-task issues cluttering the board. Our `workstate`
@@ -75,11 +78,13 @@ teams don't want 40 sub-task issues cluttering the board. Our `workstate`
 "children → sub-issues" vs "children → checklist in parent body (ADF)".
 
 ### 3. Config back-compat migration
+
 They map old config keys → new (e.g. `hierarchy.epic_type` →
 `mapping.spec_artifact`). We'll rename our config too — build in a small
 migration/alias path now so we don't break early users later.
 
 ### 4. OPTIONAL L0 narrative super-level (new, 2026-06-02 — see PROJECT-BRIEF §16)
+
 A unified 5-level model now spans both sinks: an OPTIONAL level ABOVE the spec
 for the human narrative requirement ("build a login"). The shared mapping
 grammar must allow a level above `spec`, not just remap the existing three.
