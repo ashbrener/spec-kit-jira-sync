@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="assets/architecture.svg" alt="spec-kit-jira architecture — specs to parser to workstate to reconcile engine to jira-sink to Jira REST" width="100%">
-
 # spec-kit-jira
 
 **A real sync engine that mirrors your spec-kit specs into Jira — idempotent, drift-aware, and fail-closed.**
@@ -50,8 +48,27 @@ three properties that fall out of that design are the whole pitch:
 ## How it works
 
 The pipeline is deliberately split into a **vendor-neutral engine** and a
-**Jira-specific sink**, joined by one interface (the banner above traces the
-full flow):
+**Jira-specific sink**, joined by one interface:
+
+```mermaid
+flowchart LR
+    subgraph DISK["Your repo"]
+        SPECS["specs/NNN-feature/<br/>spec.md - plan.md - tasks.md"]
+    end
+    subgraph NEUTRAL["Vendor-neutral engine"]
+        PARSER["parser.sh<br/>infer lifecycle phase"]
+        WS["workstate JSON<br/>neutral, schema-valid"]
+        ENGINE["reconcile.sh<br/>drift - recency - idempotency"]
+        PARSER --> WS --> ENGINE
+    end
+    subgraph SINK["Jira-specific sink"]
+        JSINK["jira_sink.sh<br/>workstate to REST"]
+        REST["Jira Cloud REST v3<br/>Epic - Story - Subtask"]
+        JSINK --> REST
+    end
+    SPECS --> PARSER
+    ENGINE -->|mutate_ / query_ / sync_| JSINK
+```
 
 1. **Parse.** `parser.sh` reads each `specs/NNN-feature/` directory and infers
    the lifecycle phase from which artifacts exist and what they contain — no
@@ -100,11 +117,14 @@ tracker — that is the whole point of keeping Jira specifics out of the engine.
 
 spec-kit artifacts map to Jira primitives:
 
-<div align="center">
-
-<img src="assets/mapping.svg" alt="Mapping — repo to Epic, spec to Story, task phase to Subtask, tasks to an ADF checklist inside the Subtask" width="92%">
-
-</div>
+```mermaid
+flowchart LR
+    REPO["consumer repo"] --> EPIC["Epic<br/>(1 per repo)"]
+    SPEC["spec/ NNN-feature"] --> STORY["Story<br/>(under the Epic)"]
+    PHASE["Phase N<br/>in tasks.md"] --> SUB["Subtask<br/>(of the Story)"]
+    TASKS["tasks<br/>in that phase"] --> ADF["ADF checklist<br/>(in the Subtask body)"]
+    EPIC -.-> STORY -.-> SUB -.-> ADF
+```
 
 | On disk | Jira primitive | Idempotency key |
 |---|---|---|
