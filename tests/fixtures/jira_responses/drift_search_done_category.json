@@ -1,0 +1,23 @@
+{
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 1,
+  "issues": [
+    {
+      "id": "10320",
+      "key": "PROJ-320",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10320",
+      "fields": {
+        "summary": "320 — tracker in the done category, no phase label",
+        "issuetype": { "id": "10002", "name": "Story", "subtask": false },
+        "status": {
+          "id": "20006",
+          "name": "Done",
+          "statusCategory": { "id": 3, "key": "done", "name": "Done" }
+        },
+        "labels": ["speckit-spec:320"],
+        "updated": "2026-05-26T09:31:00.000+0000"
+      }
+    }
+  ]
+}

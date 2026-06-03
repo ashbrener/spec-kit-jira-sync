@@ -1,0 +1,9 @@
+{
+  "self": "https://example.atlassian.net/rest/api/3/user?accountId=000000:00000000-0000-0000-0000-000000000000",
+  "accountId": "000000:00000000-0000-0000-0000-000000000000",
+  "accountType": "atlassian",
+  "emailAddress": "operator@example.com",
+  "displayName": "Example Operator",
+  "active": true,
+  "timeZone": "UTC"
+}

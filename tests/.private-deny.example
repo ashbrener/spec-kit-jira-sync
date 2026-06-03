@@ -1,0 +1,27 @@
+# tests/.private-deny.example
+#
+# Template for the privacy guard's local deny-list. Copy this file to
+# tests/.private-deny (which is gitignored) and replace the placeholders with
+# your REAL coordinates. The guard (tests/unit/no-real-identifiers.bats) reads
+# the gitignored copy at runtime and fails if any of these strings appear in a
+# tracked file — catching an accidental leak BEFORE you commit/push.
+#
+# Rules:
+#   * One extended-regex (ERE) per line. Matching is case-insensitive.
+#   * Blank lines and lines starting with '#' are ignored.
+#   * NEVER put real values in THIS .example file — it is committed. Real values
+#     go only in the gitignored tests/.private-deny copy.
+#
+# Fill the copy with patterns for each of (examples show the SHAPE, not real data):
+#   # Company / workspace / product name
+#   acme-corp
+#   # Jira Cloud site
+#   acme\.atlassian\.net
+#   # Project key(s) (word boundary + issue-number form)
+#   ACME-[0-9]+
+#   # cloudId / any instance UUID
+#   00000000-0000-0000-0000-000000000000
+#   # Operator Atlassian accountId
+#   557058:00000000-0000-0000-0000-000000000000
+#   # Operator email / name
+#   first\.last@example\.com

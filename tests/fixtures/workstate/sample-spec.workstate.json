@@ -1,0 +1,106 @@
+{
+  "schema_version": "0.1.0",
+  "source": {
+    "system": "spec-kit",
+    "repo": "sample-repo",
+    "generated_iso": "2026-05-31T12:34:56+00:00"
+  },
+  "items": [
+    {
+      "id": "001-sample",
+      "title": "Sample Spec",
+      "kind": "spec",
+      "state": "implementing",
+      "labels": [
+        "speckit-spec:001"
+      ],
+      "item_source": {
+        "path": "tests/fixtures/specs/001-sample/",
+        "last_commit_iso": "2026-05-31T12:00:00+00:00"
+      },
+      "links": [],
+      "notes": [],
+      "children": [
+        {
+          "id": "001-phase-1",
+          "title": "Phase 1 — Setup",
+          "kind": "task",
+          "state": "done",
+          "extensions": {
+            "tasks": [
+              {
+                "text": "Create skeleton directories",
+                "done": true
+              },
+              {
+                "text": "[P] Configure linting and bats",
+                "done": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "001-phase-2",
+          "title": "Phase 2 — Core",
+          "kind": "task",
+          "state": "in_progress",
+          "extensions": {
+            "tasks": [
+              {
+                "text": "Implement the spec parser",
+                "done": true
+              },
+              {
+                "text": "[P] Implement the Jira sink seam",
+                "done": false
+              }
+            ]
+          }
+        }
+      ],
+      "body": "A small placeholder spec used to drive parser and workstate tests for the\nspec-kit-jira-sync bridge. It carries no real coordinates and exists only as\non-disk fixture input."
+    },
+    {
+      "id": "002-updates",
+      "title": "Updates Spec",
+      "kind": "spec",
+      "state": "implementing",
+      "labels": [
+        "speckit-spec:002"
+      ],
+      "item_source": {
+        "path": "tests/fixtures/specs/002-updates/",
+        "last_commit_iso": "2026-05-31T12:00:00+00:00"
+      },
+      "links": [
+        {
+          "rel": "depends_on",
+          "target": "001"
+        }
+      ],
+      "notes": [
+        {
+          "timestamp_iso": "2026-05-20T00:00:00+00:00",
+          "body": "### Session 2026-05-20\n\n- Q: Does the bridge mirror a clarify session as a comment? A: Yes, at most once.\n- Q: What anchors the dedup on re-run? A: A stable hidden marker on the comment."
+        }
+      ],
+      "children": [
+        {
+          "id": "002-phase-1",
+          "title": "Phase 1 — Setup",
+          "kind": "task",
+          "state": "done",
+          "extensions": {
+            "tasks": [
+              {
+                "text": "Create skeleton directories",
+                "done": true
+              }
+            ]
+          }
+        }
+      ],
+      "body": "A placeholder spec used to drive the US4 integration test (clarify comments +\ncross-spec issue links). It carries no real coordinates and exists only as\non-disk fixture input."
+    }
+  ]
+}

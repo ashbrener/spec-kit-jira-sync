@@ -1,0 +1,28 @@
+{
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 1,
+  "issues": [
+    {
+      "id": "10001",
+      "key": "PROJ-101",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10001",
+      "fields": {
+        "summary": "001 — Sample spec",
+        "issuetype": { "id": "10002", "name": "Story", "subtask": false },
+        "status": {
+          "id": "10000",
+          "name": "To Do",
+          "statusCategory": { "id": 2, "key": "new", "name": "To Do" }
+        },
+        "labels": ["speckit-spec:001", "phase:specified"],
+        "updated": "2026-05-31T00:00:00.000+0000",
+        "parent": {
+          "id": "10000",
+          "key": "PROJ-100",
+          "fields": { "issuetype": { "id": "10000", "name": "Epic" } }
+        }
+      }
+    }
+  ]
+}
