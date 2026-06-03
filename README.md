@@ -258,6 +258,22 @@ reconcile.sh [--spec NNN | --all] [--dry-run] [--on-drift=proceed|abort]
 | `--quiet` | Suppress per-mutation logging; the summary still prints. |
 | `--config PATH` | Override the gitignored `jira-config.yml` location. |
 
+### In-session slash commands
+
+If you're driving from inside the agent harness, two slash commands run the
+engine without dropping to a terminal:
+
+| Command | Maps to | What it does |
+|---|---|---|
+| `/speckit-jira-push` | `reconcile.sh [--all\|--spec NNN] [--dry-run] [--on-drift=abort\|proceed]` | **Write** path — reconciles specs → Jira. |
+| `/speckit-jira-status` | `reconcile.sh --dry-run` | **Read-only** preview — plans every write, issues none. |
+
+`/speckit-jira-push` is the write path; `/speckit-jira-status` is the
+read-only drift/sync preview (it computes the same diff a live push would
+perform, then stops). There is intentionally no `pull`: the filesystem is the
+single source of truth and Jira is a unidirectional, read-only mirror, so there
+is nothing to pull back. A read-only drift report may land later.
+
 ### Exit codes (monotonic escalation)
 
 | Code | Meaning |

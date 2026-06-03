@@ -40,6 +40,9 @@ All notable changes to this project are documented here. The format is based on
   before any write.
 - **Test suite** — bats unit coverage for the parser, engine, sink, ADF
   rendering, and the privacy guard, driven against a mocked Jira REST harness.
+- **In-session slash commands** — `/speckit-jira-push` (reconcile/write) and
+  `/speckit-jira-status` (read-only dry-run preview) run the engine from inside
+  the agent harness; `pull` is deferred (unidirectional, read-only mirror).
 
 ### Changed
 

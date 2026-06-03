@@ -27,6 +27,9 @@ internally. This repo is also the independent second consumer that proves
 ## Commands
 
 - Reconcile: `src/reconcile.sh --all [--dry-run] [--on-drift=abort]`
+- Slash (write): `/speckit-jira-push` →
+  `reconcile.sh [--all|--spec NNN] [--dry-run] [--on-drift=abort|proceed]`
+- Slash (read-only preview): `/speckit-jira-status` → `reconcile.sh --dry-run`
 - Tests: `bats --recursive tests/unit`
 - Lint (CI parity): `shellcheck --severity=style src/*.sh`,
   `yamllint -d relaxed .github/workflows/ci.yml`,
