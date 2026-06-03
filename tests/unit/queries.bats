@@ -72,6 +72,31 @@ PY
   fi
 }
 
+# REGRESSION GUARD (real-Jira bug): the MODERN /search/jql endpoint returns
+# issues WITHOUT `.key`/`.fields` unless `fields` is requested. Every idempotency
+# lookup reads `.key` + `.fields.*`, so a fields-less search re-creates the whole
+# board on each run. Assert search_jql ALWAYS pins the field set + a bounded page
+# so we can never silently regress to the fieldless query the mock hid.
+@test "query_spec_issue requests an explicit fields set (so key+fields return)" {
+  jira_shim::set_response GET "*/search/jql*" search_found_story.json 200
+
+  run query_spec_issue "speckit-spec:001" "PROJ"
+  [ "$status" -eq 0 ]
+
+  local url
+  url="$(jira_shim::requests | awk '/^URL / && /search\/jql/ {print; exit}')"
+  # fields= is the load-bearing token: without it Jira omits key + fields.
+  [[ "$url" == *'fields=summary,status,updated,labels,parent'* ]] || {
+    echo "search request lacks the fields param: $url" >&2
+    false
+  }
+  # A bounded page (the lookups only need the freshest match).
+  [[ "$url" == *'maxResults=100'* ]] || {
+    echo "search request lacks maxResults: $url" >&2
+    false
+  }
+}
+
 @test "query_spec_issue returns the matching Story (present)" {
   jira_shim::set_response GET "*/search/jql*" search_found_story.json 200
 

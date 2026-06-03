@@ -316,11 +316,25 @@ jira_rest::put() {
 }
 
 # jira_rest::search_jql <jql>
-#   Convenience over GET /search/jql?jql=<url-encoded>. A READ (fail-closed).
+#   Convenience over GET /search/jql?jql=<url-encoded>&fields=…&maxResults=100.
+#   A READ (fail-closed).
+#
+#   REAL-JIRA CONTRACT (verified live): the MODERN /search/jql endpoint returns
+#   each issue WITHOUT `.key` and WITHOUT `.fields` unless `fields` is requested
+#   explicitly. The sink's idempotency lookups read `.key` (every caller) plus
+#   `.fields.{summary,status,updated,labels,parent}` (the drift reshape +
+#   query_spec_issue), so a fields-less search makes every issue look keyless +
+#   fieldless → no existing match → RE-CREATE on every run (duplicate board).
+#   We therefore ALWAYS request the field set the callers consume; `key` is
+#   returned automatically once any `fields` value is supplied. maxResults=100
+#   bounds the page (the lookups only need the freshest match, and JQL orders
+#   newest-first). The jql value stays url-encoded; `fields` + `maxResults` are
+#   fixed tokens needing no encoding.
 jira_rest::search_jql() {
   local jql="$1" encoded
   encoded="$(jira_rest::_urlencode "${jql}")"
-  jira_rest::_request "read" "GET" "search/jql?jql=${encoded}"
+  jira_rest::_request "read" "GET" \
+    "search/jql?jql=${encoded}&fields=summary,status,updated,labels,parent&maxResults=100"
 }
 
 # ----------------------------------------------------------------------------
