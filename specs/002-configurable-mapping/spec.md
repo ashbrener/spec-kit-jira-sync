@@ -8,6 +8,15 @@
 
 **Input**: User description: "Make the spec-kit→Jira artifact mapping operator-configurable instead of the hardcoded repo→Epic / spec→Story / phase→Subtask / task→checklist default, while keeping today's behavior as the frozen zero-config default. Real Jira projects vary (issue-type sets differ by board template; teams want fewer issues; some have Initiative, some don't). Add: per-level issue-type + relationship mapping with semantic validation; detection of the project's available issue types (a Kanban template has no Story); a 2-level checklist mode; an optional off-by-default Initiative super-level that degrades gracefully; an optional off-by-default status rollup so completion shows on the board; a back-compat alias layer; and a workstate-direct input seam so the sink can run without the spec-kit parser. Idempotency, drift-awareness, fail-closed reads, and privacy must hold in every mode. Build from specs/002-configurable-mapping/DESIGN-DRAFT.md; its §2 locked decisions are constraints and its §7 Q2–Q11 are the clarify questions."
 
+## Clarifications
+
+### Session 2026-06-03
+
+- Q: When a configured Jira issue type is absent in the target project (e.g. Kanban has no Story), what happens? → A: Hard-error at config-load (fail-closed, no write), with an optional explicit per-level fallback (e.g. `on_absent: Story→Task`) as the only escape.
+- Q: How is a workstate document accepted directly, skipping the parser? → A: A `--workstate` flag on the existing reconcile entrypoint taking a file path or `-` for stdin, validated against the pinned workstate schema on entry; the Initiative narrative source is gracefully absent in this mode.
+- Q: Which relationships may be used as hierarchy (parent→child) links? → A: Only `parent` / `Epic-link` / `none` / `checklist`; `Blocks`/`Relates`/`Implements` are rejected as hierarchy links and `Epic-link` between two non-Epic levels is rejected — all hard-halt at config-load.
+- Q: How does 2-level checklist mode stay zero-churn on re-run? → A: Key each checklist item by its workstate task id and byte-compare only the checklist sub-tree, writing the body only when that sub-tree changes (unrelated description edits do not trigger a rewrite).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A no-config upgrade changes nothing (Priority: P1)
@@ -226,7 +235,10 @@ no hard failure.
   nest children) before any write.
 - **FR-008**: The system MUST preserve idempotency in every mapping mode: a
   re-run against unchanged state performs zero observable writes, including in
-  2-level mode where the in-body checklist MUST re-render byte-identically.
+  2-level mode where the in-body checklist MUST re-render byte-identically. The
+  checklist MUST be kept stable by keying each item to its workstate task
+  identity and comparing only the checklist sub-tree, so unrelated edits to the
+  surrounding issue body do not trigger a rewrite.
 - **FR-009**: Each created artifact MUST carry a stable, filesystem-derived
   identity (via labels) so re-runs match and update rather than re-create —
   including a defined identity key for levels that project to a standalone Task
@@ -309,15 +321,16 @@ no hard failure.
 ## Assumptions
 
 The following working defaults are taken from the design draft's leanings (see
-`DESIGN-DRAFT.md` §7) so the spec is complete; each is a candidate for
-confirmation or adjustment in `/speckit-clarify` (the §7 Q2–Q11 set), and none
-changes the locked decisions in `DESIGN-DRAFT.md` §2.
+`DESIGN-DRAFT.md` §7) so the spec is complete; none changes the locked decisions
+in `DESIGN-DRAFT.md` §2. Four were **confirmed in the 2026-06-03 clarify session**
+(see Clarifications above): Q2, Q7, Q8, Q10. The rest remain working defaults to
+confirm or adjust in a later clarify pass or in `/speckit-plan`.
 
 - **Clarify scope (Q1)**: The clarify session resolves the five blocking
   questions first (relationship matrix, Initiative degradation mechanics, 2-level
   keying, workstate-direct interface, absent-type policy) and carries the five
   non-blocking ones into plan.
-- **Relationship matrix (Q2)**: Hierarchy links are restricted to native parent /
+- **Relationship matrix (Q2)**: **[confirmed 2026-06-03]** Hierarchy links are restricted to native parent /
   Epic-link / none / checklist; dependency-style links are rejected as hierarchy
   links; all rejections hard-halt at configuration load.
 - **Project style (Q3)**: Classic-vs-team-managed (Epic-link vs native parent) is
@@ -330,17 +343,17 @@ changes the locked decisions in `DESIGN-DRAFT.md` §2.
   stable marker and reuses the existing repo-grouping label, idempotently.
 - **Initiative scope (Q6)**: Ships per-repo 1:1 (narrative ≈ spec); per-org
   grouping is a later config extension.
-- **2-level keying (Q7)**: Each checklist item is keyed by its workstate task
+- **2-level keying (Q7)**: **[confirmed 2026-06-03]** Each checklist item is keyed by its workstate task
   identity; the checklist sub-tree is compared for byte equality and written only
   when it changes.
-- **workstate-direct interface (Q8)**: Exposed as a flag on the existing
+- **workstate-direct interface (Q8)**: **[confirmed 2026-06-03]** Exposed as a flag on the existing
   reconcile entrypoint (a file path, or `-` for standard input), validated
   against the pinned workstate schema on entry; the narrative source is treated as
   gracefully absent in this mode.
 - **Identity + provenance (Q9)**: A task-identity label prefix is added for
   Task-projected levels; the read-only-mirror provenance header renders as a
   single stable marker line above the checklist.
-- **Absent-type policy (Q10)**: Detect available types via metadata probe;
+- **Absent-type policy (Q10)**: **[confirmed 2026-06-03]** Detect available types via metadata probe;
   hard-error at configuration load when a configured artifact has no matching
   type, with an optional per-level fallback as the explicit opt-in escape.
 - **Status rollup (Q11)**: Ships off by default; phase-complete → phase issue
