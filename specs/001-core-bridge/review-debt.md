@@ -53,6 +53,46 @@ survive compaction and get folded at the right phase. Status updated as folded.
   re-runnable, so the next reconcile creates it. Left as an explicit code comment
   in `sync_inter_phase_blocks` (the `target_key` absent branch).
 
+## Dogfood findings (live Jira)
+
+Findings from a LIVE-Jira dogfood of the bridge (mirroring this repo into a real
+Jira project) — defects the mock never reproduced.
+
+- ✅ **RESOLVED — `/search/jql` returned keyless/fieldless stubs → board
+  duplicated every run** (fixed, commits `1e4cf30` + merge `fcc0bca`). The modern
+  `GET /rest/api/3/search/jql` endpoint omits `.key` and `.fields` from each issue
+  UNLESS a `fields` param is sent. The sink called it with `?jql=` only, so every
+  idempotency lookup got unusable stubs, never matched existing issues, and
+  RE-CREATED the whole board on each run. Fix: `jira_rest::search_jql` now requests
+  `&fields=summary,status,updated,labels,parent&maxResults=100`. Locked with a
+  deterministic unit test + a faithful keyless integration fixture.
+  MOCK-FIDELITY LESSON: the curl-shim returned hand-written fixtures WITH
+  keys+fields, so idempotency always passed in tests — the bug only existed against
+  real Jira.
+- ✅ **RESOLVED — empty ADF description churned every run** (fixed, commit
+  `f9e876c`). Jira drops empty paragraphs on store: the empty Story body we POST as
+  `{doc:[{paragraph,content:[]}]}` reads back as `{doc:content:[]}`. `_normalize_adf`
+  only sorted/compacted, so desired != current forever → the spec issue's
+  description was rewritten every reconcile (Updated:1; violates SC-017 zero-write
+  idempotency). Fix: strip content-less paragraph nodes on both sides before
+  comparing. +2 regression tests.
+- ✅ **RESOLVED — one-time convergence update on a fresh create** (commit
+  `3b5859d`). After a fresh mirror the FIRST re-run performed exactly one
+  description write on the spec issue before reaching stable zero-churn. Root
+  cause (pinned via diff-key logging): right after a fresh CREATE, Jira returns
+  the issue description as `null` until a later write settles it, so an empty
+  Story body read back `null` while desired normalized to `{doc:content:[]}` —
+  one write per fresh create (SC-017 zero-write edge). Fix: `_normalize_adf` now
+  collapses all semantically-empty forms (null, empty-content doc, empty-paragraph
+  doc) to one canonical value; the first re-run after a fresh create is now
+  zero-churn. Verified live (create → re-run = 0/0) + regression test. The mock
+  never reproduced it (it returned a populated description) — another mock-fidelity
+  gap the dogfood exposed.
+- ⏭️ **DEFERRED to feature-002 — two design findings.** Issue types differ by board
+  template (the mapping must DETECT available types, not assume Story); and status
+  rollup so the Epic/Subtasks reflect completion. Both are being folded into
+  `specs/002-configurable-mapping/DESIGN-DRAFT.md` — cross-reference it here.
+
 ## Engine debt — fix at the engine-extraction / hardening step
 
 - 🔧 **`git_helpers::iso_to_epoch` misparses fractional-second ISO timestamps**

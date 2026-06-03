@@ -22,6 +22,13 @@ existing project; use the UI or your admin tooling to create the project
 itself). Note its **project key** (the prefix in every issue key, e.g.
 `PROJ-123`) — you will need it in step 2.
 
+Recommendation: for a spec mirror, prefer a **Kanban** board. A team-managed
+**Scrum** board only renders issues that are in an ACTIVE SPRINT, so a
+freshly-synced mirror's issues sit in the Backlog and the Board looks empty until
+someone starts a sprint; a **Kanban** board shows every issue immediately. (Note
+the Kanban simplified template lacks a Story type — Task / Epic / Subtask only —
+so the spec maps to Task there; full configurable mapping is feature-002.)
+
 ## 2. Resolve the binding config (gitignored)
 
 Copy the committed template to the gitignored resolved location and fill in the
@@ -87,3 +94,87 @@ src/reconcile.sh --all --on-drift=abort
 
 Exit codes: `0` ok · `1` warnings (incl. drift) · `3` a spec failed closed ·
 `2` config error.
+
+## 5. Validation after a live run
+
+Once the mirror exists, prove the engine's guarantees (SC-017: idempotent,
+drift-aware, fail-closed) directly against your real Jira project. Each check
+below is copy-pasteable and names the observable result to assert. Use your own
+project key in place of `PROJ`, your board name in place of "your board", and
+the live issue numbers (`PROJ-NNN`) the run printed.
+
+1. **Dry-run parity (zero mutations).** Re-plan with no writes:
+
+   ```bash
+   src/reconcile.sh --all --dry-run
+   ```
+
+   Assert: the run prints the same planned-writes summary (planned creates /
+   updates / comments / links) but issues **no** mutating request — no `POST`,
+   `PUT`, or `DELETE` reaches Jira. Nothing changes in the UI; refresh your board
+   and confirm no issue, field, comment, or link was touched. Exit code `0`.
+
+2. **Idempotency (zero churn).** This is the single most important real-Jira
+   proof. Run the live reconcile once against a fresh mirror and record the
+   created counts:
+
+   ```bash
+   src/reconcile.sh --all          # fresh mirror — note created counts
+   src/reconcile.sh --all          # immediately again — must be a no-op
+   ```
+
+   Assert: the **second** run's summary shows `0 created / 0 updated /
+   0 comments / 0 links` (zero churn) and exits `0`. No issue key is
+   re-created, no field is rewritten, no duplicate comment or link appears on
+   the board. A converged mirror re-run is a pure no-op.
+
+3. **Drift-aware (Jira ahead of disk, never silently overwritten).** In the
+   Jira UI, advance exactly one mirrored Story — transition its status forward
+   (e.g. move `PROJ-NNN` one column right on your board) or edit a mirrored
+   field — then re-run:
+
+   ```bash
+   src/reconcile.sh --all
+   ```
+
+   Assert: a **named WARNING** surfaces for that spec (Jira ahead of disk /
+   backward-drift) and the Story is **not** silently overwritten. Document both
+   dispositions:
+
+   - **Default** (drift surfaced, then proceeds): the warning names the drifted
+     issue, the run continues and restores the disk-derived state, exit `1`.
+   - **`--on-drift=abort`** (skip the drifted spec): re-run with
+     `src/reconcile.sh --all --on-drift=abort` — that spec is **skipped**, the
+     drifted Story is left exactly as the human set it in Jira (unchanged), and
+     the run exits `≥1`.
+
+4. **Fail-closed (bad credentials → no writes).** Temporarily break auth, then
+   run — restore the real value immediately after:
+
+   ```bash
+   cp .env .env.bak
+   # set a deliberately bad JIRA_API_TOKEN in .env
+   src/reconcile.sh --all
+   mv .env.bak .env               # restore the real token
+   ```
+
+   Assert: **no** write lands for the affected spec (refresh the board — nothing
+   created or changed), the summary carries an **error row** for that spec, and
+   the process exits `3`. The bridge fails closed: an unreadable / unwritable
+   Jira never produces a partial mutation.
+
+5. **Exit-code assertions.** Each scenario maps to a single process exit code,
+   consistent with the README "Exit codes" section (monotonic escalation — the
+   highest code that fires wins):
+
+   | Scenario | Expected exit |
+   |---|---|
+   | Dry-run parity (check 1) | `0` |
+   | Idempotent re-run, zero churn (check 2) | `0` |
+   | Drift surfaced, default proceeds (check 3, default) | `1` |
+   | Drift surfaced, `--on-drift=abort` skips (check 3, abort) | `≥1` |
+   | Fail-closed on bad token (check 4) | `3` |
+
+   Read the code off `echo $?` immediately after each run. A clean converged
+   mirror is always `0`; a surfaced warning is `1`; an unreadable / failed spec
+   is `3`.

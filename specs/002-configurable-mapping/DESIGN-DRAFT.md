@@ -165,6 +165,19 @@ Relationship vocabulary to support: `parent` (native), `Epic Link` (classic /
 company-managed), `Relates`, `Blocks`, `Implements`, `none`, plus the
 non-issue `checklist` render sentinel.
 
+**Available-issue-type detection (live-Jira dogfood finding).** Issue types
+differ by board/template: a team-managed **Scrum** project ships
+Epic/Story/Task/Subtask/Bug, but the **Kanban** simplified template ships only
+**Task/Epic/Subtask — NO Story**. The sink today assumes
+`issue_types.{epic,story,subtask}` exist; dogfooding against a Kanban project
+forced the spec slot to map to **Task** because no Story type was present.
+Configurable mapping therefore MUST NOT assume a fixed Epic/Story/Subtask set.
+It MUST (1) **read the target project's available issue types**, (2) **validate**
+each configured `artifact` against that available set at config-load time, and
+(3) define explicit behavior when a configured type (e.g. "Story") is **absent**
+in the target project. The validation joins the §4 fail-closed config check (it
+runs before any write); the absent-type behavior is enumerated in §7 Q10.
+
 ## 4. Invariants to preserve
 
 The constitutional differentiator — **idempotent + drift-aware + fail-closed** —
@@ -190,11 +203,29 @@ MUST hold in **every** mapping mode, not just the default:
   drift anchor** even when the Initiative super-level is on; the super-level is
   narrative, not a new drift surface.
 
+- **Status rollup is idempotent (live-Jira dogfood finding).** Today only the
+  spec-level issue (Story/Task) receives a lifecycle status; the per-repo Epic
+  and per-phase Subtasks stay "To Do", so a 100%-complete feature still looks
+  undone on the board — per-task done-ness lives only inside the ADF checklist.
+  This feature adds an **OPTIONAL mapping lever (OFF by default)** to roll
+  completion up to issue status: e.g. all tasks in a phase checked → that
+  phase's Subtask → Done; all specs done → the repo Epic → Done. When the lever
+  is on, the rollup MUST stay **idempotent**: a re-run against unchanged
+  completion fires **no transition** (no re-transition churn), and the rollup
+  only transitions an issue whose computed completion state has actually
+  changed. The exact rollup rules and the OFF-by-default default are the §7 Q11
+  question.
+
 - **Fail-closed (Principle VIII).** Config validation runs BEFORE any write. A
   nonsensical relationship combo, a missing required issue-type id for a
-  configured artifact, or an unsupported artifact name is a **workspace-level
-  configuration error** that halts the run with copy-paste remediation — not a
-  silent skip, not a per-spec warning.
+  configured artifact, an unsupported artifact name, or a **configured artifact
+  whose issue type does not exist in the target project's available types**
+  (the live-Jira dogfood finding — e.g. mapping a level to "Story" on a Kanban
+  project that ships no Story type) is a **workspace-level configuration error**.
+  Validation against the project's detected available issue types runs at
+  config-load, before any write; the resolution policy when a configured type is
+  absent (hard-error vs warn-and-skip vs fall-back) is the §7 Q10 question — not
+  a silent skip, not a per-spec warning, until that policy is set.
 
 ## 5. workstate-direct input seam (HANDOFF §14 / addendum)
 
@@ -229,32 +260,183 @@ place it surfaces:
 - Auto-discovery of issue-type ids for new artifacts (that is the seed/install
   feature's job; here they are consumed, not resolved).
 
-## 7. Open questions for `/speckit-clarify`
+## 7. Clarify questions
 
-1. **Relationship-validation matrix:** what is the exact allow/reject table of
-   (level-boundary × relationship-type) combinations? Which combos warn vs hard
-   halt? (e.g. is `Blocks` ever legal as a hierarchy link, or only as a
-   cross-spec dependency link?)
-2. **`Epic Link` vs native `parent` detection:** how does the bridge know
-   whether a project is classic/company-managed (needs the `Epic Link` custom
-   field) vs team-managed (native `parent`)? Probe the project metadata at
-   runtime, or require the operator to declare project style in config?
-3. **Initiative scope:** is the Initiative super-level configured **per-repo**
-   or **per-org**? (1:1 narrative≈spec vs 1:many operator grouping changes
-   where the binding lives.)
-4. **Default when a configured issue type is absent** in the project (e.g.
-   `Task` chosen for the task level but the project has no Task type): hard
-   halt with remediation, or degrade to the next mode (e.g. fall back to
-   checklist)? The Initiative level already specifies `degrade`; should other
-   levels?
-5. **Mixed/partial mapping:** if `mapping:` is present but only some levels are
-   specified, do unspecified levels inherit the synthesized default, or is a
-   partial `mapping:` block a validation error (all-or-nothing)?
-6. **ADF checklist provenance header in 2-level mode:** Principle I requires
-   mirrored checklists to carry a read-only-mirror header. In 2-level mode the
-   checklist lives in the parent body alongside the issue description — how is
-   the header rendered so the round-trip stays byte-identical (idempotency)
-   without visually dominating the issue?
+This section enumerates **every** question that must be resolved (or explicitly
+deferred) before opening a `/speckit-specify` cycle. Each item is an answerable
+question with its candidate options and the proposed default/leaning that the
+draft already implies (drawn from §2 locked decisions, §3 config, and the §5
+workstate-direct seam — no new product direction is introduced here). Items are
+tagged **[blocking]** (must be answered before specify) or **[non-blocking]**
+(may take the proposed default and be revisited during clarify/plan).
+
+LOCKED (NOT clarify questions — listed only to bound the session): the frozen
+default mapping (§2a), the existence of 3-level and 2-level opt-in modes (§2b),
+the existence of an OFF-by-default Initiative super-level that degrades when
+absent (§2c), relationship types being configurable behind a validation matrix
+(§2d), and config back-compat as an alias layer not a migration (§2e). Do NOT
+re-open these; the questions below are narrower.
+
+### 7.1 Scope of the clarify session
+
+- **Q1 [blocking] — How many questions is the clarify session, and which ones?**
+  The inventory flagged this as under-specified (is it ~5 or ~25?). The real set
+  is the **ten** questions enumerated in §7.2–§7.5 below: Q2–Q11 (Q10 and Q11
+  added from the live-Jira dogfood — available-issue-type detection and status
+  rollup). A standard `/speckit-clarify` pass caps at ~5 targeted questions, so
+  this set MUST be split. **Proposed leaning:** answer the five **[blocking]**
+  items (Q2, Q5, Q7, Q8, Q10) in the first clarify pass and carry the five
+  **[non-blocking]** items (Q3, Q4, Q6, Q9, Q11) into plan/a second pass.
+  Options: (a) one combined session taking all ten; (b) blocking-first split as
+  proposed; (c) defer all non-blocking items to plan. Default: (b).
+
+### 7.2 Mapping model and relationships
+
+- **Q2 [blocking] — What is the exact relationship-validation matrix?** Define
+  the allow/reject table of (level-boundary × relationship-type) combinations,
+  and which combos warn vs hard-halt. (e.g. is `Blocks` ever legal as a
+  hierarchy link, or only as a cross-spec dependency link?) Vocabulary to cover
+  per §3: `parent`, `Epic Link`, `Relates`, `Blocks`, `Implements`, `none`,
+  `checklist`. **Leaning** (per §2d, fail-closed): hierarchy links restricted to
+  `parent` / `Epic Link` / `none` / `checklist`; `Blocks` / `Relates` /
+  `Implements` rejected as hierarchy links; `Epic Link` rejected between two
+  non-Epic levels — all rejections hard-halt at config-load, before any write.
+  Blocking because the matrix is the fail-closed guard the whole feature leans
+  on.
+
+- **Q3 [non-blocking] — `Epic Link` vs native `parent` detection.** How does the
+  bridge know a project is classic/company-managed (needs the `Epic Link`
+  custom field) vs team-managed (native `parent`)? Options: (a) probe project
+  metadata at runtime; (b) require the operator to declare project style in
+  config; (c) hybrid — declare in config, validate against a probe. **Leaning:**
+  (b) declare-in-config (keeps the sink offline-validatable and fail-closed),
+  with (c) as a later enhancement. Non-blocking: a config-declared default
+  unblocks specify.
+
+- **Q4 [non-blocking] — Mixed/partial `mapping:` block.** If `mapping:` is
+  present but only some levels are specified, do unspecified levels inherit the
+  synthesized default, or is a partial block a validation error
+  (all-or-nothing)? Options: (a) inherit default per-level; (b) all-or-nothing
+  validation error. **Leaning:** (a) per-level inheritance, consistent with the
+  §2e additive/optional alias philosophy. Non-blocking: defaulting to inherit is
+  safe and revisitable.
+
+### 7.3 Initiative / L0 super-level, degradation, and identity
+
+- **Q5 [blocking] — How does the L0/Initiative super-level degrade on
+  non-Premium Jira (Advanced Roadmaps absent)?** §2c locks the policy
+  (`on_absent: "degrade"` → fold narrative onto the Epic, demote repo-grouping
+  to a label, never hard-fail), but the mechanics are open: (i) how is
+  Premium/Advanced-Roadmaps availability **detected** — probe issue-type
+  metadata for the `Initiative` type, catch the create error, or an operator
+  config flag? (ii) when degraded, **where** does the narrative land on the Epic
+  (description prepend vs a dedicated ADF block) and **which label** carries the
+  repo grouping (reuse `repo_prefix` per §3 `labels`, or a new prefix)?
+  (iii) must degradation be **idempotent** so a later upgrade to Premium can
+  re-home the narrative onto a real Initiative without churn? **Leaning:**
+  detect via issue-type metadata probe; degrade by folding narrative into the
+  Epic description behind a stable marker and reusing the existing `repo_prefix`
+  label. Blocking because "never hard-fail on standard Jira" is a shipped
+  promise and the detection path gates every write on a non-Premium instance.
+
+- **Q6 [non-blocking] — Initiative scope: per-repo or per-org?** Is the
+  super-level configured per-repo (1:1, narrative ≈ spec) or per-org (1:many
+  operator grouping)? This changes where the binding lives and how the
+  `spec_input` source (§3, "NEVER inferred") is resolved. Options: (a) per-repo
+  1:1; (b) per-org 1:many; (c) support both via config. **Leaning:** ship (a)
+  per-repo 1:1 first (matches `source: "spec_input"`), leave (b) as a config
+  extension. Non-blocking: it is OFF by default (§2c), so specify can proceed
+  with the 1:1 shape.
+
+### 7.4 Idempotency, identity keys, and provenance
+
+- **Q7 [blocking] — Does 2-level checklist mode preserve idempotency under real
+  use, and how is the checklist diffed/keyed?** §4 requires byte-identical ADF
+  re-render with zero field writes via the US2 update path, but the keying is
+  open: (i) what is the **stable key** for each checklist item so re-runs match
+  rather than duplicate — `task` id, the task text, or an embedded marker? (ii)
+  how is the rendered ADF **diffed** — full-body byte compare, or an isolated
+  checklist sub-tree compare so unrelated description edits don't trigger a
+  rewrite? (iii) how are item reorder / completion-toggle / rename handled
+  without churn? **Leaning** (per §4): key each item by its `workstate` `task`
+  id, compare the checklist ADF sub-tree for byte equality, and only write when
+  that sub-tree changes. Blocking because idempotency in non-default modes is
+  the constitutional differentiator and the inventory flagged it as
+  under-verified.
+
+- **Q8 [blocking] — Is the parser bypassable: lock the workstate-direct input
+  interface.** §5 commits the sink to run from a `workstate` JSON file or stdin
+  (skipping the parser) so a non-spec-kit producer can feed it. The **interface
+  is open and must be locked before specify:** (i) invocation surface — a flag
+  (e.g. `--workstate <file>` / `--workstate -` for stdin) on the existing
+  reconcile entrypoint, or a separate subcommand? (ii) which `workstate` schema
+  version is accepted and is it validated on entry (fail-closed on a bad
+  document)? (iii) does the `spec_input` narrative source (the one spec-kit
+  coupling, §5) degrade cleanly when the input is workstate-direct and no
+  `spec.md` exists — Initiative narrative simply unavailable, not an error?
+  **Leaning** (per §5): add a `--workstate` flag on the reconcile entrypoint
+  (file or `-` for stdin), validate against the pinned `workstate` schema on
+  entry, and treat `spec_input` as gracefully absent in workstate-direct mode.
+  Blocking because §5 calls it a contract to expose now and an unlocked surface
+  blocks the test obligations in §8.
+
+- **Q9 [non-blocking] — Task-issue identity label + 2-level provenance header.**
+  Two coupled identity/provenance details: (i) when a level projects to a `Task`
+  issue (3-level), what is the **task-identity label prefix** so re-runs match
+  rather than re-create (§4 requires defining one; sibling to
+  `speckit-spec:` / `speckit-repo:` / `task-phase:` in §3 `labels`)?
+  (ii) in 2-level mode the mirrored checklist shares the parent body with the
+  description — how is the Principle I read-only-mirror provenance header
+  rendered so the round-trip stays byte-identical (Q7) without visually
+  dominating the issue? **Leaning:** add a `task_prefix` (e.g. `speckit-task:`)
+  to the `labels` block; render the provenance header as a single stable ADF
+  marker line above the checklist sub-tree. Non-blocking: sensible defaults
+  exist and both fold into the Q7 idempotency tests.
+
+### 7.5 Live-Jira dogfood findings: issue-type detection and status rollup
+
+- **Q10 [blocking] — When a configured issue type is absent in the target
+  project, does the mapping hard-error, warn-and-skip, or fall back to an
+  available type (and which)?** The live-Jira dogfood proved issue types differ
+  by board/template: a team-managed **Scrum** project ships
+  Epic/Story/Task/Subtask/Bug, but the **Kanban** simplified template ships only
+  **Task/Epic/Subtask — NO Story**, forcing the spec slot to map to **Task**
+  (§3). So the mapping MUST (1) read the target project's available issue types,
+  (2) validate the configured `artifact` per level against that set, and (3)
+  define behavior when a configured type is absent. Open: (i) is the absent-type
+  outcome **hard-error** (fail-closed per §4), **warn-and-skip** that level, or
+  **fall back** to an available type — and if fall-back, which type and is the
+  substitution per-level configurable (e.g. `on_absent: "Task"`)? (ii) how is
+  the available-type set **detected** — probe project issue-type metadata, or an
+  operator-declared list in config (mirroring the Q3 declare-vs-probe choice)?
+  (iii) is the validation purely config-load-time, or re-checked against the
+  live project before each run? **Leaning** (per §4 fail-closed): detect via an
+  issue-type-metadata probe, hard-error at config-load when a configured
+  artifact has no matching available type, with an OPTIONAL per-level
+  `on_absent` fall-back (e.g. `Story → Task`) as the explicit opt-in escape.
+  Blocking because absent-type behavior gates every write on any non-Scrum
+  template and the default Story-bearing assumption is already known to break on
+  Kanban.
+
+- **Q11 [non-blocking] — Should status rollup be a config lever (off by
+  default), and what are the rollup rules?** Today only the spec-level issue
+  (Story/Task) gets a lifecycle status; the per-repo Epic and per-phase Subtasks
+  stay "To Do", so a 100%-complete feature still reads as undone on the board
+  (per-task done-ness lives only inside the ADF checklist — §4). Open: (i) is
+  rollup an **OPTIONAL lever, OFF by default**, preserving today's behavior as
+  the regression anchor (§2a)? (ii) what are the exact **rules** — e.g. all
+  tasks in a phase checked → that phase's Subtask → Done; all specs done → the
+  repo Epic → Done — and are the target statuses drawn from the existing
+  `phase_status` / `transitions` config or a new rollup block? (iii) how does
+  rollup stay **idempotent** (§4) so a re-run fires no transition when
+  completion is unchanged, and how are partially-complete or regressed states
+  handled (transition back to "In Progress"/"To Do", or roll up forward only)?
+  **Leaning** (per §4): ship rollup OFF by default as an additive lever;
+  phase-complete → Subtask Done and all-specs-done → Epic Done; reuse the
+  existing transition config for target statuses; transition only when the
+  computed completion state changes, forward-and-backward, to stay idempotent.
+  Non-blocking unless rollup is judged MVP: it is OFF by default and additive,
+  so specify can proceed without it and it folds into the §8 idempotency tests.
 
 ## 8. Test obligations (to seed `/speckit-tasks` later)
 
@@ -270,3 +452,11 @@ place it surfaces:
   → degrades to Epic + repo label (no hard fail).
 - `workstate`-direct input: sink runs from a `workstate` JSON file and from
   stdin, producing the same projection as the `specs/`-tree path.
+- Available-issue-type detection (Q10): a configured artifact absent from the
+  target project's available types is caught at config-load (e.g. mapping a
+  level to "Story" on a Kanban project that ships no Story type), and the chosen
+  absent-type policy (hard-error / warn-skip / configured fall-back) is honored
+  before any write.
+- Status rollup (Q11), when the lever is ON: a phase whose tasks are all checked
+  rolls its Subtask → Done and an all-specs-done repo rolls its Epic → Done;
+  **re-run is zero churn** (no transition fired when completion is unchanged).
