@@ -196,6 +196,43 @@ us2::register_present() {
   jira_shim::set_response POST "*/issue/*/transitions" "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 204
 }
 
+# us2::register_present_faithful_search
+#   Like us2::register_present, but the SPEC-Story search is served by a
+#   FIELDS-DISCRIMINATING pair of rules that mimic real Jira's /search/jql:
+#     * a request that DOES carry `fields=` → the full fixture (key + fields),
+#     * a request that does NOT carry `fields=` → a faithful fields-LESS body
+#       (issues without `.key`/`.fields`, exactly what the modern endpoint
+#       returns when fields are omitted).
+#   First-match-wins, so the `*fields=*` rule is registered BEFORE the bare one.
+#   This makes the idempotency contract depend on search_jql actually requesting
+#   fields: WITH the fix the lookup matches the existing Story (zero creates);
+#   WITHOUT it the lookup sees a keyless stub and re-creates — so this test FAILS
+#   if search_jql ever regresses to a fieldless query (the bug the old hand-
+#   written fixtures hid).
+us2::register_present_faithful_search() {
+  local story_get_fixture="$1"
+
+  jira_shim::set_response GET "*/issue/*/transitions" "$REPO_ROOT/tests/fixtures/jira_responses/transitions.json" 200
+
+  jira_shim::set_response GET "*task-phase%3A1*" "$US2_FIXTURES/sub1_search.json" 200
+  jira_shim::set_response GET "*task-phase%3A2*" "$US2_FIXTURES/sub2_search.json" 200
+  jira_shim::set_response GET "*speckit-repo%3A*" "$US2_FIXTURES/epic_search.json" 200
+
+  # FIELDS-DISCRIMINATING spec-Story search. The `*fields=*` rule MUST be first
+  # (first-match-wins) so a fields-bearing request gets the full, keyed body.
+  jira_shim::set_response GET "*/search/jql*fields=*" "$US2_FIXTURES/story_search.json" 200
+  jira_shim::set_response GET "*/search/jql*" \
+    "$REPO_ROOT/tests/fixtures/jira_responses/search_found_story_fieldless.json" 200
+
+  jira_shim::set_response GET "*/issue/SUB-1*" "$US2_FIXTURES/sub1_get.json" 200
+  jira_shim::set_response GET "*/issue/SUB-2*" "$US2_FIXTURES/sub2_get.json" 200
+  jira_shim::set_response GET "*/issue/PROJ-101*" "$story_get_fixture" 200
+
+  jira_shim::set_response POST "*/rest/api/3/issue" "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 201
+  jira_shim::set_response PUT "*/issue/*" "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 204
+  jira_shim::set_response POST "*/issue/*/transitions" "$REPO_ROOT/tests/fixtures/jira_responses/issue_create_ok.json" 204
+}
+
 # --- (a) RE-RUN ZERO CHURN ---------------------------------------------------
 
 @test "re-run against an unchanged mirror performs ZERO writes" {
@@ -314,6 +351,41 @@ us2::register_present() {
   # The Story is updated (status restored); the 2 Subtasks are unchanged.
   run summary::count updated
   [ "$output" -eq 1 ] || { echo "updated=$output (want 1)" >&2; false; }
+
+  run summary::count created
+  [ "$output" -eq 0 ] || { echo "created=$output (want 0)" >&2; false; }
+}
+
+# --- (c) FAITHFUL-FIXTURE IDEMPOTENCY REGRESSION -----------------------------
+# Real Jira's /search/jql omits `.key`/`.fields` unless `fields` is requested.
+# This test serves that faithful shape for a fields-LESS request and the full,
+# keyed body only when `fields=` is present, so the zero-churn guarantee holds
+# ONLY when search_jql actually asks for fields. If search_jql regresses to the
+# bare query, the spec-Story lookup returns a keyless stub → the engine RE-creates
+# the Story → this asserts a duplicate create and FAILS (the regression guard the
+# old hand-written full fixtures could never trip).
+@test "re-run stays zero-churn only because search_jql requests fields (faithful mock)" {
+  cd "$WORKDIR"
+  us2::register_present_faithful_search "$US2_FIXTURES/story_get.json"
+
+  summary::start "us2 faithful-search"
+  run reconcile::process_spec "specs/001-sample"
+  [ "$status" -eq 0 ]
+
+  local reqs
+  reqs="$(jira_shim::requests)"
+
+  # ZERO create POSTs — the existing Story/Subtasks were matched via the keyed,
+  # fields-bearing search response. A fieldless regression would re-create here.
+  local creates
+  creates="$(printf '%s\n' "$reqs" \
+    | grep -c '^URL https://example.atlassian.net/rest/api/3/issue$' || true)"
+  [ "$creates" -eq 0 ] || {
+    echo "expected 0 creates with a faithful fields-aware search, got $creates" >&2
+    echo "(a fieldless /search/jql regression re-creates the board)" >&2
+    printf '%s\n' "$reqs" >&2
+    false
+  }
 
   run summary::count created
   [ "$output" -eq 0 ] || { echo "created=$output (want 0)" >&2; false; }

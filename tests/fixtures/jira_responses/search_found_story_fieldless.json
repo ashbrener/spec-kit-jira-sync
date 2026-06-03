@@ -1,0 +1,11 @@
+{
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 1,
+  "issues": [
+    {
+      "id": "10001",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10001"
+    }
+  ]
+}
