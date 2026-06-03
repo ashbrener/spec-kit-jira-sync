@@ -170,25 +170,28 @@ PY
 }
 
 # -----------------------------------------------------------------------------
-# Regression — REAL-JIRA ADF round-trip (found by the live dogfood). Jira DROPS
-# empty paragraphs on store: the empty-body Story description we POST as
-# {doc:[{paragraph,content:[]}]} reads back as {doc:content:[]}. _normalize_adf
-# MUST collapse both to the same canonical form, else the Story description
-# diffs forever → Updated:1 every run (churn; SC-017 zero-write violation).
+# Regression — REAL-JIRA ADF round-trip (found by the live dogfood). Two real
+# behaviors: (1) Jira drops empty paragraphs on store, so an empty body POSTed as
+# {doc:[{paragraph,content:[]}]} reads back as {doc:content:[]}; (2) right after a
+# fresh CREATE, Jira returns the description as `null` until a later write settles
+# it. All three forms (null, empty-content doc, empty-paragraph doc) are
+# SEMANTICALLY EMPTY and MUST normalize equal — else the Story description churns
+# one write per fresh create before settling (SC-017 zero-write violation).
 # -----------------------------------------------------------------------------
-@test "normalize_adf: empty-paragraph doc canonicalizes to Jira's empty-content doc (no churn)" {
-  local sent stored a b
-  sent='{"version":1,"type":"doc","content":[{"type":"paragraph","content":[]}]}'
-  stored='{"type":"doc","version":1,"content":[]}'
-  a="$(jira_sink::_normalize_adf "$sent")"
-  b="$(jira_sink::_normalize_adf "$stored")"
-  [ -n "$a" ]
-  [ "$a" = "$b" ]
+@test "normalize_adf: null, empty-content doc, and empty-paragraph doc all canonicalize equal (no churn)" {
+  local n e p
+  n="$(jira_sink::_normalize_adf "null")"
+  e="$(jira_sink::_normalize_adf '{"type":"doc","version":1,"content":[]}')"
+  p="$(jira_sink::_normalize_adf '{"version":1,"type":"doc","content":[{"type":"paragraph","content":[]}]}')"
+  [ "$n" = "$e" ]
+  [ "$e" = "$p" ]
 }
 
-@test "normalize_adf: a paragraph with real text is preserved (genuine content still diffs)" {
-  local doc out
+@test "normalize_adf: a paragraph with real text is preserved and differs from empty" {
+  local doc out empty
   doc='{"version":1,"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}'
   out="$(jira_sink::_normalize_adf "$doc")"
+  empty="$(jira_sink::_normalize_adf '{"type":"doc","version":1,"content":[]}')"
   [[ "$out" == *'"text":"hi"'* ]]
+  [ "$out" != "$empty" ]
 }
