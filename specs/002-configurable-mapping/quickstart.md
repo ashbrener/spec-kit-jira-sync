@@ -41,7 +41,7 @@ jira:
         relationship_to_parent: "none"
       phase:
         artifact: "Story"
-        relationship_to_parent: "Epic Link"   # or "parent" on team-managed
+        relationship_to_parent: "Epic-link"   # or "parent" on team-managed
       task:
         artifact: "Task"
         relationship_to_parent: "parent"
@@ -70,9 +70,9 @@ In 2-level mode each checklist item is keyed by its workstate task id and only t
 checklist sub-tree is byte-compared, so a re-run against unchanged tasks performs
 zero writes and an unrelated description edit never forces a rewrite.
 
-Hierarchy links are restricted to `parent`, `Epic Link`, `none`, and `checklist`.
+Hierarchy links are restricted to `parent`, `Epic-link`, `none`, and `checklist`.
 A dependency-style link (`Blocks` / `Relates` / `Implements`) used as a hierarchy
-link, or an `Epic Link` declared between two non-Epic levels, is rejected at
+link, or an `Epic-link` declared between two non-Epic levels, is rejected at
 config-load — before any write.
 
 ## 3. Available-type validation

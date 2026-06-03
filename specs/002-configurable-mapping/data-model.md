@@ -81,7 +81,7 @@ jira:
 | `mapping.status_rollup.enabled` | bool | `false` | rollup lever (Q11) |
 
 `<level>` ∈ `{repo, spec, phase, task}`. `relationship_to_parent` vocabulary:
-`parent`, `Epic Link`, `Relates`, `Blocks`, `Implements`, `none`, `checklist`.
+`parent`, `Epic-link`, `Relates`, `Blocks`, `Implements`, `none`, `checklist`.
 
 ### Validation rules (all fail-closed at config-load)
 
@@ -162,7 +162,7 @@ config-load, before any write — no warn-and-continue.
 | Relationship | As a hierarchy (parent→child) link | Notes |
 |--------------|-----------------------------------|-------|
 | `parent` (native) | ALLOW | team-managed native nesting |
-| `Epic Link` | ALLOW only when parent is an Epic | classic / company-managed |
+| `Epic-link` | ALLOW only when parent is an Epic | classic / company-managed |
 | `none` | ALLOW | top level (e.g. repo Epic, or spec Epic in 3-level) |
 | `checklist` | ALLOW | non-issue sentinel; in-body ADF render |
 | `Blocks` | REJECT | dependency semantics, not nesting |
@@ -171,11 +171,11 @@ config-load, before any write — no warn-and-continue.
 
 ### Boundary-specific rejections
 
-- `Epic Link` declared between two NON-Epic levels ⇒ REJECT (the parent must be
+- `Epic-link` declared between two NON-Epic levels ⇒ REJECT (the parent must be
   an Epic for an Epic-link to be a legal hierarchy link).
 - `Blocks` / `Relates` / `Implements` used as ANY hierarchy link ⇒ REJECT (they
   are cross-spec dependency links, not nesting).
-- Classic vs team-managed style (which decides `Epic Link` vs native `parent`) is
+- Classic vs team-managed style (which decides `Epic-link` vs native `parent`) is
   operator-declared in config (Q3), so the matrix resolves fully OFFLINE at
   config-load with no network round-trip.
 

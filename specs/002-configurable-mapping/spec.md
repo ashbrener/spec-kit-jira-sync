@@ -230,9 +230,12 @@ no hard failure.
   absent from the target project as a configuration-level error and write nothing
   for the affected run, unless an explicit per-level fallback is configured.
 - **FR-007**: The system MUST validate configured relationships against a
-  matrix of allowed (level-boundary × relationship-type) combinations and reject
-  semantically nonsensical hierarchy links (e.g. dependency-style links used to
-  nest children) before any write.
+  matrix of allowed (level-boundary × relationship-type) combinations — resolved
+  against the operator-declared **project style** (classic/company-managed vs
+  team-managed) — and reject these semantically nonsensical combinations before
+  any write: dependency-style links (`Blocks`/`Relates`/`Implements`) used as
+  hierarchy links, an `Epic-link` declared between two non-Epic levels, and a
+  `checklist` artifact paired with a non-`checklist` relationship.
 - **FR-008**: The system MUST preserve idempotency in every mapping mode: a
   re-run against unchanged state performs zero observable writes, including in
   2-level mode where the in-body checklist MUST re-render byte-identically. The
@@ -280,9 +283,12 @@ no hard failure.
 ### Key Entities *(include if feature involves data)*
 
 - **Mapping configuration**: An optional, additive block describing per-level
-  artifact + parent-relationship choices, the optional narrative super-level
-  (with its on/off state, degrade policy, and narrative source), and the optional
-  status-rollup lever. Absent ⇒ the alias layer synthesizes the default.
+  artifact + parent-relationship choices, the operator-declared **project style**
+  (classic/company-managed vs team-managed — which decides whether a parent link
+  resolves to the `Epic-link` field or the native `parent`), the optional
+  narrative super-level (with its on/off state, degrade policy, and narrative
+  source), and the optional status-rollup lever. Absent ⇒ the alias layer
+  synthesizes the default.
 - **workstate level**: The neutral structural units the mapping consumes — repo,
   spec, phase, task — independent of any spec-kit on-disk concept.
 - **Available issue-type set**: The issue types the target project actually
