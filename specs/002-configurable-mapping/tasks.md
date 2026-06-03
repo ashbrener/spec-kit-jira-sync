@@ -94,7 +94,7 @@ issue is created.
 - [ ] T021 [US2] Implement the absent-type policy in `src/config.sh` (`mapping::validate_available`) — reject configured artifacts absent from the probed set, honoring a valid `on_absent` fallback; `checklist` sentinel exempt; hard-error exit 2 otherwise (FR-006, FR-017)
 - [ ] T022 [US2] Implement `sync_level_artifact` + `link_to_parent` in `src/jira_sink.sh` — mapping-driven create/update of the configured artifact with the configured relationship; Task-projected levels match/update by `task_prefix` identity label (Q9, FR-009)
 - [ ] T023 [US2] Wire `src/reconcile.sh` so config-load validation (relationship matrix + available-type probe) runs before the write loop; a failure aborts the run with exit 2 and writes nothing (FR-017, fail-closed)
-- [ ] T024 [US2] Integration test `tests/integration/us2_configured_mapping.bats` — a spec→Epic / phase→Story / task→Task config mirrors the configured types with the configured parent relationships (spec scenario 1)
+- [ ] T024 [US2] Integration test `tests/integration/us2_configured_mapping.bats` — a spec→Epic / phase→Story / task→Task config mirrors the configured types with the configured parent relationships (spec scenario 1), AND a re-run against the unchanged corpus asserts **zero churn** (0 created / 0 updated) — the 3-level arm of SC-004 (analyze Next-Action #3)
 - [ ] T025 [US2] Integration test `tests/integration/us2_absent_type_failclosed.bats` — a config mapping a level to a project-absent type is rejected at config-load with a clear error and zero writes; a nonsensical hierarchy relationship is likewise rejected before any write (spec scenarios 2–3, SC-003)
 
 **Checkpoint**: US2 delivers the core value — safe, validated, board-fitting
