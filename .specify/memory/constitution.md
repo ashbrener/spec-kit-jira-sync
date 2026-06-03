@@ -27,7 +27,7 @@ Follow-up TODOs: the first feature spec (core bridge) MUST pass the
 /speckit-plan Constitution Check against this v1.0.0 document.
 -->
 
-# spec-kit-jira Constitution
+# spec-kit-jira-sync Constitution
 
 The non-negotiable principles that govern how the spec-kit ↔ Jira bridge is
 built, installed, and operated. Every functional requirement in this repo's
@@ -345,7 +345,7 @@ the documented path for missed hooks, drift inspection, and post-incident audit.
 ## Governance
 
 This constitution supersedes all other practices and informal conventions in
-the `spec-kit-jira` project. Where this constitution and any other document
+the `spec-kit-jira-sync` project. Where this constitution and any other document
 (SEED-BRIEF.md, PLAN.md, README) conflict, this constitution wins.
 
 **Compliance**: every PR touching the bridge MUST be reviewed for compliance.

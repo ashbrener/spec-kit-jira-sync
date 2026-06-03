@@ -1,4 +1,4 @@
-# SEED BRIEF — spec-kit-jira
+# SEED BRIEF — spec-kit-jira-sync
 
 > **Read this top-to-bottom before doing anything.** You are starting cold in
 > a fresh repo. This brief is self-contained: it tells you what to build, what
@@ -11,7 +11,7 @@
 
 ## 0. What this is, in one sentence
 
-`spec-kit-jira` mirrors a spec-kit project's specs into **Jira** — the exact
+`spec-kit-jira-sync` mirrors a spec-kit project's specs into **Jira** — the exact
 twin of the already-shipped `spec-kit-linear`, but targeting Jira's REST API
 and consuming the neutral **`workstate`** format internally.
 
@@ -124,7 +124,7 @@ for it.)
   (auto-discovers `.markdownlint-cli2.jsonc`), bats (macos + ubuntu × bash
   4.4/5.2). Copy that CI workflow as the starting point.
 - **Push mechanic:** SSH has no key in this env. Use HTTPS-via-gh:
-  `git -c credential.helper='!gh auth git-credential' push https://github.com/<acct>/spec-kit-jira.git <branch>`
+  `git -c credential.helper='!gh auth git-credential' push https://github.com/<acct>/spec-kit-jira-sync.git <branch>`
 - **NO AI-attribution / Co-Authored-By trailers in commit messages.**
 - Real secrets (Jira token) live ONLY in gitignored `.env`. Never commit.
   Use placeholder identifiers in tests/fixtures (there's a privacy-guard test

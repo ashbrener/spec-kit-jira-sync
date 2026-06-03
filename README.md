@@ -1,6 +1,6 @@
 <div align="center">
 
-# spec-kit-jira
+# spec-kit-jira-sync
 
 **A real sync engine that mirrors your spec-kit specs into Jira — idempotent, drift-aware, and fail-closed.**
 
@@ -28,7 +28,7 @@ clean board, with a patient operator watching. It has no idempotency (re-running
 duplicates issues), no drift detection (it clobbers whatever a teammate
 advanced), and no failure contract (a 401 mid-run leaves a half-mirrored board).
 
-`spec-kit-jira` is the other thing — a **reconcile engine**, built the way
+`spec-kit-jira-sync` is the other thing — a **reconcile engine**, built the way
 Kubernetes builds controllers: it reads the full desired state off disk, reads
 the actual state from Jira, computes the difference, and writes only that. The
 three properties that fall out of that design are the whole pitch:

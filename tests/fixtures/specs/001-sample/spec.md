@@ -6,7 +6,7 @@
 ## Summary
 
 A small placeholder spec used to drive parser and workstate tests for the
-spec-kit-jira bridge. It carries no real coordinates and exists only as
+spec-kit-jira-sync bridge. It carries no real coordinates and exists only as
 on-disk fixture input.
 
 ## User Scenarios

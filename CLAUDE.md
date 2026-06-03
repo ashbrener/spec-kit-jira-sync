@@ -1,4 +1,4 @@
-# spec-kit-jira — agent context
+# spec-kit-jira-sync — agent context
 
 A greenfield bridge that mirrors a spec-kit project's specs into **Jira**, the
 twin of the shipped `spec-kit-linear`, consuming the neutral `workstate` format

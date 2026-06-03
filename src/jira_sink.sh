@@ -69,7 +69,7 @@ jira_sink::_dry_run() {
 #   Per-mutation diagnostic to stderr (never stdout). Used by the DRY_RUN
 #   intent lines so a --dry-run pass narrates what it WOULD write.
 jira_sink::_log() {
-    printf 'spec-kit-jira: sink: %s\n' "$*" >&2
+    printf 'spec-kit-jira-sync: sink: %s\n' "$*" >&2
 }
 
 # -----------------------------------------------------------------------------

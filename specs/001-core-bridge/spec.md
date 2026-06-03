@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: User description: "spec-kit-jira core bridge — mirror a spec-kit project's specs into Jira (Layer D reconcile only). Parser reads specs/NNN-*/, infers lifecycle phase, emits neutral workstate JSON; jira-sink consumes workstate and writes Jira issues/subtasks/status/labels/comments/links. Idempotent, drift-aware, fail-closed. Out of scope: seed/install, pull, status, the GitHub Action (Layer E)."
+**Input**: User description: "spec-kit-jira-sync core bridge — mirror a spec-kit project's specs into Jira (Layer D reconcile only). Parser reads specs/NNN-*/, infers lifecycle phase, emits neutral workstate JSON; jira-sink consumes workstate and writes Jira issues/subtasks/status/labels/comments/links. Idempotent, drift-aware, fail-closed. Out of scope: seed/install, pull, status, the GitHub Action (Layer E)."
 
 ## Clarifications
 

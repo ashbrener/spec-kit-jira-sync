@@ -19,7 +19,7 @@
 #   summary::start [<title>]
 #       Initialise module-level counters and the warning/message buffer.
 #       Optional <title> is printed at the top of the emitted block (e.g. the
-#       caller may pass "speckit.linear reconcile — repo: foo, branch: 001-…").
+#       caller may pass "speckit.jira reconcile — repo: foo, branch: 001-…").
 #       Safe to call multiple times in the same process; each call resets state.
 #
 #   summary::add <type> <message>
@@ -220,7 +220,7 @@ summary::has_errors() {
 #   Print the structured block to stderr. Format is locked by the spec sample
 #   (see specs/001-spec-kit-linear-bridge/spec.md FR-023 commentary):
 #
-#       ===== speckit.linear summary =====
+#       ===== speckit.jira summary =====
 #       <optional title line>
 #       Created: 3   Updated: 12   Archived: 1
 #       Skipped: 0   Warned: 2     Errors: 0
@@ -265,7 +265,7 @@ summary::emit() {
     lbl_errors=$(summary::_colour 31 "Errors:")
 
     {
-        printf '===== speckit.linear summary =====\n'
+        printf '===== speckit.jira summary =====\n'
         if [[ -n "$_SUMMARY_TITLE" ]]; then
             printf '%s\n' "$_SUMMARY_TITLE"
         fi

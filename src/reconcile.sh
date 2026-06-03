@@ -203,7 +203,7 @@ reconcile::log() {
     if (( ARG_QUIET == 1 )); then
         return 0
     fi
-    printf 'spec-kit-jira: %s\n' "$*" >&2
+    printf 'spec-kit-jira-sync: %s\n' "$*" >&2
 }
 
 # -----------------------------------------------------------------------------
@@ -238,7 +238,7 @@ reconcile::parse_args() {
         case "$1" in
             --spec)
                 if (( $# < 2 )); then
-                    printf 'spec-kit-jira: --spec requires a feature number argument\n' >&2
+                    printf 'spec-kit-jira-sync: --spec requires a feature number argument\n' >&2
                     reconcile::usage
                     exit 2
                 fi
@@ -263,7 +263,7 @@ reconcile::parse_args() {
                 ;;
             --on-drift)
                 if (( $# < 2 )); then
-                    printf 'spec-kit-jira: --on-drift requires a value (abort|proceed)\n' >&2
+                    printf 'spec-kit-jira-sync: --on-drift requires a value (abort|proceed)\n' >&2
                     reconcile::usage
                     exit 2
                 fi
@@ -284,7 +284,7 @@ reconcile::parse_args() {
                 ;;
             --config)
                 if (( $# < 2 )); then
-                    printf 'spec-kit-jira: --config requires a path argument\n' >&2
+                    printf 'spec-kit-jira-sync: --config requires a path argument\n' >&2
                     reconcile::usage
                     exit 2
                 fi
@@ -300,7 +300,7 @@ reconcile::parse_args() {
                 exit 0
                 ;;
             *)
-                printf 'spec-kit-jira: unknown argument: %s\n' "$1" >&2
+                printf 'spec-kit-jira-sync: unknown argument: %s\n' "$1" >&2
                 reconcile::usage
                 exit 2
                 ;;
@@ -313,7 +313,7 @@ reconcile::parse_args() {
     case "$ARG_ON_DRIFT" in
         ''|abort|proceed) : ;;
         *)
-            printf 'spec-kit-jira: --on-drift value must be abort or proceed (got %q)\n' "$ARG_ON_DRIFT" >&2
+            printf 'spec-kit-jira-sync: --on-drift value must be abort or proceed (got %q)\n' "$ARG_ON_DRIFT" >&2
             reconcile::usage
             exit 2
             ;;
@@ -334,12 +334,12 @@ reconcile::parse_args() {
         ARG_ALL=1
     fi
     if [[ -n "$ARG_SPEC" ]] && (( ARG_ALL == 1 )); then
-        printf 'spec-kit-jira: --spec and --all are mutually exclusive\n' >&2
+        printf 'spec-kit-jira-sync: --spec and --all are mutually exclusive\n' >&2
         reconcile::usage
         exit 2
     fi
     if [[ -n "$ARG_SPEC" && ! "$ARG_SPEC" =~ ^[0-9]+$ ]]; then
-        printf 'spec-kit-jira: --spec value must be numeric (got %q)\n' "$ARG_SPEC" >&2
+        printf 'spec-kit-jira-sync: --spec value must be numeric (got %q)\n' "$ARG_SPEC" >&2
         exit 2
     fi
 
@@ -1817,7 +1817,7 @@ reconcile::main() {
     reconcile::parse_args "$@"
 
     local title
-    title="spec-kit-jira reconcile"
+    title="spec-kit-jira-sync reconcile"
     if [[ -n "$ARG_SPEC" ]]; then
         title="${title} — spec ${ARG_SPEC}"
     elif (( ARG_ALL == 1 )); then

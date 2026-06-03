@@ -103,7 +103,7 @@ readonly -a CONFIG_LABEL_PREFIXES=(
 # fatal error paths funnel through here.
 config::_die() {
     local message="$*"
-    printf 'spec-kit-jira: config: %s\n' "${message}" >&2
+    printf 'spec-kit-jira-sync: config: %s\n' "${message}" >&2
     exit 2
 }
 
@@ -113,7 +113,7 @@ config::_die() {
 # `config::validate` accumulates every missing key before exiting).
 config::_warn() {
     local message="$*"
-    printf 'spec-kit-jira: config: %s\n' "${message}" >&2
+    printf 'spec-kit-jira-sync: config: %s\n' "${message}" >&2
 }
 
 # config::_strip <raw>

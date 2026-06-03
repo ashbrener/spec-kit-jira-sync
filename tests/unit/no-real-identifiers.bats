@@ -3,7 +3,7 @@
 # =============================================================================
 # tests/unit/no-real-identifiers.bats
 #
-# Privacy guard. spec-kit-jira is (or will become) a PUBLIC repo. NO real
+# Privacy guard. spec-kit-jira-sync is (or will become) a PUBLIC repo. NO real
 # identifier may ever enter a tracked file: not a company / workspace name, a
 # project key, a person's name or email, a Jira Cloud site, an account ID, a
 # cloudId / UUID, and above all not a live Atlassian API token.

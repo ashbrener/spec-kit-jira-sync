@@ -1,4 +1,4 @@
-# PLAN — spec-kit-jira build
+# PLAN — spec-kit-jira-sync build
 
 > Strategy doc for review (per SEED-BRIEF §8). It fixes the engine-*copy* vs
 > rewrite-*fresh* boundary before any build code lands, and precedes the formal

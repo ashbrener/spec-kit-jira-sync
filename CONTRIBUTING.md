@@ -1,4 +1,4 @@
-# Contributing to spec-kit-jira
+# Contributing to spec-kit-jira-sync
 
 A Bash bridge that mirrors a spec-kit project's specs into Jira, consuming the
 neutral `workstate` format. Please read `.specify/memory/constitution.md` (the

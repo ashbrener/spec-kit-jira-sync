@@ -1,5 +1,5 @@
 # =============================================================================
-# CI for the spec-kit-jira repository itself.
+# CI for the spec-kit-jira-sync repository itself.
 #
 # This workflow catches regressions in the bridge code that lives in THIS repo:
 #   * bash implementation under src/*.sh (parser, engine, jira-sink)

@@ -1,6 +1,6 @@
 # config-template.yml
 #
-# COMMITTED PLACEHOLDER template for the spec-kit-jira bridge binding.
+# COMMITTED PLACEHOLDER template for the spec-kit-jira-sync bridge binding.
 #
 # An operator copies this file to the GITIGNORED resolved location
 #   .specify/extensions/jira/jira-config.yml

@@ -1,4 +1,4 @@
-# HANDOFF — competitive dig + model upgrades to fold into spec-kit-jira
+# HANDOFF — competitive dig + model upgrades to fold into spec-kit-jira-sync
 
 > Date: 2026-06-01. Source: a competitive investigation done in the
 > spec-kit-linear design session. This is an ACTIONABLE handoff — it asks you
@@ -33,7 +33,7 @@ strictly dominating — their flexible model + our safe engine.
 **Read:** demand is real (27★ for a prompt file in ~4 months) but UNMET at our
 quality level. Every serious-sync attempt died (sustainability warning — which
 is exactly why our tracker-agnostic engine, fix-once-all-sinks-benefit, is the
-right bet). Our spec-kit-jira (4.8k LOC, 123 tests, drift-aware engine,
+right bet). Our spec-kit-jira-sync (4.8k LOC, 123 tests, drift-aware engine,
 workstate layer) is in a different category of robustness from anything shipping.
 
 **Our defensible positioning (they cannot make this claim):**
