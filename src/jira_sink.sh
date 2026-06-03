@@ -111,7 +111,20 @@ declare -gx JIRA_SINK_SPEC_TRANSITION_FAILED="0"
 jira_sink::_normalize_adf() {
     local raw="${1:-}"
     [[ -n "$raw" && "$raw" != "null" ]] || { printf ''; return 0; }
-    printf '%s' "$raw" | jq -S -c '.' 2>/dev/null || printf ''
+    # Canonicalize for comparison. REAL-JIRA CONTRACT (verified live): Jira drops
+    # empty paragraphs on store — an empty-body doc we POST as
+    # {doc:[{paragraph,content:[]}]} round-trips on read as {doc:content:[]}. A
+    # naive compare therefore diffs forever (the Story description is rewritten
+    # every run — churn, violating SC-017 zero-write idempotency). Strip
+    # content-less paragraph nodes on BOTH sides (recursively), then sort keys +
+    # compact, so a semantically-identical body yields no diff.
+    printf '%s' "$raw" | jq -S -c '
+        walk(
+            if type == "object" and (.content | type) == "array"
+            then .content |= map(select((.type != "paragraph") or (((.content // []) | length) > 0)))
+            else . end
+        )
+    ' 2>/dev/null || printf ''
 }
 
 # jira_sink::_labels_equal <desired_json> <current_json>

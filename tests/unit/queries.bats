@@ -168,3 +168,27 @@ PY
   [ "$status" -eq 3 ]
   [ -z "$output" ]
 }
+
+# -----------------------------------------------------------------------------
+# Regression — REAL-JIRA ADF round-trip (found by the live dogfood). Jira DROPS
+# empty paragraphs on store: the empty-body Story description we POST as
+# {doc:[{paragraph,content:[]}]} reads back as {doc:content:[]}. _normalize_adf
+# MUST collapse both to the same canonical form, else the Story description
+# diffs forever → Updated:1 every run (churn; SC-017 zero-write violation).
+# -----------------------------------------------------------------------------
+@test "normalize_adf: empty-paragraph doc canonicalizes to Jira's empty-content doc (no churn)" {
+  local sent stored a b
+  sent='{"version":1,"type":"doc","content":[{"type":"paragraph","content":[]}]}'
+  stored='{"type":"doc","version":1,"content":[]}'
+  a="$(jira_sink::_normalize_adf "$sent")"
+  b="$(jira_sink::_normalize_adf "$stored")"
+  [ -n "$a" ]
+  [ "$a" = "$b" ]
+}
+
+@test "normalize_adf: a paragraph with real text is preserved (genuine content still diffs)" {
+  local doc out
+  doc='{"version":1,"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}'
+  out="$(jira_sink::_normalize_adf "$doc")"
+  [[ "$out" == *'"text":"hi"'* ]]
+}
