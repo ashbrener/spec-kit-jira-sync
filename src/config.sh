@@ -93,6 +93,74 @@ readonly -a CONFIG_LABEL_PREFIXES=(
 )
 
 # ---------------------------------------------------------------------------
+# Feature 002 — configurable artifact mapping (data-model § 1, contracts/
+# mapping-config.md). All mapping/validation logic lives HERE in the config
+# layer so the vendor-neutral engine half of reconcile.sh stays free of Jira /
+# mapping knowledge (FR-018). The `mapping:` block is OPTIONAL and additive over
+# the existing issue_types / labels / phase_status keys: absent ⇒ the alias
+# layer (`mapping::synthesize_default`) emits today's DEFAULT so behavior is
+# byte-for-byte unchanged (FR-001, FR-002).
+# ---------------------------------------------------------------------------
+
+# The four ordinal workstate levels the mapping projects (parent → child).
+readonly -a CONFIG_MAPPING_LEVELS=(
+    "repo"
+    "spec"
+    "phase"
+    "task"
+)
+
+# The synthesized DEFAULT per-level mapping (data-model § 1). Each entry is
+# "<artifact><TAB><relationship_to_parent>". When `mapping:` is absent — OR a
+# level is unspecified in a partial block (Q4 per-level inheritance) — the alias
+# layer fills the level from this table, reproducing the shipped 001 projection.
+declare -gA CONFIG_MAPPING_DEFAULT=(
+    [repo]=$'Epic\tnone'
+    [spec]=$'Story\tparent'
+    [phase]=$'Subtask\tparent'
+    [task]=$'checklist\tchecklist'
+)
+
+# The new task-identity label prefix (Q9) the alias layer synthesizes when a
+# pre-feature config omits it — the identity key for any level projecting to a
+# standalone Task issue (FR-009).
+readonly CONFIG_DEFAULT_TASK_PREFIX="speckit-task:"
+
+# The relationship_to_parent vocabulary (data-model § 1 / mapping-config.md
+# matrix). `checklist` and `none` are sentinels; `parent` / `Epic-link` are the
+# allowed hierarchy links; the dependency-style links are present in the
+# vocabulary but REJECTED as hierarchy links by the matrix.
+readonly -a CONFIG_RELATIONSHIP_VOCAB=(
+    "parent"
+    "Epic-link"
+    "none"
+    "checklist"
+    "Blocks"
+    "Relates"
+    "Implements"
+)
+
+# The relationship values REJECTED outright as a hierarchy link (Q2, FR-007):
+# they carry cross-spec dependency semantics, not nesting. `Epic-link` is NOT
+# here because it is conditionally allowed (only when the parent is an Epic).
+readonly -a CONFIG_RELATIONSHIP_REJECT=(
+    "Blocks"
+    "Relates"
+    "Implements"
+)
+
+# Tracks whether `mapping:` was explicitly present in the loaded file (vs.
+# fully alias-synthesized). Exposed via `mapping::is_explicit`: the Phase 4/US2
+# available-type probe + the initiative super-level read it to distinguish an
+# operator-declared block from the aliased default; the resolve path treats
+# both identically once `mapping::synthesize_default` has run.
+declare -g CONFIG_MAPPING_PRESENT=0
+
+# Set to 1 once the alias layer has run on the current load, so resolve/
+# validate can guard against being called on an un-synthesized state.
+declare -g CONFIG_MAPPING_SYNTHESIZED=0
+
+# ---------------------------------------------------------------------------
 # Internal helpers.
 # ---------------------------------------------------------------------------
 
@@ -283,6 +351,8 @@ hint: copy config-template.yml to ${path} and run the Jira install/seed step to 
     # Reset state so consecutive loads in the same process don't leak.
     CONFIG_VALUES=()
     CONFIG_LOADED_PATH="${path}"
+    CONFIG_MAPPING_PRESENT=0
+    CONFIG_MAPPING_SYNTHESIZED=0
 
     config::_parse_file "${path}"
 }
@@ -413,6 +483,372 @@ config::validate() {
 
     if (( ${#problems[@]} > 0 )); then
         config::_warn "validation failed for ${path}:"
+        local problem
+        for problem in "${problems[@]}"; do
+            printf '  - %s\n' "${problem}" >&2
+        done
+        exit 2
+    fi
+
+    return 0
+}
+
+# ===========================================================================
+# Feature 002 — configurable artifact mapping (mapping::* namespace).
+#
+# These functions extend config.sh with the optional `mapping:` block: parse +
+# enum-validate (mapping::parse), alias-layer default synthesis + per-level
+# inheritance (mapping::synthesize_default), per-level resolution
+# (mapping::resolve_level), and the fail-closed config-load validation gate
+# (mapping::validate, with the offline relationship matrix in
+# mapping::validate_relationships). The LIVE available-issue-type probe is
+# Phase 4/US2 — mapping::validate leaves a labelled hook for it but performs no
+# network I/O here.
+#
+# Vendor-neutrality (FR-018): all of this is config-layer; the engine half of
+# reconcile.sh never sees it.
+# ===========================================================================
+
+# mapping::_inline_to_keys <full_key> <inline-map-string>
+# The shipped _parse_file stores an inline map (`{ artifact: "Epic",
+# relationship_to_parent: "none" }`) as one raw string. The contract schema
+# uses exactly that inline form for levels, so split it into the flattened
+# child keys (e.g. `mapping.levels.repo.artifact`). Accepts the body between
+# the braces; each comma-separated `child: value` pair becomes
+# CONFIG_VALUES["<full_key>.<child>"]. Malformed pairs are a config error.
+mapping::_inline_to_keys() {
+    local full_key="$1"
+    local body="$2"
+    # Strip the surrounding braces.
+    body="${body#"{"}"
+    body="${body%"}"}"
+
+    local IFS=','
+    local pair
+    for pair in ${body}; do
+        # Skip empties from a trailing comma.
+        if [[ -z "${pair//[[:space:]]/}" ]]; then
+            continue
+        fi
+        if [[ "${pair}" != *:* ]]; then
+            config::_die "${CONFIG_LOADED_PATH}: malformed inline map for ${full_key} (no key:value): ${pair}"
+        fi
+        local ckey="${pair%%:*}"
+        local cval="${pair#*:}"
+        ckey="$(config::_strip "${ckey}")"
+        cval="$(config::_strip "${cval}")"
+        CONFIG_VALUES["${full_key}.${ckey}"]="${cval}"
+    done
+}
+
+# mapping::_enum_guard <dotted.key> <value> <allowed...>
+# Halt (exit 2) when <value> is non-empty and not one of <allowed>. An empty
+# value is accepted (the alias layer fills defaults). Used for the
+# mapping-block enum fields.
+mapping::_enum_guard() {
+    local key="$1"; shift
+    local value="$1"; shift
+    if [[ -z "${value}" ]]; then
+        return 0
+    fi
+    local candidate
+    for candidate in "$@"; do
+        if [[ "${value}" == "${candidate}" ]]; then
+            return 0
+        fi
+    done
+    config::_die "${CONFIG_LOADED_PATH}: mapping.${key}: invalid value '${value}' (allowed: $*)"
+}
+
+# mapping::parse
+# Normalise any inline-map level entries into flattened child keys, record
+# whether `mapping:` was present, enum-validate the mapping-block scalars
+# (initiative.on_absent=degrade, initiative.source=spec_input,
+# project_style∈{team-managed,classic}), then run the alias layer so every
+# level + lever has a resolved value. Fail-closed (exit 2) on a malformed enum.
+#
+# MUST be called after config::load; resolve/validate depend on it.
+mapping::parse() {
+    config::_require_loaded
+
+    # Detect presence + expand inline-map level entries. A level stored as a
+    # raw `{...}` string is the contract's inline form — split it.
+    local lvl
+    for lvl in "${CONFIG_MAPPING_LEVELS[@]}"; do
+        local lkey="mapping.levels.${lvl}"
+        local lval="${CONFIG_VALUES[${lkey}]:-}"
+        if [[ -n "${lval}" ]]; then
+            CONFIG_MAPPING_PRESENT=1
+            if [[ "${lval}" == \{*\} ]]; then
+                mapping::_inline_to_keys "${lkey}" "${lval}"
+                # The block-opener form would have stored children directly; the
+                # inline raw-string entry is now redundant — drop it.
+                unset 'CONFIG_VALUES[mapping.levels.'"${lvl}"']'
+            fi
+        fi
+    done
+
+    # Any mapping.* key at all means the block is present (covers an
+    # initiative-only or status_rollup-only block with no `levels:`).
+    local k
+    for k in "${!CONFIG_VALUES[@]}"; do
+        if [[ "${k}" == mapping.* ]]; then
+            CONFIG_MAPPING_PRESENT=1
+            break
+        fi
+    done
+
+    # Enum-validate the mapping-block scalars (only when present; empty ⇒ the
+    # alias layer fills the default).
+    mapping::_enum_guard "initiative.on_absent" \
+        "${CONFIG_VALUES[mapping.initiative.on_absent]:-}" "degrade"
+    mapping::_enum_guard "initiative.source" \
+        "${CONFIG_VALUES[mapping.initiative.source]:-}" "spec_input"
+    mapping::_enum_guard "project_style" \
+        "${CONFIG_VALUES[mapping.project_style]:-}" "team-managed" "classic"
+
+    mapping::synthesize_default
+}
+
+# mapping::synthesize_default
+# The alias layer (FR-002). Fill every mapping field the loaded config did NOT
+# specify from the synthesized DEFAULT, per-level (Q4 inheritance — NOT
+# all-or-nothing). When `mapping:` is wholly absent this reproduces today's
+# default block; when partial, only the unspecified levels/levers inherit.
+# Also synthesizes the new `labels.task_prefix` default (Q9) for any
+# pre-feature config that lacks it. Idempotent.
+mapping::synthesize_default() {
+    config::_require_loaded
+
+    # Per-level artifact + relationship_to_parent inheritance.
+    local lvl
+    for lvl in "${CONFIG_MAPPING_LEVELS[@]}"; do
+        local def="${CONFIG_MAPPING_DEFAULT[${lvl}]}"
+        local def_artifact="${def%%$'\t'*}"
+        local def_rel="${def#*$'\t'}"
+
+        local akey="mapping.levels.${lvl}.artifact"
+        local rkey="mapping.levels.${lvl}.relationship_to_parent"
+        if [[ -z "${CONFIG_VALUES[${akey}]:-}" ]]; then
+            CONFIG_VALUES["${akey}"]="${def_artifact}"
+        fi
+        if [[ -z "${CONFIG_VALUES[${rkey}]:-}" ]]; then
+            CONFIG_VALUES["${rkey}"]="${def_rel}"
+        fi
+    done
+
+    # Initiative super-level levers (OFF by default, FR-013).
+    : "${CONFIG_VALUES[mapping.initiative.enabled]:=false}"
+    : "${CONFIG_VALUES[mapping.initiative.artifact]:=Initiative}"
+    : "${CONFIG_VALUES[mapping.initiative.on_absent]:=degrade}"
+    : "${CONFIG_VALUES[mapping.initiative.source]:=spec_input}"
+
+    # Operator-declared project style (Q3) — defaults to team-managed.
+    : "${CONFIG_VALUES[mapping.project_style]:=team-managed}"
+
+    # Status rollup lever (OFF by default, Q11/FR-011).
+    : "${CONFIG_VALUES[mapping.status_rollup.enabled]:=false}"
+
+    # New task-identity label prefix (Q9). Synthesized when a pre-feature
+    # config omits it; never overwrites an operator-supplied value.
+    : "${CONFIG_VALUES[labels.task_prefix]:=${CONFIG_DEFAULT_TASK_PREFIX}}"
+
+    CONFIG_MAPPING_SYNTHESIZED=1
+}
+
+# mapping::is_explicit
+# Return 0 when the loaded config carried an explicit `mapping:` block, 1 when
+# the block was wholly alias-synthesized from the existing keys. A read-only
+# accessor for the Phase 4/US2 probe + the initiative super-level; the resolve
+# path itself does not branch on this (both cases resolve identically).
+mapping::is_explicit() {
+    config::_require_loaded
+    (( CONFIG_MAPPING_PRESENT == 1 ))
+}
+
+# mapping::resolve_level <level>
+# Echo the resolved mapping for a workstate level (engine-sink-interface-002
+# §mapping-driven projection) as:
+#
+#     <artifact><TAB><relationship_to_parent>[<TAB><on_absent>]
+#
+# The optional third field is present only when a per-level `on_absent`
+# fallback was configured (Q10). Halts on an unknown level or an unsynthesized
+# state.
+mapping::resolve_level() {
+    config::_require_loaded
+    if (( $# != 1 )); then
+        config::_die "mapping::resolve_level requires exactly one argument (level)"
+    fi
+    if (( CONFIG_MAPPING_SYNTHESIZED == 0 )); then
+        config::_die "mapping not synthesized; call \`mapping::parse\` after config::load"
+    fi
+
+    local level="$1"
+    local known=0 candidate
+    for candidate in "${CONFIG_MAPPING_LEVELS[@]}"; do
+        if [[ "${candidate}" == "${level}" ]]; then
+            known=1
+            break
+        fi
+    done
+    if (( known == 0 )); then
+        config::_die "unknown mapping level: ${level}
+hint: valid levels are ${CONFIG_MAPPING_LEVELS[*]}"
+    fi
+
+    local artifact="${CONFIG_VALUES[mapping.levels.${level}.artifact]:-}"
+    local rel="${CONFIG_VALUES[mapping.levels.${level}.relationship_to_parent]:-}"
+    local on_absent="${CONFIG_VALUES[mapping.levels.${level}.on_absent]:-}"
+
+    if [[ -n "${on_absent}" ]]; then
+        printf '%s\t%s\t%s\n' "${artifact}" "${rel}" "${on_absent}"
+    else
+        printf '%s\t%s\n' "${artifact}" "${rel}"
+    fi
+}
+
+# mapping::validate_relationships
+# The OFFLINE relationship-validation matrix (Q2, FR-007, mapping-config.md §4).
+# Resolves fully at config-load with no network round-trip because the
+# Epic-link parent-is-Epic check reads the loaded levels (classic vs
+# team-managed style is operator-declared, Q3). Accumulates every violation into
+# the nameref array <problems_ref>; the caller decides the exit. Allowed
+# hierarchy links: parent / Epic-link(only under an Epic parent) / none /
+# checklist. Rejected: Blocks / Relates / Implements as ANY hierarchy link; an
+# unknown vocabulary value; `checklist` artifact paired with a non-checklist
+# relationship; Epic-link where the parent level's artifact is not Epic.
+mapping::validate_relationships() {
+    local -n _problems_ref="$1"
+    local path="${CONFIG_LOADED_PATH}"
+
+    # Parent of each level (parent → child ordinal: repo > spec > phase > task).
+    local -A parent_of=(
+        [spec]="repo"
+        [phase]="spec"
+        [task]="phase"
+        [repo]=""
+    )
+
+    local lvl
+    for lvl in "${CONFIG_MAPPING_LEVELS[@]}"; do
+        local artifact="${CONFIG_VALUES[mapping.levels.${lvl}.artifact]:-}"
+        local rel="${CONFIG_VALUES[mapping.levels.${lvl}.relationship_to_parent]:-}"
+
+        # Vocabulary guard.
+        local in_vocab=0 v
+        for v in "${CONFIG_RELATIONSHIP_VOCAB[@]}"; do
+            if [[ "${rel}" == "${v}" ]]; then
+                in_vocab=1
+                break
+            fi
+        done
+        if (( in_vocab == 0 )); then
+            _problems_ref+=("${path}: mapping.levels.${lvl}.relationship_to_parent: unknown relationship '${rel}'")
+            continue
+        fi
+
+        # Dependency-style links are never legal hierarchy links.
+        local rejected=0 r
+        for r in "${CONFIG_RELATIONSHIP_REJECT[@]}"; do
+            if [[ "${rel}" == "${r}" ]]; then
+                _problems_ref+=("${path}: mapping.levels.${lvl}.relationship_to_parent: '${rel}' is a dependency link, not a hierarchy link")
+                rejected=1
+                break
+            fi
+        done
+        if (( rejected == 1 )); then
+            continue
+        fi
+
+        # checklist sentinel: artifact and relationship must agree.
+        if [[ "${artifact}" == "checklist" && "${rel}" != "checklist" ]]; then
+            _problems_ref+=("${path}: mapping.levels.${lvl}: artifact 'checklist' requires relationship_to_parent 'checklist' (got '${rel}')")
+            continue
+        fi
+        if [[ "${rel}" == "checklist" && "${artifact}" != "checklist" ]]; then
+            _problems_ref+=("${path}: mapping.levels.${lvl}: relationship 'checklist' requires artifact 'checklist' (got '${artifact}')")
+            continue
+        fi
+
+        # Epic-link is legal ONLY when the parent level projects to an Epic.
+        if [[ "${rel}" == "Epic-link" ]]; then
+            local parent="${parent_of[${lvl}]}"
+            local parent_artifact=""
+            if [[ -n "${parent}" ]]; then
+                parent_artifact="${CONFIG_VALUES[mapping.levels.${parent}.artifact]:-}"
+            fi
+            if [[ "${parent_artifact}" != "Epic" ]]; then
+                _problems_ref+=("${path}: mapping.levels.${lvl}.relationship_to_parent: 'Epic-link' is legal only when the parent level projects to an Epic (parent '${parent:-<none>}' projects to '${parent_artifact:-<none>}')")
+            fi
+        fi
+    done
+}
+
+# mapping::validate
+# The single fail-closed config-load validation gate (FR-017, mapping-config.md
+# §validation order). Runs the OFFLINE checks — required-id presence for
+# configured artifacts, then the relationship matrix — accumulating EVERY
+# problem before exiting 2 (so the operator sees them all). Any failure writes
+# nothing for the run (the engine maps the config rc to exit 2).
+#
+# Order (mapping-config.md §validation order):
+#   1. parse + alias (already done by mapping::parse — guarded here).
+#   2. required-id: a level projecting to a standalone Task issue needs
+#      issue_types.task; an enabled initiative needs issue_types.initiative.
+#   3. relationship matrix (mapping::validate_relationships).
+#   4. available-type probe — LIVE, Phase 4/US2. SEAM/HOOK only (see below); no
+#      network here.
+#
+# `checklist` is a render sentinel, not an issue type, and is exempt from the
+# required-id + (future) available-type checks.
+mapping::validate() {
+    config::_require_loaded
+    if (( CONFIG_MAPPING_SYNTHESIZED == 0 )); then
+        config::_die "mapping not synthesized; call \`mapping::parse\` after config::load"
+    fi
+
+    local -a problems=()
+    local path="${CONFIG_LOADED_PATH}"
+
+    # --- 2. Required-id presence for configured artifacts --------------------
+    # A level projecting to a standalone "Task" issue requires issue_types.task
+    # (FR-009 identity needs a real issue-type id). `checklist` projects no
+    # issue and is exempt. Epic/Story/Subtask reuse the existing required ids
+    # (already enforced by config::validate); a non-default artifact that maps
+    # to "Task" is the new required-id surface for this phase.
+    local lvl
+    for lvl in "${CONFIG_MAPPING_LEVELS[@]}"; do
+        local artifact="${CONFIG_VALUES[mapping.levels.${lvl}.artifact]:-}"
+        case "${artifact}" in
+            Task)
+                if [[ -z "${CONFIG_VALUES[issue_types.task]:-}" ]]; then
+                    problems+=("${path}: issue_types.task: missing (required: level '${lvl}' projects to a Task issue)")
+                fi
+                ;;
+        esac
+    done
+
+    # An enabled initiative super-level needs issue_types.initiative ONLY when
+    # the instance supports Initiative; absence is handled at write time by
+    # on_absent: degrade (FR-013), NOT a config error. So no required-id check
+    # here — the available-type probe (step 4, Phase 4/US2) routes initiative
+    # absence to degrade.
+
+    # --- 3. Relationship matrix (offline) ------------------------------------
+    mapping::validate_relationships problems
+
+    # --- 4. Available-issue-type probe (LIVE) — Phase 4/US2 SEAM -------------
+    # Out of scope for Phase 2 (Foundational): the live issue-type metadata
+    # probe (FR-005, Q10) and the absent-type policy (FR-006) are implemented in
+    # Phase 4/US2 as `mapping::detect_available_types` +
+    # `mapping::validate_available`, which will append their findings to
+    # `problems` HERE, ordered after the relationship matrix, before the single
+    # exit below. Leaving the hook explicit keeps the validation order
+    # (parse → required-id → relationship → available-type) intact.
+
+    if (( ${#problems[@]} > 0 )); then
+        config::_warn "mapping validation failed for ${path}:"
         local problem
         for problem in "${problems[@]}"; do
             printf '  - %s\n' "${problem}" >&2

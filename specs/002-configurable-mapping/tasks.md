@@ -42,14 +42,14 @@ config-load (exit 2), before any write.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T003 [P] Unit test `tests/unit/mapping_parse.bats` — parse the `mapping:` block from `jira-config.yml` (initiative / project_style / levels / status_rollup) per `contracts/mapping-config.md` schema; malformed enum values (`on_absent`≠`degrade`, `source`≠`spec_input`) are config errors (exit 2)
-- [ ] T004 [P] Unit test `tests/unit/mapping_alias.bats` — absent `mapping:` synthesizes the default block (repo→Epic, spec→Story, phase→Subtask, task→checklist, initiative/rollup off); a pre-feature config loads byte-for-byte unchanged; an explicit default block equals the synthesized one (alias equivalence, FR-002, US1 scenario 3)
-- [ ] T005 [P] Unit test `tests/unit/mapping_inherit.bats` — a partial `mapping:` block (only some levels specified) inherits the synthesized default per unspecified level (Q4); not an all-or-nothing error
-- [ ] T006 [P] Unit test `tests/unit/mapping_validate.bats` — the config-load validation order (parse → required-id → relationship matrix → available-type) runs as a single fail-closed gate; any failure exits 2 and writes nothing (FR-017, `mapping-config.md` §validation order)
-- [ ] T007 Implement `mapping::parse` in `src/config.sh` — parse the `mapping:` block into the loaded config; validate `initiative.on_absent`=`degrade`, `initiative.source`=`spec_input`, `project_style`∈`{team-managed,classic}` (fail-closed, exit 2)
-- [ ] T008 Implement `mapping::synthesize_default` + alias layer in `src/config.sh` — emit the default block when `mapping:` is absent; apply per-level inheritance for unspecified levels (Q4); add the new `labels.task_prefix` (`speckit-task:`) default (Q9)
-- [ ] T009 Implement `mapping::resolve_level` in `src/config.sh` — return `{artifact, relationship_to_parent, on_absent?}` for a given level from the loaded (or aliased) block (engine-sink-interface-002 §mapping-driven projection)
-- [ ] T010 Implement the config-load validation framework `mapping::validate` in `src/config.sh` — single fail-closed gate ordering required-id, relationship-matrix, and available-type checks; collects to a workspace-level config error (exit 2) before any write (FR-017)
+- [x] T003 [P] Unit test `tests/unit/mapping_parse.bats` — parse the `mapping:` block from `jira-config.yml` (initiative / project_style / levels / status_rollup) per `contracts/mapping-config.md` schema; malformed enum values (`on_absent`≠`degrade`, `source`≠`spec_input`) are config errors (exit 2)
+- [x] T004 [P] Unit test `tests/unit/mapping_alias.bats` — absent `mapping:` synthesizes the default block (repo→Epic, spec→Story, phase→Subtask, task→checklist, initiative/rollup off); a pre-feature config loads byte-for-byte unchanged; an explicit default block equals the synthesized one (alias equivalence, FR-002, US1 scenario 3)
+- [x] T005 [P] Unit test `tests/unit/mapping_inherit.bats` — a partial `mapping:` block (only some levels specified) inherits the synthesized default per unspecified level (Q4); not an all-or-nothing error
+- [x] T006 [P] Unit test `tests/unit/mapping_validate.bats` — the config-load validation order (parse → required-id → relationship matrix → available-type) runs as a single fail-closed gate; any failure exits 2 and writes nothing (FR-017, `mapping-config.md` §validation order)
+- [x] T007 Implement `mapping::parse` in `src/config.sh` — parse the `mapping:` block into the loaded config; validate `initiative.on_absent`=`degrade`, `initiative.source`=`spec_input`, `project_style`∈`{team-managed,classic}` (fail-closed, exit 2)
+- [x] T008 Implement `mapping::synthesize_default` + alias layer in `src/config.sh` — emit the default block when `mapping:` is absent; apply per-level inheritance for unspecified levels (Q4); add the new `labels.task_prefix` (`speckit-task:`) default (Q9)
+- [x] T009 Implement `mapping::resolve_level` in `src/config.sh` — return `{artifact, relationship_to_parent, on_absent?}` for a given level from the loaded (or aliased) block (engine-sink-interface-002 §mapping-driven projection)
+- [x] T010 Implement the config-load validation framework `mapping::validate` in `src/config.sh` — single fail-closed gate ordering required-id, relationship-matrix, and available-type checks; collects to a workspace-level config error (exit 2) before any write (FR-017)
 
 **Checkpoint**: the `mapping:` block parses, aliases to today's default, inherits
 per level, and validates fail-closed — the foundation every story builds on.
