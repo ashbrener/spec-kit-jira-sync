@@ -312,7 +312,7 @@ workstate::_phase_child() {
 }
 
 # ---------------------------------------------------------------------------
-# workstate::item_for_spec <spec_dir> [generated_iso_unused]
+# workstate::item_for_spec <spec_dir> [generated_iso_unused] [state_hint]
 #
 # Maps one spec directory (`specs/NNN-<short>/`) to a single workstate item
 # (kind="spec") and prints it as JSON on stdout. Returns non-zero (and emits
@@ -322,7 +322,7 @@ workstate::_phase_child() {
 #   id            "<NNN>-<short-name>"            (stable idempotency key)
 #   title         spec.md heading
 #   kind          "spec"
-#   state         parser::lifecycle_phase token
+#   state         parser::lifecycle_phase token (or the caller's state_hint)
 #   body          spec.md Summary section          (omitted when empty)
 #   labels        ["speckit-spec:<NNN>"]
 #   item_source   { path, last_commit_iso }
@@ -332,10 +332,22 @@ workstate::_phase_child() {
 #
 # The second arg is accepted for signature symmetry but unused at item level;
 # `generated_iso` lives on the document's `source`, not per item.
+#
+# The OPTIONAL third arg is a pre-computed lifecycle-phase token (a neutral
+# `workflow_state_uuids` key such as `merged`/`ready_to_merge`). When supplied
+# it OVERRIDES the artifact-ladder inference for the item's `state`. The
+# producer's filesystem ladder (parser::lifecycle_phase) cannot see git
+# merge/PR state — that signal lives in the engine, which already resolves it
+# once per spec via git_helpers::pr_state. Passing the engine's resolved token
+# in keeps merge-detection vendor-neutral (it stays an engine/parser concern,
+# never a Jira concern) while ensuring a spec read as `merged` actually carries
+# `state: "merged"` so the sink's merged→Done transition fires. Empty / omitted
+# → fall back to the artifact-ladder inference unchanged.
 # ---------------------------------------------------------------------------
 workstate::item_for_spec() {
     local spec_dir="${1%/}"
     # Second positional arg intentionally unused (document-level concern).
+    local state_hint="${3:-}"
 
     local spec_md="${spec_dir}/spec.md"
     local tasks_md="${spec_dir}/tasks.md"
@@ -354,7 +366,14 @@ workstate::item_for_spec() {
     local item_id="${feature_number}-${short_name}"
     local title state body label path last_commit_iso notes_json links_json
     title="$(workstate::_spec_title "$spec_dir")"
-    state="$(parser::lifecycle_phase "$spec_dir" || true)"
+    # Prefer the engine's pre-resolved lifecycle token (it folds in git
+    # merge/PR state the filesystem ladder cannot see); otherwise infer from
+    # artifacts on disk.
+    if [[ -n "$state_hint" ]]; then
+        state="$state_hint"
+    else
+        state="$(parser::lifecycle_phase "$spec_dir" || true)"
+    fi
     [[ -n "$state" ]] || state="specifying"
     state="$(workstate::_normalize_phase "$state")"
     body="$(workstate::_spec_body "$spec_dir")"
