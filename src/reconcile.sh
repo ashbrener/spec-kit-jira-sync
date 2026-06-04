@@ -383,6 +383,44 @@ reconcile::load_config() {
     # none of it (FR-018) — it only ensures the block is loaded + validated.
     mapping::parse
     mapping::validate
+    # Feature 002 (US2/T023): the LIVE available-issue-type gate. Probe the target
+    # project's issue-type metadata ONCE, then validate every configured artifact
+    # against the detected set — BOTH BEFORE the write loop, both fail-closed
+    # (FR-005, FR-006, FR-017). This is step 4 of the §validation-order; it runs
+    # AFTER the offline gate (mapping::validate: required-id + relationship
+    # matrix) so the cheap offline rejects fire first. The detection + validation
+    # live in config.sh (FR-018 vendor-neutrality); the engine half here only
+    # orchestrates the call order and maps any failure to the project-level halt.
+    #
+    # The default-aliased path probes too — but its artifacts (Epic/Story/Subtask;
+    # task→checklist is exempt) are present on any standard project, so a
+    # default-config run validates clean. A run whose probe is UNREADABLE (rc 3)
+    # fails closed: we cannot prove the configured types exist, so we abort with
+    # the project-level config exit rather than risk writing onto a board that
+    # lacks them. mapping::validate_available `exit 2`s on an absent type (the
+    # same fail-closed contract as the offline gate), writing nothing.
+    # Capture the probe via a tempfile so the subshell's rc is observable: a
+    # `mapfile < <(...)` would mask a failing probe (process substitution rc is
+    # not propagated to mapfile). The if/else fork is the codebase's set -e-safe
+    # rc-capture idiom.
+    local -a available_types=()
+    local _probe_file detect_rc=0
+    _probe_file="$(mktemp "${TMPDIR:-/tmp}/reconcile-probe.XXXXXX")"
+    if mapping::detect_available_types >"$_probe_file"; then
+        detect_rc=0
+    else
+        detect_rc=$?
+    fi
+    if (( detect_rc == 0 )); then
+        mapfile -t available_types <"$_probe_file"
+    fi
+    rm -f "$_probe_file"
+    if (( detect_rc != 0 )); then
+        summary::add error "available issue types for project unreadable (rc ${detect_rc}); failing closed — no write (verify the project key + credentials)"
+        reconcile::promote_exit 2
+        return 2
+    fi
+    mapping::validate_available "${available_types[@]}"
     reconcile::log "config loaded from ${path}"
 }
 

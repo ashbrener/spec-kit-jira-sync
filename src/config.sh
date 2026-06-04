@@ -858,3 +858,136 @@ mapping::validate() {
 
     return 0
 }
+
+# ===========================================================================
+# Feature 002 — Phase 4/US2: the LIVE available-issue-type probe + absent-type
+# policy (FR-005, FR-006, Q10, mapping-config.md §available-type detection).
+#
+# These complete the §validation-order step 4. They are kept SEPARATE from
+# mapping::validate (which stays offline so the foundational unit suites can run
+# the matrix without a transport): the engine (reconcile.sh, T023) runs
+# mapping::validate first (offline gate), then probes the project once via
+# mapping::detect_available_types, then runs mapping::validate_available with the
+# detected set — all BEFORE the write loop, all fail-closed (exit 2 / rc 3).
+#
+# Vendor-neutrality (FR-018): the probe lives in the config layer; the engine
+# half of reconcile.sh only orchestrates the call order, it embeds no Jira /
+# issue-type knowledge.
+# ===========================================================================
+
+# mapping::detect_available_types
+# Probe the TARGET project's issue-type metadata and echo the available-type
+# NAME set, one name per line (FR-005, Q10). The probe is a READ via
+# src/jira_rest.sh (`jira_rest::get "project/<key>"`), which returns the project
+# resource carrying `.issueTypes[].name`. A real unreadable read — transport /
+# auth / permission (jira_rest rc 3/4/5) OR a 200 whose body has no parseable
+# issue-type array — returns rc 3 (FAIL-CLOSED): we must NOT validate configured
+# artifacts against an empty/partial set, which would let an absent type slip
+# through (or reject a present one). The caller feeds the echoed set to
+# mapping::validate_available.
+#
+# Depends on jira_rest.sh being sourced (the engine + the sink both source it;
+# the unit suite sources it explicitly). project_key comes from the loaded,
+# gitignored config (Principle V/IX) — never a hardcoded coordinate.
+mapping::detect_available_types() {
+    config::_require_loaded
+
+    local project
+    project="${CONFIG_VALUES[project_key]:-}"
+    if [[ -z "${project}" ]]; then
+        # No project to probe — unreadable (fail-closed). config::validate would
+        # already have halted on this; guard defensively.
+        return 3
+    fi
+
+    local raw rc=0
+    if raw="$(jira_rest::get "project/${project}" 2>/dev/null)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    if (( rc != 0 )); then
+        # A real unreadable read (transport / auth / permission). Fail closed so
+        # the engine never validates against an unknown set.
+        return 3
+    fi
+
+    # Extract the issue-type names. A 200 whose body carries no parseable
+    # `.issueTypes[].name` is ALSO unreadable — we cannot prove the available
+    # set, so fail closed rather than treat it as empty.
+    local names
+    if ! names="$(printf '%s' "${raw}" | jq -e -r '
+        (.issueTypes // []) | map(.name // empty) | .[]
+    ' 2>/dev/null)"; then
+        return 3
+    fi
+    printf '%s\n' "${names}"
+    return 0
+}
+
+# mapping::validate_available <available-type-name>...
+# The absent-type policy (FR-006, Q10, mapping-config.md §available-type). Reject
+# every configured `levels.<level>.artifact` (and `initiative.artifact` when the
+# super-level is enabled) that does NOT appear in the supplied available-type set
+# — UNLESS that level declares a per-level `on_absent: "<type>"` fallback whose
+# value IS in the set, the only escape. An `on_absent` whose fallback is ITSELF
+# absent STILL hard-errors. The `checklist` render sentinel is EXEMPT (it
+# projects no issue type). Initiative absence is NOT a hard error — it routes to
+# `on_absent: degrade` (FR-013) — so the enabled-initiative artifact is checked
+# only as a soft note, never a halt, here.
+#
+# A single fail-closed gate: accumulates EVERY violation (so the operator sees
+# them all), then exits 2 if any remain — writing nothing for the run (FR-017).
+# The caller (reconcile.sh T023) supplies the set from
+# mapping::detect_available_types.
+mapping::validate_available() {
+    config::_require_loaded
+    if (( CONFIG_MAPPING_SYNTHESIZED == 0 )); then
+        config::_die "mapping not synthesized; call \`mapping::parse\` after config::load"
+    fi
+
+    # Build a membership lookup over the supplied available-type set.
+    local -A available=()
+    local t
+    for t in "$@"; do
+        [[ -n "${t}" ]] && available["${t}"]=1
+    done
+
+    local -a problems=()
+    local path="${CONFIG_LOADED_PATH}"
+
+    local lvl
+    for lvl in "${CONFIG_MAPPING_LEVELS[@]}"; do
+        local artifact="${CONFIG_VALUES[mapping.levels.${lvl}.artifact]:-}"
+        # The checklist sentinel projects no issue type — exempt from the probe.
+        if [[ -z "${artifact}" || "${artifact}" == "checklist" ]]; then
+            continue
+        fi
+        # Present in the detected set → fine.
+        if [[ -n "${available[${artifact}]:-}" ]]; then
+            continue
+        fi
+        # Absent. The ONLY escape is a per-level on_absent fallback whose value is
+        # itself available. A fallback that is also absent still hard-errors.
+        local fallback="${CONFIG_VALUES[mapping.levels.${lvl}.on_absent]:-}"
+        if [[ -n "${fallback}" ]]; then
+            if [[ -n "${available[${fallback}]:-}" ]]; then
+                continue
+            fi
+            problems+=("${path}: mapping.levels.${lvl}: artifact '${artifact}' is absent from the project and its on_absent fallback '${fallback}' is also absent (no available substitute)")
+            continue
+        fi
+        problems+=("${path}: mapping.levels.${lvl}: artifact '${artifact}' is not an available issue type in project ${CONFIG_VALUES[project_key]:-<unknown>} (set an on_absent fallback to an available type, or pick a type the project offers)")
+    done
+
+    if (( ${#problems[@]} > 0 )); then
+        config::_warn "available-type validation failed for ${path}:"
+        local problem
+        for problem in "${problems[@]}"; do
+            printf '  - %s\n' "${problem}" >&2
+        done
+        exit 2
+    fi
+
+    return 0
+}

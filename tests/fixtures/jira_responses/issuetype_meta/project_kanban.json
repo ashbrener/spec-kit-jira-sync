@@ -1,0 +1,10 @@
+{
+  "id": "10200",
+  "key": "PROJ",
+  "name": "Sample Kanban Project",
+  "issueTypes": [
+    { "id": "10001", "name": "Epic", "subtask": false },
+    { "id": "10004", "name": "Task", "subtask": false },
+    { "id": "10003", "name": "Subtask", "subtask": true }
+  ]
+}
