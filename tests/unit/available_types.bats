@@ -84,11 +84,12 @@ teardown() {
   [[ "$output" == *"Epic"* ]]
   [[ "$output" == *"Task"* ]]
   [[ "$output" == *"Subtask"* ]]
-  # The defining Kanban property: no Story type at all.
-  printf '%s\n' "$output" | grep -qx "Story" && {
+  # The defining Kanban property: no Story type at all. NF5-class HARD guard
+  # (plain `if`, no `|| true`) so a stray Story actually fails the test.
+  if printf '%s\n' "$output" | grep -qx "Story"; then
     echo "Kanban fixture must NOT contain Story" >&2
     false
-  } || true
+  fi
 }
 
 # --- a real unreadable read fails closed (rc 3) ------------------------------

@@ -198,9 +198,17 @@ _input() {
 @test "RE-RUN zero-churn for the phase (Epic-link) level — 0 PUTs, skipped" {
   jira_shim::set_response GET "*/search/jql*" search_found_story.json 200
 
-  # The already-mirrored phase Story: summary "Phase 1", empty body, the phase
-  # identity label, and its parent ALREADY the spec Epic (PROJ-100). The fixed
-  # parent-diff must therefore find a match and write nothing.
+  # The already-mirrored phase Story: summary "Phase 1", empty body, its parent
+  # ALREADY the spec Epic (PROJ-100), AND the EXTRA labels (the identity, a phase
+  # label, and an operator-added label). The fixed parent-diff must find a match
+  # and write nothing.
+  #
+  # NF6 HARDENING: the desired input now carries the SAME extra labels via the
+  # `labels` field, so this re-run exercises the F1 label-union fix — the FIXED
+  # sink composes desired == ([identity] + input.labels | unique) == the current
+  # set → a TRUE zero diff. The un-fixed sink rebuilt desired = [identity] ONLY,
+  # so it would diff the two extra labels away and PUT labels:["task-phase:1"] —
+  # flipping disposition to "updated" and firing a PUT, failing this test.
   local current="${BATS_TEST_TMPDIR}/phase_current.json"
   local desired_desc
   desired_desc="$(adf::from_markdown "")"
@@ -208,30 +216,51 @@ _input() {
     '{fields:{
         summary: "Phase 1",
         description: $desc,
-        labels: ["task-phase:1"],
+        labels: ["task-phase:1", "phase:specified", "team:bridge"],
         parent: { key: "PROJ-100" }
      }}' > "$current"
   jira_shim::set_response GET "*/rest/api/3/issue/PROJ-101*" "$current" 200
 
+  # Drive the disposition assertion in the CURRENT shell (not `run`) so the global
+  # survives. The input carries the phase + operator labels (the sink always adds
+  # the identity label itself), so F1 is exercised.
+  local desired_input
+  desired_input="$(jq -cn '{summary:"Phase 1", body:"", labels:["phase:specified","team:bridge"]}')"
   JIRA_SINK_LEVEL_DISPOSITION=""
-  sync_level_artifact phase "task-phase:1" "PROJ-100" "$(_input "Phase 1")" >/dev/null
+  sync_level_artifact phase "task-phase:1" "PROJ-100" "$desired_input" >/dev/null
   [ "$JIRA_SINK_LEVEL_DISPOSITION" = "skipped" ] || {
     echo "expected skipped (phase zero churn), got '${JIRA_SINK_LEVEL_DISPOSITION}'" >&2
     jira_shim::requests >&2
     false
   }
 
+  # NF6: also exercise the F3 read-before-write fix in link_to_parent directly —
+  # an already-correctly-parented child must perform ZERO PUTs. On the un-fixed
+  # code link_to_parent PUT unconditionally, so this fired a PUT and failed.
+  jira_shim::reset
+  jira_shim::set_response GET "*/issue/*/transitions" transitions.json 200
+  local already="${BATS_TEST_TMPDIR}/phase_already_parented.json"
+  jq -n '{fields:{summary:"Phase 1", description:null, labels:["task-phase:1"], parent:{key:"PROJ-100"}}}' > "$already"
+  jira_shim::set_response GET "*/rest/api/3/issue/PROJ-101*" "$already" 200
+  jira_shim::set_response PUT "*/rest/api/3/issue/*" issue_create_ok.json 204
+  run link_to_parent "PROJ-101" "PROJ-100" "Epic-link"
+  [ "$status" -eq 0 ]
+
   local reqs puts
   reqs="$(jira_shim::requests)"
   puts="$(printf '%s\n' "$reqs" | grep -c '^METHOD PUT$' || true)"
-  [ "$puts" -eq 0 ] || { echo "expected 0 PUTs on the phase re-run, got $puts" >&2; printf '%s\n' "$reqs" >&2; false; }
+  [ "$puts" -eq 0 ] || { echo "expected 0 PUTs on the already-parented phase re-run, got $puts" >&2; printf '%s\n' "$reqs" >&2; false; }
 }
 
 @test "RE-RUN zero-churn for the task (parent) level — 0 PUTs, skipped" {
   jira_shim::set_response GET "*/search/jql*" search_found_story.json 200
 
-  # The already-mirrored task Task: summary "Task 1", empty body, the task
-  # identity label, parent ALREADY the phase Story (PROJ-100, the fixture key).
+  # The already-mirrored task Task: summary "Task 1", empty body, parent ALREADY
+  # the phase Story (PROJ-100, the fixture key), AND the EXTRA labels (identity +
+  # an operator-added label). NF6 HARDENING: the desired input carries the same
+  # operator label via `labels`, exercising the F1 union — the FIXED sink yields a
+  # TRUE zero diff; the un-fixed sink (desired=[identity]) would PUT, wiping
+  # team:bridge and flipping disposition to "updated".
   local current="${BATS_TEST_TMPDIR}/task_current.json"
   local desired_desc
   desired_desc="$(adf::from_markdown "")"
@@ -239,15 +268,74 @@ _input() {
     '{fields:{
         summary: "Task 1",
         description: $desc,
-        labels: ["speckit-task:001-1-1"],
+        labels: ["speckit-task:001-1-1", "team:bridge"],
         parent: { key: "PROJ-100" }
      }}' > "$current"
   jira_shim::set_response GET "*/rest/api/3/issue/PROJ-101*" "$current" 200
 
+  local desired_input
+  desired_input="$(jq -cn '{summary:"Task 1", body:"", labels:["team:bridge"]}')"
   JIRA_SINK_LEVEL_DISPOSITION=""
-  sync_level_artifact task "speckit-task:001-1-1" "PROJ-100" "$(_input "Task 1")" >/dev/null
+  sync_level_artifact task "speckit-task:001-1-1" "PROJ-100" "$desired_input" >/dev/null
   [ "$JIRA_SINK_LEVEL_DISPOSITION" = "skipped" ] || {
     echo "expected skipped (task zero churn), got '${JIRA_SINK_LEVEL_DISPOSITION}'" >&2
+    jira_shim::requests >&2
+    false
+  }
+
+  # NF6: exercise the F3 read-before-write fix — an already-correctly-parented
+  # Task performs ZERO PUTs via link_to_parent (parent relationship).
+  jira_shim::reset
+  jira_shim::set_response GET "*/issue/*/transitions" transitions.json 200
+  local already="${BATS_TEST_TMPDIR}/task_already_parented.json"
+  jq -n '{fields:{summary:"Task 1", description:null, labels:["speckit-task:001-1-1"], parent:{key:"PROJ-100"}}}' > "$already"
+  jira_shim::set_response GET "*/rest/api/3/issue/PROJ-102*" "$already" 200
+  jira_shim::set_response PUT "*/rest/api/3/issue/*" issue_create_ok.json 204
+  run link_to_parent "PROJ-102" "PROJ-100" "parent"
+  [ "$status" -eq 0 ]
+
+  local reqs puts
+  reqs="$(jira_shim::requests)"
+  puts="$(printf '%s\n' "$reqs" | grep -c '^METHOD PUT$' || true)"
+  [ "$puts" -eq 0 ] || { echo "expected 0 PUTs on the already-parented task re-run, got $puts" >&2; printf '%s\n' "$reqs" >&2; false; }
+}
+
+# --- NF4: a re-run zero-churn test with a NON-EMPTY markdown body -------------
+# Every other re-run zero-churn test uses body:"" so the ADF round-trip leg is
+# unproven for the generic path. This drives sync_level_artifact with a NON-EMPTY
+# markdown body (heading + a list + a code span) and a matching stored-ADF
+# current fixture, asserting the description diff is {} (0 PUTs / skipped) on a
+# re-run.
+@test "NF4: RE-RUN zero-churn with a NON-EMPTY markdown body (ADF round-trip) — 0 PUTs, skipped" {
+  jira_shim::set_response GET "*/search/jql*" search_found_story.json 200
+
+  # A markdown body with a heading, a list, and an inline code span. The stored
+  # current description is the EXACT ADF that adf::from_markdown produces for it,
+  # so the normalize-equal description diff yields {} on a re-run.
+  local body
+  body="$(printf '%s\n' '# Heading' '- first item' '- second item' 'inline `code span` here')"
+  local desired_desc
+  desired_desc="$(adf::from_markdown "$body")"
+
+  local current="${BATS_TEST_TMPDIR}/nf4_body_current.json"
+  jq -n --argjson desc "$desired_desc" \
+    '{fields:{
+        summary: "001 — Sample spec",
+        description: $desc,
+        labels: ["speckit-spec:001"],
+        parent: { key: "PROJ-100" }
+     }}' > "$current"
+  jira_shim::set_response GET "*/rest/api/3/issue/PROJ-101*" "$current" 200
+
+  # spec→Epic (relationship none, no parent diff). Pass the SAME markdown body as
+  # the desired input; the sink renders it via adf::from_markdown and diffs the
+  # normalized ADF against the stored one → {} → skipped, zero PUTs.
+  local desired_input
+  desired_input="$(jq -cn --arg b "$body" '{summary:"001 — Sample spec", body:$b}')"
+  JIRA_SINK_LEVEL_DISPOSITION=""
+  sync_level_artifact spec "speckit-spec:001" "PROJ-100" "$desired_input" >/dev/null
+  [ "$JIRA_SINK_LEVEL_DISPOSITION" = "skipped" ] || {
+    echo "expected skipped (non-empty-body zero churn), got '${JIRA_SINK_LEVEL_DISPOSITION}'" >&2
     jira_shim::requests >&2
     false
   }
@@ -255,5 +343,5 @@ _input() {
   local reqs puts
   reqs="$(jira_shim::requests)"
   puts="$(printf '%s\n' "$reqs" | grep -c '^METHOD PUT$' || true)"
-  [ "$puts" -eq 0 ] || { echo "expected 0 PUTs on the task re-run, got $puts" >&2; printf '%s\n' "$reqs" >&2; false; }
+  [ "$puts" -eq 0 ] || { echo "expected 0 PUTs on the non-empty-body re-run, got $puts" >&2; printf '%s\n' "$reqs" >&2; false; }
 }

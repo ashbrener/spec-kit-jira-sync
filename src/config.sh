@@ -955,6 +955,15 @@ mapping::validate_available() {
 
     local -a problems=()
     local path="${CONFIG_LOADED_PATH}"
+    # Track whether ANY on_absent substitution mutated the resolved mapping. A
+    # substitution can change a level's artifact away from its declared type
+    # (e.g. a parent level Epic → Task), which can INVALIDATE a child's
+    # relationship that the OFFLINE matrix (mapping::validate, run earlier on the
+    # PRE-substitution mapping) already passed — most notably an `Epic-link`
+    # child whose parent no longer projects to an Epic (NF1). When a
+    # substitution happens we MUST re-run the relationship matrix against the
+    # POST-substitution mapping before the single fail-closed exit below.
+    local substituted=0
 
     local lvl
     for lvl in "${CONFIG_MAPPING_LEVELS[@]}"; do
@@ -983,6 +992,7 @@ mapping::validate_available() {
                 # pending fallback for an already-substituted level.
                 CONFIG_VALUES[mapping.levels.${lvl}.artifact]="${fallback}"
                 CONFIG_VALUES[mapping.levels.${lvl}.on_absent]=""
+                substituted=1
                 continue
             fi
             problems+=("${path}: mapping.levels.${lvl}: artifact '${artifact}' is absent from the project and its on_absent fallback '${fallback}' is also absent (no available substitute)")
@@ -990,6 +1000,17 @@ mapping::validate_available() {
         fi
         problems+=("${path}: mapping.levels.${lvl}: artifact '${artifact}' is not an available issue type in project ${CONFIG_VALUES[project_key]:-<unknown>} (set an on_absent fallback to an available type, or pick a type the project offers)")
     done
+
+    # NF1 — re-validate the relationship matrix against the POST-substitution
+    # mapping. The offline matrix (mapping::validate) ran BEFORE the probe, on the
+    # PRE-substitution artifacts; an on_absent substitution that moved a parent
+    # level away from Epic could leave a child `Epic-link` invalid yet unrejected.
+    # Re-running the matrix here closes that hole, fail-closed (exit 2, zero
+    # writes), and only when a substitution actually occurred (so the default /
+    # no-fallback path pays no cost and reports no duplicate matrix findings).
+    if (( substituted == 1 )); then
+        mapping::validate_relationships problems
+    fi
 
     if (( ${#problems[@]} > 0 )); then
         config::_warn "available-type validation failed for ${path}:"

@@ -1,0 +1,10 @@
+{
+  "id": "10500",
+  "key": "PROJ",
+  "name": "Sample Project Without Epic",
+  "issueTypes": [
+    { "id": "10002", "name": "Story", "subtask": false },
+    { "id": "10004", "name": "Task", "subtask": false },
+    { "id": "10003", "name": "Subtask", "subtask": true }
+  ]
+}

@@ -167,13 +167,15 @@ YAML
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 
-  # No create POST fired for a checklist-sentinel level.
+  # No create POST fired for a checklist-sentinel level. NF5-class HARD guard
+  # (plain `if`, no `|| true`) so a stray create actually fails the test.
   local reqs
   reqs="$(jira_shim::requests)"
-  printf '%s\n' "$reqs" | grep -q '^URL .*rest/api/3/issue$' && {
+  if printf '%s\n' "$reqs" | grep -q '^URL .*rest/api/3/issue$'; then
     echo "checklist sentinel must NOT POST a create" >&2
+    printf '%s\n' "$reqs" >&2
     false
-  } || true
+  fi
 }
 
 # --- F2/F5: a fallback-rescued level POSTs the FALLBACK issue-type id ----------
@@ -239,11 +241,14 @@ YAML
     false
   }
   # The ABSENT primary Story id (10002) MUST NOT be on the create payload.
-  printf '%s\n' "$reqs" | grep -q '"id":"10002"' && {
+  # NF5: a HARD guard — the prior `&& { ...; false; } || true` idiom swallowed the
+  # `false`, so the guard could never fail (it passed even when 10002 WAS posted).
+  # A plain `if` with no `|| true` lets a leak actually fail the test.
+  if printf '%s\n' "$reqs" | grep -q '"id":"10002"'; then
     echo "the absent primary Story id 10002 must NOT be POSTed" >&2
     printf '%s\n' "$reqs" >&2
     false
-  } || true
+  fi
 }
 
 # --- link_to_parent ----------------------------------------------------------

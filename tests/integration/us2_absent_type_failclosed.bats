@@ -226,11 +226,15 @@ YAML
     printf '%s\n' "$reqs" >&2
     false
   }
-  printf '%s\n' "$reqs" | grep -q '"id":"10002"' && {
+  # NF5: a HARD guard — if the absent primary Story id (10002) leaks onto the
+  # wire the test MUST fail. The prior `&& { ...; false; } || true` idiom
+  # swallowed the `false`, so the guard could never fail (it passed even when the
+  # forbidden id WAS posted). Use a plain `if`-with-no-`|| true` so a leak fails.
+  if printf '%s\n' "$reqs" | grep -q '"id":"10002"'; then
     echo "the absent primary Story id 10002 must NOT be POSTed" >&2
     printf '%s\n' "$reqs" >&2
     false
-  } || true
+  fi
 }
 
 # --- (b) a nonsensical hierarchy relationship is rejected before the probe ---
@@ -342,4 +346,95 @@ YAML
 
   run _load_config "$conf" "error_401.json" 401
   [ "$status" -eq 2 ]
+}
+
+# --- NF1: an on_absent substitution that breaks a child Epic-link is rejected -
+# The offline relationship matrix (mapping::validate) runs BEFORE the live probe,
+# on the PRE-substitution mapping. An on_absent fallback that moves a PARENT
+# level away from Epic can invalidate a child `Epic-link` that the offline matrix
+# already passed. The available-type gate must RE-RUN the matrix against the
+# POST-substitution mapping and fail closed (exit 2, zero writes). Without the
+# NF1 re-validation this slips through (exit 0); with it, exit 2.
+@test "NF1: an on_absent substitution that strips a child Epic-link's Epic parent is rejected (exit 2)" {
+  # repo→Epic (on_absent: Story) ; spec→Story Epic-link under the repo Epic.
+  # The project LACKS Epic but offers Story/Task/Subtask, so repo Epic is absent
+  # and substitutes to Story — leaving spec's Epic-link parent projecting Story,
+  # NOT Epic. Pre-substitution the matrix passes (repo IS Epic); post-substitution
+  # it must reject.
+  local conf="${BATS_TEST_TMPDIR}/nf1-epic-link-broken.yml"
+  cat > "$conf" <<'YAML'
+jira:
+  project_key: "PROJ"
+  issue_types:
+    epic: "10001"
+    story: "10002"
+    subtask: "10003"
+    task: "10004"
+  phase_status:
+    specifying: "20001"
+    planning: "20002"
+    tasking: "20003"
+    implementing: "20004"
+    ready_to_merge: "20005"
+    merged: "20006"
+  transitions: {}
+  labels:
+    spec_prefix: "speckit-spec:"
+    repo_prefix: "speckit-repo:"
+    phase_prefix: "task-phase:"
+    lifecycle_prefix: "phase:"
+    task_prefix: "speckit-task:"
+  mapping:
+    levels:
+      repo: { artifact: "Epic",  relationship_to_parent: "none", on_absent: "Story" }
+      spec: { artifact: "Story", relationship_to_parent: "Epic-link" }
+YAML
+
+  # The project offers Story/Task/Subtask but NO Epic → repo substitutes Epic→Story.
+  run _load_config "$conf" "issuetype_meta/project_no_epic.json" 200
+  [ "$status" -eq 2 ]
+  # The rejection names the now-invalid Epic-link.
+  [[ "$output" == *"Epic-link"* ]]
+}
+
+@test "NF1: the post-substitution Epic-link rejection writes NOTHING (zero POST/PUT)" {
+  local conf="${BATS_TEST_TMPDIR}/nf1-epic-link-broken2.yml"
+  cat > "$conf" <<'YAML'
+jira:
+  project_key: "PROJ"
+  issue_types:
+    epic: "10001"
+    story: "10002"
+    subtask: "10003"
+    task: "10004"
+  phase_status:
+    specifying: "20001"
+    planning: "20002"
+    tasking: "20003"
+    implementing: "20004"
+    ready_to_merge: "20005"
+    merged: "20006"
+  transitions: {}
+  labels:
+    spec_prefix: "speckit-spec:"
+    repo_prefix: "speckit-repo:"
+    phase_prefix: "task-phase:"
+    lifecycle_prefix: "phase:"
+    task_prefix: "speckit-task:"
+  mapping:
+    levels:
+      repo: { artifact: "Epic",  relationship_to_parent: "none", on_absent: "Story" }
+      spec: { artifact: "Story", relationship_to_parent: "Epic-link" }
+YAML
+
+  ( _load_config "$conf" "issuetype_meta/project_no_epic.json" 200 ) || true
+
+  local reqs writes
+  reqs="$(jira_shim::requests)"
+  writes="$(printf '%s\n' "$reqs" | grep -cE '^METHOD (POST|PUT)$' || true)"
+  [ "$writes" -eq 0 ] || {
+    echo "post-substitution matrix rejection must write NOTHING, saw $writes writes" >&2
+    printf '%s\n' "$reqs" >&2
+    false
+  }
 }
