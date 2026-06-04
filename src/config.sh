@@ -972,6 +972,17 @@ mapping::validate_available() {
         local fallback="${CONFIG_VALUES[mapping.levels.${lvl}.on_absent]:-}"
         if [[ -n "${fallback}" ]]; then
             if [[ -n "${available[${fallback}]:-}" ]]; then
+                # RESCUE — and SUBSTITUTE: the gate honors the fallback here, but
+                # the WRITE path resolves the artifact via mapping::resolve_level
+                # (which reads mapping.levels.<lvl>.artifact). Without writing the
+                # fallback back into the resolved mapping, the projection would
+                # POST the ABSENT primary's issue-type id (F2/F5). Write the
+                # fallback into the level's artifact so resolve_level / the sink
+                # project the type the project actually offers (FR-006). Clear the
+                # now-satisfied on_absent so resolve_level no longer advertises a
+                # pending fallback for an already-substituted level.
+                CONFIG_VALUES[mapping.levels.${lvl}.artifact]="${fallback}"
+                CONFIG_VALUES[mapping.levels.${lvl}.on_absent]=""
                 continue
             fi
             problems+=("${path}: mapping.levels.${lvl}: artifact '${artifact}' is absent from the project and its on_absent fallback '${fallback}' is also absent (no available substitute)")

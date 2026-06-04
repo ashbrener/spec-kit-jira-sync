@@ -111,3 +111,26 @@ teardown() {
   run mapping::detect_available_types
   [ "$status" -eq 3 ]
 }
+
+# --- F7: a VALID 200 whose issueTypes is empty/absent fails closed (rc 3) ------
+
+@test "detect_available_types: a valid 200 with an EMPTY issueTypes returns rc 3 (fail-closed)" {
+  # A well-formed JSON project resource whose issueTypes is [] proves NOTHING
+  # about the available set (we'd validate every configured artifact as absent,
+  # or — worse if treated as success — skip the gate entirely). Fail closed.
+  jira_shim::set_response GET "*/project/PROJ*" issuetype_meta/project_no_types.json 200
+
+  run mapping::detect_available_types
+  [ "$status" -eq 3 ]
+}
+
+@test "detect_available_types: a valid 200 with NO issueTypes key returns rc 3 (fail-closed)" {
+  # The issueTypes array is entirely absent (a partial/wrong project resource) —
+  # also unprovable → fail closed rather than treat as an empty available set.
+  local tmp="${BATS_TEST_TMPDIR}/no-issuetypes-key.json"
+  jq -n '{id:"10400", key:"PROJ", name:"Sample Project Missing Issue Types"}' > "$tmp"
+  jira_shim::set_response GET "*/project/PROJ*" "$tmp" 200
+
+  run mapping::detect_available_types
+  [ "$status" -eq 3 ]
+}

@@ -176,9 +176,89 @@ YAML
   } || true
 }
 
+# --- F2/F5: a fallback-rescued level POSTs the FALLBACK issue-type id ----------
+
+@test "sync_level_artifact: an on_absent-rescued level creates the FALLBACK type (not the absent primary)" {
+  # spec→Story (issue_types.story=10002) is ABSENT on a Kanban project; on_absent:
+  # Task (issue_types.task=10004) IS available. validate_available must SUBSTITUTE
+  # the fallback so resolve_level/the projection POST the Task id — NOT the absent
+  # Story id. On the un-fixed code resolve_level still returns Story, so the POST
+  # carries 10002 and this test fails.
+  local conf3="${BATS_TEST_TMPDIR}/fallback.yml"
+  cat > "$conf3" <<'YAML'
+jira:
+  project_key: "PROJ"
+  issue_types:
+    epic: "10001"
+    story: "10002"
+    subtask: "10003"
+    task: "10004"
+  phase_status:
+    specifying: "20001"
+    planning: "20002"
+    tasking: "20003"
+    implementing: "20004"
+    ready_to_merge: "20005"
+    merged: "20006"
+  transitions: {}
+  labels:
+    spec_prefix: "speckit-spec:"
+    repo_prefix: "speckit-repo:"
+    phase_prefix: "task-phase:"
+    lifecycle_prefix: "phase:"
+    task_prefix: "speckit-task:"
+  mapping:
+    levels:
+      spec:
+        artifact: "Story"
+        relationship_to_parent: "parent"
+        on_absent: "Task"
+YAML
+  config::load "$conf3"
+  config::validate
+  mapping::parse
+  mapping::validate
+  # The Kanban project offers Epic/Task/Subtask, NO Story → the gate honors the
+  # Story→Task fallback AND substitutes it into the resolved level.
+  mapping::validate_available Epic Task Subtask
+
+  jira_shim::reset
+  jira_shim::set_response GET "*/issue/*/transitions" transitions.json 200
+  jira_shim::set_response GET "*/search/jql*" search_absent.json 200
+  jira_shim::set_response POST "*/rest/api/3/issue" issue_create_ok.json 201
+
+  run sync_level_artifact spec "speckit-spec:001" "PROJ-100" "$(_task_input)"
+  [ "$status" -eq 0 ]
+
+  local reqs
+  reqs="$(jira_shim::requests)"
+  # The FALLBACK Task id (10004) is on the wire.
+  printf '%s\n' "$reqs" | grep -q '"id":"10004"' || {
+    echo "expected the fallback Task id 10004 on the create, got:" >&2
+    printf '%s\n' "$reqs" >&2
+    false
+  }
+  # The ABSENT primary Story id (10002) MUST NOT be on the create payload.
+  printf '%s\n' "$reqs" | grep -q '"id":"10002"' && {
+    echo "the absent primary Story id 10002 must NOT be POSTed" >&2
+    printf '%s\n' "$reqs" >&2
+    false
+  } || true
+}
+
 # --- link_to_parent ----------------------------------------------------------
 
+# A current-issue read whose parent does NOT match the desired one, so the
+# read-before-write parent diff (F3) still fires a PUT.
+_current_other_parent() {
+  local f="${BATS_TEST_TMPDIR}/cur_other_parent.json"
+  jq -n '{fields:{summary:"x", description:null, labels:[], parent:{key:"PROJ-999"}}}' > "$f"
+  printf '%s' "$f"
+}
+
 @test "link_to_parent: parent relationship sets the issue's parent" {
+  # Read-before-write: the child currently has a DIFFERENT parent → the PUT fires.
+  jira_shim::set_response GET "*/rest/api/3/issue/PROJ-300*" "$(_current_other_parent)" 200
   jira_shim::set_response PUT "*/rest/api/3/issue/*" issue_create_ok.json 204
 
   run link_to_parent "PROJ-300" "PROJ-200" "parent"
@@ -191,6 +271,7 @@ YAML
 }
 
 @test "link_to_parent: Epic-link sets the parent field too (modern Jira)" {
+  jira_shim::set_response GET "*/rest/api/3/issue/PROJ-300*" "$(_current_other_parent)" 200
   jira_shim::set_response PUT "*/rest/api/3/issue/*" issue_create_ok.json 204
 
   run link_to_parent "PROJ-300" "PROJ-200" "Epic-link"
@@ -199,6 +280,30 @@ YAML
   local reqs
   reqs="$(jira_shim::requests)"
   printf '%s\n' "$reqs" | grep -q 'PROJ-200'
+}
+
+# --- F3 zero-churn: an already-correctly-parented child performs 0 PUTs --------
+
+@test "link_to_parent: an already-correctly-parented issue performs ZERO PUTs (zero churn)" {
+  # The child's CURRENT parent already equals the desired one → read-before-write
+  # must NO-OP (no PUT). On the un-fixed (unconditional-PUT) code this fires one
+  # PUT and the assertion below fails.
+  local cur="${BATS_TEST_TMPDIR}/cur_same_parent.json"
+  jq -n '{fields:{summary:"x", description:null, labels:[], parent:{key:"PROJ-200"}}}' > "$cur"
+  jira_shim::set_response GET "*/rest/api/3/issue/PROJ-300*" "$cur" 200
+  jira_shim::set_response PUT "*/rest/api/3/issue/*" issue_create_ok.json 204
+
+  run link_to_parent "PROJ-300" "PROJ-200" "parent"
+  [ "$status" -eq 0 ]
+
+  local reqs puts
+  reqs="$(jira_shim::requests)"
+  puts="$(printf '%s\n' "$reqs" | grep -c '^METHOD PUT$' || true)"
+  [ "$puts" -eq 0 ] || {
+    echo "expected ZERO PUTs on an already-correctly-parented child, got $puts" >&2
+    printf '%s\n' "$reqs" >&2
+    false
+  }
 }
 
 @test "link_to_parent: none is a no-op (no request)" {

@@ -195,6 +195,8 @@ degradation.
 - [ ] T052 [P] Update `CHANGELOG.md` (Unreleased: configurable artifact mapping — alias default, per-level mapping + validation, 2-level checklist, status rollup, workstate-direct, initiative super-level)
 - [ ] T053 [P] Validate `specs/002-configurable-mapping/quickstart.md` against the shipped behavior (modes, validation, workstate-direct) and correct any drift
 - [ ] T054 Run the exact CI locally via `scripts/check.sh` (shellcheck + yamllint + markdownlint + bats unit) and fix to green before pushing
+- [ ] T055 [later] Wire `sync_level_artifact` + `link_to_parent` into the engine orchestration in `src/reconcile.sh` (`process_spec`), replacing the 001-era hardcoded `ensure_repo_epic` / `sync_spec_issue` / `sync_task_phase_subissues` call path with the mapping-driven projection for ALL configured levels. TRACKED DEFERRAL: US2 (T022) ships `sync_level_artifact`/`link_to_parent` as the proven, unit+integration-tested mapping-driven projection, but the engine still drives the 001 orchestrators — a DELIBERATE phase boundary (the engine half of `reconcile.sh` stays vendor-neutral and is not part of US2's sink-scoped change). Out of US2 scope; do NOT wire it within US2.
+- [ ] T056 [later] End-to-end live-reconcile zero-churn test of a NON-DEFAULT label/parent shape (a configured phase/operator label set + a configured parent relationship) driven through the wired engine (T055), asserting a re-run is 0 created / 0 updated / 0 PUT across every parent-bearing level — the full-stack analogue of the sink-level F1/F3/F4 zero-churn assertions added in the adversarial-review hardening.
 
 ---
 

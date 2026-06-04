@@ -23,15 +23,33 @@ with the configured relationship (validated already at config-load per
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `mapping::resolve_level <level>` | `{artifact, relationship_to_parent, on_absent?}` | reads the loaded `mapping:` block (or alias default) |
+| `mapping::resolve_level <level>` | `{artifact, relationship_to_parent, on_absent?}` | reads the loaded `mapping:` block (or alias default); when the available-type gate **rescued** an absent primary via its `on_absent` fallback, `resolve_level` returns the FALLBACK artifact (the substitution was written back at probe time) so the projection writes the type the project actually offers |
 | `sync_level_artifact <level> <identity_label> <parent_id> <input_json>` | `{id,key}` (issue) or empty (`checklist` sentinel) | create/update the configured artifact under `parent_id` using `relationship_to_parent`; idempotent match by `identity_label` |
-| `link_to_parent <child_id> <parent_id> <relationship>` | ok | applies `parent` / `Epic-link`; no-op for `none`/`checklist` |
+| `link_to_parent <child_id> <parent_id> <relationship>` | ok | applies `parent` / `Epic-link` **only when the child's current parent differs** (read-before-write, zero-churn); no-op for `none`/`checklist` |
+
+`input_json` is the sink-neutral level payload:
+
+```json
+{ "summary": "<issue summary>", "body": "<markdown body>", "labels": ["<phase-label>", "…item labels"] }
+```
+
+- `labels` is the **desired** label set EXCLUDING the identity label (the sink
+  always adds `identity_label`). The sink composes the on-the-wire desired set as
+  `([identity_label] + (input.labels // [])) | unique` for BOTH the create and
+  the PRESENT-path label diff — so a configured phase/operator label survives an
+  idempotent update instead of being wiped (zero-churn, FR-009/SC-017). `labels`
+  is optional; an absent/empty array projects just the identity label.
 
 - A level projecting to a standalone `Task` issue matches/updates by its
   task-identity label (`task_prefix`, Q9) so re-runs update rather than re-create
   (FR-009).
 - `checklist`-sentinel levels create **no** child issue; they render into the
   parent body (below).
+- When the available-type gate honors a per-level `on_absent` fallback (the
+  configured primary is absent from the project but the fallback IS available),
+  the gate SUBSTITUTES the fallback into the resolved level so `resolve_level` /
+  `sync_level_artifact` POST the fallback's issue-type id, not the absent
+  primary's (the validation rescue and the write path agree; FR-006).
 
 ## 2-level checklist render — keyed sub-tree byte-diff (Q7)
 

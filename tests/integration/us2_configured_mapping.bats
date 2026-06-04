@@ -119,6 +119,11 @@ _input() {
   jira_shim::set_response GET "*/search/jql*" search_absent.json 200
   jira_shim::set_response POST "*/rest/api/3/issue" issue_create_ok.json 201
   jira_shim::set_response PUT "*/rest/api/3/issue/*" issue_create_ok.json 204
+  # link_to_parent reads the child's current parent first (read-before-write,
+  # F3). PROJ-102 currently has a DIFFERENT parent → the reaffirming PUT fires.
+  local cur="${BATS_TEST_TMPDIR}/proj102_other_parent.json"
+  jq -n '{fields:{summary:"Phase 1", description:null, labels:["task-phase:1"], parent:{key:"PROJ-999"}}}' > "$cur"
+  jira_shim::set_response GET "*/rest/api/3/issue/PROJ-102*" "$cur" 200
 
   # phase→Story is Epic-link under the spec Epic; the create carries the parent,
   # and an explicit link_to_parent reaffirms it.
@@ -138,9 +143,14 @@ _input() {
   # desired — so a re-run must CREATE nothing and UPDATE nothing.
   jira_shim::set_response GET "*/search/jql*" search_found_story.json 200
 
-  # Build the already-mirrored issue body the sink composes for an empty body, so
-  # the desired-vs-current diff is a true zero. The fixture's current summary is
-  # "001 — Sample spec"; match it so summary diffs to nothing too.
+  # F1 HARDENING: the already-mirrored issue carries EXTRA labels beyond the
+  # identity — a phase label (phase:specified) AND an operator-added label
+  # (team:bridge). The desired input carries those SAME extra labels via the
+  # `labels` field, so the FIXED sink composes the desired set as
+  # ([identity] + input.labels | unique) == the current set → a TRUE zero diff.
+  # The un-fixed sink rebuilt desired = [identity] ONLY, so it would diff the two
+  # extra labels away and PUT labels:["speckit-spec:001"] — WIPING them — which
+  # flips disposition to "updated" and fires a PUT, failing this test.
   local current="${BATS_TEST_TMPDIR}/current.json"
   local desired_desc
   desired_desc="$(adf::from_markdown "")"
@@ -149,17 +159,20 @@ _input() {
     '{fields:{
         summary: "001 — Sample spec",
         description: $desc,
-        labels: ["speckit-spec:001"],
+        labels: ["speckit-spec:001", "phase:specified", "team:bridge"],
         status: { id: "10000" },
         parent: { key: "PROJ-100" }
      }}' > "$current"
   jira_shim::set_response GET "*/rest/api/3/issue/PROJ-101*" "$current" 200
 
-  # spec→Epic, identity speckit-spec:001, parent PROJ-100 (matches the fixture).
-  # Call in the CURRENT shell (not `run`, a subshell) so the disposition global
-  # survives for the assertion below.
+  # The desired input carries the phase + operator labels (the sink always adds
+  # the identity label itself). spec→Epic, identity speckit-spec:001, parent
+  # PROJ-100 (matches the fixture). Call in the CURRENT shell (not `run`, a
+  # subshell) so the disposition global survives for the assertion below.
+  local desired_input
+  desired_input="$(jq -cn '{summary:"001 — Sample spec", body:"", labels:["phase:specified","team:bridge"]}')"
   JIRA_SINK_LEVEL_DISPOSITION=""
-  sync_level_artifact spec "speckit-spec:001" "PROJ-100" "$(_input "001 — Sample spec")" >/dev/null
+  sync_level_artifact spec "speckit-spec:001" "PROJ-100" "$desired_input" >/dev/null
   [ "$JIRA_SINK_LEVEL_DISPOSITION" = "skipped" ] || {
     echo "expected skipped (zero churn), got '${JIRA_SINK_LEVEL_DISPOSITION}'" >&2
     jira_shim::requests >&2
@@ -173,4 +186,74 @@ _input() {
   updates="$(printf '%s\n' "$reqs" | grep -c '^METHOD PUT$' || true)"
   [ "$creates" -eq 0 ] || { echo "expected 0 creates, got $creates" >&2; false; }
   [ "$updates" -eq 0 ] || { echo "expected 0 updates, got $updates" >&2; false; }
+}
+
+# --- F4: re-run zero-churn for the PARENT-BEARING levels ----------------------
+# The spec-level above carries relationship `none` (no parent diff). The
+# parent-bearing levels — phase (Epic-link under the spec Epic) and task (parent
+# under the phase Story) — must ALSO be zero-churn on a re-run whose current
+# parent already matches. These assert DISPOSITION=skipped and 0 PUTs, closing
+# the gap where only the relationship-`none` level was checked.
+
+@test "RE-RUN zero-churn for the phase (Epic-link) level — 0 PUTs, skipped" {
+  jira_shim::set_response GET "*/search/jql*" search_found_story.json 200
+
+  # The already-mirrored phase Story: summary "Phase 1", empty body, the phase
+  # identity label, and its parent ALREADY the spec Epic (PROJ-100). The fixed
+  # parent-diff must therefore find a match and write nothing.
+  local current="${BATS_TEST_TMPDIR}/phase_current.json"
+  local desired_desc
+  desired_desc="$(adf::from_markdown "")"
+  jq -n --argjson desc "$desired_desc" \
+    '{fields:{
+        summary: "Phase 1",
+        description: $desc,
+        labels: ["task-phase:1"],
+        parent: { key: "PROJ-100" }
+     }}' > "$current"
+  jira_shim::set_response GET "*/rest/api/3/issue/PROJ-101*" "$current" 200
+
+  JIRA_SINK_LEVEL_DISPOSITION=""
+  sync_level_artifact phase "task-phase:1" "PROJ-100" "$(_input "Phase 1")" >/dev/null
+  [ "$JIRA_SINK_LEVEL_DISPOSITION" = "skipped" ] || {
+    echo "expected skipped (phase zero churn), got '${JIRA_SINK_LEVEL_DISPOSITION}'" >&2
+    jira_shim::requests >&2
+    false
+  }
+
+  local reqs puts
+  reqs="$(jira_shim::requests)"
+  puts="$(printf '%s\n' "$reqs" | grep -c '^METHOD PUT$' || true)"
+  [ "$puts" -eq 0 ] || { echo "expected 0 PUTs on the phase re-run, got $puts" >&2; printf '%s\n' "$reqs" >&2; false; }
+}
+
+@test "RE-RUN zero-churn for the task (parent) level — 0 PUTs, skipped" {
+  jira_shim::set_response GET "*/search/jql*" search_found_story.json 200
+
+  # The already-mirrored task Task: summary "Task 1", empty body, the task
+  # identity label, parent ALREADY the phase Story (PROJ-100, the fixture key).
+  local current="${BATS_TEST_TMPDIR}/task_current.json"
+  local desired_desc
+  desired_desc="$(adf::from_markdown "")"
+  jq -n --argjson desc "$desired_desc" \
+    '{fields:{
+        summary: "Task 1",
+        description: $desc,
+        labels: ["speckit-task:001-1-1"],
+        parent: { key: "PROJ-100" }
+     }}' > "$current"
+  jira_shim::set_response GET "*/rest/api/3/issue/PROJ-101*" "$current" 200
+
+  JIRA_SINK_LEVEL_DISPOSITION=""
+  sync_level_artifact task "speckit-task:001-1-1" "PROJ-100" "$(_input "Task 1")" >/dev/null
+  [ "$JIRA_SINK_LEVEL_DISPOSITION" = "skipped" ] || {
+    echo "expected skipped (task zero churn), got '${JIRA_SINK_LEVEL_DISPOSITION}'" >&2
+    jira_shim::requests >&2
+    false
+  }
+
+  local reqs puts
+  reqs="$(jira_shim::requests)"
+  puts="$(printf '%s\n' "$reqs" | grep -c '^METHOD PUT$' || true)"
+  [ "$puts" -eq 0 ] || { echo "expected 0 PUTs on the task re-run, got $puts" >&2; printf '%s\n' "$reqs" >&2; false; }
 }

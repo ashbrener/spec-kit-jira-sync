@@ -915,6 +915,13 @@ reconcile::subissue_state_key() {
 #   workstate::item_for_spec (the neutral internal contract) rather than
 #   recomposing tracker-shaped state inline. The item is cached on a module
 #   global so reconcile::sync_task_phase_subissues reuses it without re-parsing.
+#
+#   TRACKED DEFERRAL (002 US2 phase boundary — tasks.md T055/T056): the engine
+#   still drives the 001-era sink orchestrators (sync_spec_issue /
+#   sync_task_phase_subissues / ensure_repo_epic). The mapping-driven generic
+#   projection (jira_sink.sh sync_level_artifact + link_to_parent) is shipped and
+#   tested for US2 but NOT yet wired here — that re-platforming of process_spec
+#   onto the per-level projection is a DELIBERATE later task, out of US2 scope.
 reconcile::sync_spec_issue() {
     local feature_number="$1"
     local short_name="$2"

@@ -1078,6 +1078,14 @@ sync_task_phase_subissues() {
 # config.sh (validated at config-load); this sink only translates the resolved
 # names to Jira ids/payloads. The disposition channel mirrors the 001 channel so
 # the engine's created/updated/skipped tally works for the configured path too.
+#
+# TRACKED DEFERRAL (US2 phase boundary — tasks.md T055/T056): these two
+# functions are the proven, unit+integration-tested mapping-driven projection,
+# but the engine (reconcile.sh process_spec) is NOT yet wired to call them — it
+# still drives the 001-era ensure_repo_epic / sync_spec_issue /
+# sync_task_phase_subissues orchestrators. That wiring (and a full-stack
+# live-reconcile zero-churn test of a non-default label/parent shape) is a
+# DELIBERATE later task, OUT OF US2 SCOPE — do not wire it here.
 # =============================================================================
 
 # Per-call disposition for the generic level projection (mirrors
@@ -1120,10 +1128,18 @@ sync_level_artifact() {
     body="$(printf '%s' "$input_json" | jq -r '.body // ""' 2>/dev/null || printf '')"
     description="$(adf::from_markdown "$body")"
 
-    # The identity label is the re-match key (the task_prefix identity for a
-    # Task-projected level, FR-009). It is always carried so a re-run finds it.
+    # The desired label set = the identity label (the re-match key — the
+    # task_prefix identity for a Task-projected level, FR-009; always carried so a
+    # re-run finds it) UNION the caller's desired labels (input.labels — the phase
+    # label + the workstate item's own labels). Composing the FULL set here is
+    # load-bearing for zero-churn: the PRESENT-path diff below rebuilds the desired
+    # labels from THIS value, so omitting input.labels would PUT labels:[identity]
+    # and WIPE the phase + operator labels on every update (F1). Mirrors
+    # sync_spec_issue's `([$spec,$phase] + (.labels // [])) | unique`.
     local labels_json
-    labels_json="$(jq -cn --arg id "$identity_label" '[$id]')"
+    labels_json="$(printf '%s' "$input_json" | jq -c \
+        --arg id "$identity_label" \
+        '([$id] + (.labels // [])) | unique')"
 
     # Whether the configured relationship sets a native parent link on create.
     local set_parent=0
@@ -1242,6 +1258,21 @@ link_to_parent() {
             ;;
         parent|Epic-link)
             [[ -n "$child_id" && -n "$parent_id" ]] || return 0
+            # Read-before-write (zero-churn, F3): an UNCONDITIONAL parent PUT
+            # churns on every reconcile. Read the child's current parent and
+            # NO-OP when it already matches (mirrors the sync_level_artifact
+            # parent-diff). An unreadable read fails closed (rc 3): we cannot
+            # prove the parent matches, so silently writing could clobber.
+            local current cur_parent
+            if ! current="$(query_issue_full "$child_id")"; then
+                jira_sink::_log "link_to_parent: ${child_id} read unreadable; failing closed (rc 3)"
+                return 3
+            fi
+            cur_parent="$(printf '%s' "$current" | jq -r '.parent.key // ""' 2>/dev/null || printf '')"
+            if [[ "$cur_parent" == "$parent_id" ]]; then
+                # Already correctly parented — zero churn.
+                return 0
+            fi
             local payload
             payload="$(jq -cn --arg p "$parent_id" '{fields:{parent:{key:$p}}}')"
             if ! mutate_issue_update "$child_id" "$payload"; then
