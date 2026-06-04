@@ -1,0 +1,23 @@
+{
+  "expand": "transitions",
+  "transitions": [
+    {
+      "id": "21",
+      "name": "In Progress",
+      "to": {
+        "id": "20004",
+        "name": "In Progress",
+        "statusCategory": { "id": 4, "key": "indeterminate", "name": "In Progress" }
+      }
+    },
+    {
+      "id": "31",
+      "name": "Done",
+      "to": {
+        "id": "20006",
+        "name": "Done",
+        "statusCategory": { "id": 3, "key": "done", "name": "Done" }
+      }
+    }
+  ]
+}

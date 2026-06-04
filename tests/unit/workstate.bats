@@ -41,6 +41,22 @@ setup() {
   echo "$output" | jq -e '.state == "implementing"'
 }
 
+@test "item_for_spec: a lifecycle state hint overrides the artifact ladder" {
+  # The filesystem ladder cannot see git merge/PR state; the engine resolves it
+  # and passes the token in as the 3rd arg. A `merged` hint must win over the
+  # disk-inferred `implementing` so the sink's merged→Done transition can fire.
+  run workstate::item_for_spec "$SPEC_DIR" "" "merged"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.state == "merged"'
+}
+
+@test "item_for_spec: an empty state hint falls back to the artifact ladder" {
+  # Guard the back-compat path: a blank hint must not blank out the state.
+  run workstate::item_for_spec "$SPEC_DIR" "" ""
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.state == "implementing"'
+}
+
 @test "item_for_spec: carries the derived speckit-spec:NNN label" {
   run workstate::item_for_spec "$SPEC_DIR"
   [ "$status" -eq 0 ]

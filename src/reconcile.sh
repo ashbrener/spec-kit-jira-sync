@@ -879,8 +879,16 @@ reconcile::sync_spec_issue() {
     # The producer normalizes the lifecycle phase to the documented 6-phase
     # vocabulary the sink's config maps, so the sink never sees clarifying/
     # red_team/analyzing.
+    #
+    # Pass the engine's already-resolved lifecycle token (arg 4) as the item's
+    # state hint. process_spec computed it via parser::lifecycle_phase WITH the
+    # git_helpers::pr_state merge/PR hint, so a merged feature carries
+    # `state: "merged"` here — the filesystem ladder inside item_for_spec cannot
+    # see git state and would otherwise stall at `implementing`, leaving the
+    # merged→Done status transition unfired. Merge-detection stays vendor-neutral
+    # (engine/parser), only the merged→status MAP lives in the sink's config.
     local item_json
-    if ! item_json="$(workstate::item_for_spec "$spec_dir")"; then
+    if ! item_json="$(workstate::item_for_spec "$spec_dir" "" "$lifecycle_phase")"; then
         return 1
     fi
     # Cache for the sub-issue pass (process_spec runs them back-to-back).
@@ -1657,7 +1665,9 @@ reconcile::process_spec() {
     # independent, and the spec is NOT aborted (FR-014/FR-015, Principle VIII).
     local _us4_item="${RECONCILE_WORKSTATE_ITEM:-}"
     if [[ -z "$_us4_item" ]]; then
-        _us4_item="$(workstate::item_for_spec "$spec_dir" 2>/dev/null || true)"
+        # Rebuild with the same merge-aware state hint the sink got, so the
+        # neutral item is identical to the one that drove the Story status.
+        _us4_item="$(workstate::item_for_spec "$spec_dir" "" "$lifecycle_phase" 2>/dev/null || true)"
     fi
     if [[ -n "$_us4_item" ]]; then
         local _us4_rc
