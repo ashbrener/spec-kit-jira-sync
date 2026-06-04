@@ -373,6 +373,16 @@ reconcile::load_config() {
     # project config failure).
     config::load "$path"
     config::validate
+    # Feature 002 (US1/T014): parse + alias-synthesize the optional `mapping:`
+    # block, then run the fail-closed mapping validation gate — all BEFORE the
+    # write loop. With no `mapping:` block (the pre-feature default), the alias
+    # layer reproduces today's repo→Epic / spec→Story / phase→Subtask /
+    # task→checklist projection, so the sink (which now resolves each level via
+    # mapping::resolve_level, T013) behaves byte-for-byte as 001 (FR-001, FR-002,
+    # FR-017). All mapping logic stays in config.sh; the engine half below sees
+    # none of it (FR-018) — it only ensures the block is loaded + validated.
+    mapping::parse
+    mapping::validate
     reconcile::log "config loaded from ${path}"
 }
 

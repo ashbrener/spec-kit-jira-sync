@@ -73,6 +73,97 @@ jira_sink::_log() {
 }
 
 # -----------------------------------------------------------------------------
+# Feature 002 — mapping-driven level projection (US1/T013).
+#
+# The 001 orchestrators hardcoded repo→Epic / spec→Story / phase→Subtask. They
+# now route their artifact (issue type) + parent relationship through the config
+# layer's mapping::resolve_level, so an operator's configured mapping (US2+)
+# drives the projection — WITHOUT changing the default. With no `mapping:` block,
+# the alias layer synthesizes today's default (repo→Epic, spec→Story,
+# phase→Subtask, task→checklist), so these helpers resolve to exactly the same
+# issue-type ids the 001 path used: byte-for-byte unchanged (FR-001, FR-018).
+#
+# Vendor-neutrality holds: the MAPPING (level→artifact name + relationship) lives
+# in config.sh; the sink only translates the resolved artifact NAME to its Jira
+# issue-type id via the existing issue_types.* bindings.
+# -----------------------------------------------------------------------------
+
+# jira_sink::_resolve_level <level>
+#   Echo `<artifact>\t<relationship_to_parent>` for a workstate level via the
+#   config layer's mapping::resolve_level. The engine runs mapping::parse at
+#   config-load (T014), so production always resolves through the loaded (or
+#   alias-synthesized) block. As a SELF-HEALING fallback, when the mapping was
+#   not synthesized (a caller that loaded config but skipped mapping::parse —
+#   e.g. a 001-era contract test), resolve the level from the synthesized DEFAULT
+#   table directly, so the projection is still today's default (repo→Epic,
+#   spec→Story, phase→Subtask, task→checklist). This keeps the sink's default
+#   projection byte-for-byte identical regardless of which load path reached it
+#   (FR-001), without coupling every caller to the mapping API.
+jira_sink::_resolve_level() {
+    local level="$1"
+    if [[ "${CONFIG_MAPPING_SYNTHESIZED:-0}" == "1" ]]; then
+        mapping::resolve_level "$level"
+        return
+    fi
+    # Fallback: emit the default level mapping (artifact<TAB>relationship).
+    printf '%s\n' "${CONFIG_MAPPING_DEFAULT[$level]:-}"
+}
+
+# jira_sink::_level_artifact <level>
+#   Echo the artifact name resolved for the given workstate level (e.g. `Epic`
+#   for repo, `checklist` for task in the default).
+jira_sink::_level_artifact() {
+    local level="$1"
+    jira_sink::_resolve_level "$level" | cut -f1
+}
+
+# jira_sink::_level_relationship <level>
+#   Echo the relationship_to_parent resolved for the level (e.g. `none` for repo,
+#   `parent` for spec/phase, `checklist` for task in the default).
+jira_sink::_level_relationship() {
+    local level="$1"
+    jira_sink::_resolve_level "$level" | cut -f2
+}
+
+# jira_sink::_artifact_issue_type_id <artifact>
+#   Translate a resolved artifact NAME to its configured Jira issue-type id via
+#   the existing issue_types.* bindings (Epic→issue_types.epic, etc.). The four
+#   built-in artifacts map to today's required ids; a configured Task projects to
+#   issue_types.task (US2). The `checklist` sentinel is NOT an issue type and has
+#   no id — callers must branch on it before reaching here. An unknown artifact
+#   is a config error (config::get halts on the missing key).
+jira_sink::_artifact_issue_type_id() {
+    local artifact="$1"
+    case "$artifact" in
+        Epic)      config::get issue_types.epic ;;
+        Story)     config::get issue_types.story ;;
+        Subtask)   config::get issue_types.subtask ;;
+        Task)      config::get issue_types.task ;;
+        checklist)
+            jira_sink::_log "internal: checklist is a render sentinel, not an issue type"
+            return 1
+            ;;
+        *)
+            # A non-default artifact name reuses the lowercased issue_types.<name>
+            # binding (US2 operator-configured types resolve their id the same
+            # way). config::get halts (config rc) if the id is absent.
+            local key
+            key="$(printf '%s' "$artifact" | tr '[:upper:]' '[:lower:]')"
+            config::get "issue_types.${key}"
+            ;;
+    esac
+}
+
+# jira_sink::_level_issue_type_id <level>
+#   Convenience: resolve a workstate level straight to its Jira issue-type id via
+#   the mapping layer. The default aliases (repo→Epic→10001, spec→Story→10002,
+#   phase→Subtask→10003) reproduce the exact ids the 001 orchestrators used.
+jira_sink::_level_issue_type_id() {
+    local level="$1"
+    jira_sink::_artifact_issue_type_id "$(jira_sink::_level_artifact "$level")"
+}
+
+# -----------------------------------------------------------------------------
 # US2 disposition channel.
 #
 # The orchestrators (sync_spec_issue / sync_task_phase_subissues) own the
@@ -586,7 +677,10 @@ ensure_repo_epic() {
     local repo_prefix project epic_type label
     repo_prefix="$(config::get labels.repo_prefix)"
     project="$(config::get project_key)"
-    epic_type="$(config::get issue_types.epic)"
+    # T013: the repo level's issue type is resolved through the mapping layer
+    # (default repo→Epic→issue_types.epic). Byte-for-byte unchanged in the
+    # default; an operator's mapping (US2+) re-targets it without touching this.
+    epic_type="$(jira_sink::_level_issue_type_id repo)"
     label="${repo_prefix}${repo_slug}"
 
     # Find-or-create: an existing Epic with the repo label is reused (idempotent).
@@ -656,7 +750,9 @@ sync_spec_issue() {
 
     local project story_type spec_prefix lifecycle_prefix
     project="$(config::get project_key)"
-    story_type="$(config::get issue_types.story)"
+    # T013: the spec level's issue type is resolved through the mapping layer
+    # (default spec→Story→issue_types.story). Unchanged in the default path.
+    story_type="$(jira_sink::_level_issue_type_id spec)"
     spec_prefix="$(config::get labels.spec_prefix)"
     lifecycle_prefix="$(config::get labels.lifecycle_prefix)"
 
@@ -839,7 +935,11 @@ sync_task_phase_subissues() {
 
     local project subtask_type phase_prefix
     project="$(config::get project_key)"
-    subtask_type="$(config::get issue_types.subtask)"
+    # T013: the phase level's issue type is resolved through the mapping layer
+    # (default phase→Subtask→issue_types.subtask). Unchanged in the default path.
+    # The task level (default task→checklist) renders in-body below — the
+    # checklist sentinel projects no standalone issue (FR-001).
+    subtask_type="$(jira_sink::_level_issue_type_id phase)"
     phase_prefix="$(config::get labels.phase_prefix)"
 
     # Build the phase→subtask map + the per-phase disposition map incrementally.

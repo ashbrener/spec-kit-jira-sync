@@ -65,10 +65,10 @@ byte-for-byte — the regression anchor for the whole feature.
 the mock and confirm the created/updated/skipped result is byte-identical to
 001's, including a zero-churn re-run.
 
-- [ ] T011 [P] [US1] Integration test `tests/integration/us1_default_equivalence.bats` — a config with no `mapping:` block mirrors repo→Epic / spec→Story / phase→Subtask / task→in-body checklist exactly as the shipped 001 default; assert created counts + issue shapes match the 001 baseline (spec scenario 1)
-- [ ] T012 [P] [US1] Integration test `tests/integration/us1_default_zerochurn.bats` — re-run the already-mirrored default corpus; assert zero writes (0 created / 0 updated, Epic reused), and that an explicit default `mapping:` block produces the identical result to the no-block case (spec scenarios 2–3, SC-001)
-- [ ] T013 [US1] Wire `src/jira_sink.sh` projection through `mapping::resolve_level` for the default-aliased path so the existing 001 `ensure_repo_epic` / `sync_spec_issue` / `sync_task_phase_subissues` calls route via the mapping layer without behavior change (FR-001, FR-018)
-- [ ] T014 [US1] Confirm `src/reconcile.sh` orchestration loads + aliases the `mapping:` block before the write loop and passes it to the sink; default path unchanged from 001 (regression anchor)
+- [x] T011 [P] [US1] Integration test `tests/integration/us1_default_equivalence.bats` — a config with no `mapping:` block mirrors repo→Epic / spec→Story / phase→Subtask / task→in-body checklist exactly as the shipped 001 default; assert created counts + issue shapes match the 001 baseline (spec scenario 1)
+- [x] T012 [P] [US1] Integration test `tests/integration/us1_default_zerochurn.bats` — re-run the already-mirrored default corpus; assert zero writes (0 created / 0 updated, Epic reused), and that an explicit default `mapping:` block produces the identical result to the no-block case (spec scenarios 2–3, SC-001)
+- [x] T013 [US1] Wire `src/jira_sink.sh` projection through `mapping::resolve_level` for the default-aliased path so the existing 001 `ensure_repo_epic` / `sync_spec_issue` / `sync_task_phase_subissues` calls route via the mapping layer without behavior change (FR-001, FR-018)
+- [x] T014 [US1] Confirm `src/reconcile.sh` orchestration loads + aliases the `mapping:` block before the write loop and passes it to the sink; default path unchanged from 001 (regression anchor)
 
 **Checkpoint**: US1 delivers the safety promise — upgrade safely, opt in later.
 
