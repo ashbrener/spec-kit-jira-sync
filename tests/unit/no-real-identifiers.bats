@@ -68,6 +68,30 @@ _private_patterns() {
   fi
 }
 
+@test "feature-002 fixtures are tracked (under the guard) and placeholder-only" {
+  # The new-mode fixtures + the template mapping block must be UNDER the
+  # git-ls-files scan above (so the guard actually covers them) and carry only
+  # neutral placeholders (FR-019, Privacy IX).
+  cd "$REPO_ROOT"
+  local f
+  for f in \
+    config-template.yml \
+    tests/fixtures/workstate/direct/placeholder.workstate.json \
+    tests/fixtures/jira_responses/issuetype_meta/project_scrum.json \
+    tests/fixtures/jira_responses/issuetype_meta/project_kanban.json; do
+    git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || {
+      echo "untracked (the privacy guard would not scan it): $f" >&2
+      return 1
+    }
+  done
+  # The committed mapping template + workstate-direct placeholder name only the
+  # neutral project key / example repo (never a real coordinate).
+  grep -q 'project_key: "PROJ"' config-template.yml
+  grep -q 'mapping:' config-template.yml
+  grep -q 'example-org/example-repo' \
+    tests/fixtures/workstate/direct/placeholder.workstate.json
+}
+
 @test "private deny-list, when present, actually contributes patterns" {
   # Guards against a silently-empty deny-list giving false confidence. Skips
   # cleanly in CI where the gitignored file is absent.
