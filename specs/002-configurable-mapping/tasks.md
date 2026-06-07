@@ -132,12 +132,12 @@ complete; idempotent (transition only on changed completion, Q11).
 **Independent test**: With rollup on, complete all tasks in a phase and confirm
 its issue moves to done; re-run and confirm no further transition fires.
 
-- [ ] T032 [P] [US4] Unit test `tests/unit/rollup_completion.bats` — `rollup::compute_completion` returns `complete` when all phase tasks are checked (phase level) or all specs are done (repo/top level), else `partial` (Q11)
-- [ ] T033 [P] [US4] Unit test `tests/unit/rollup_idempotent.bats` — `rollup::transition_if_changed` transitions ONLY when computed completion ≠ prior (forward and backward); unchanged completion fires no transition; rollup off sets only the spec-level status (today's behavior) (Q11, FR-012)
-- [ ] T034 [US4] Implement `rollup::compute_completion` in `src/jira_sink.sh` — phase completion from task checks, repo/top completion from spec states (engine-sink-interface-002 §status rollup)
-- [ ] T035 [US4] Implement `rollup::transition_if_changed` in `src/jira_sink.sh` — reuse the 001 `transition_issue` / `config::get_status_transition` levers; fire only on a real completion-state change (FR-011, FR-012)
-- [ ] T036 [US4] Wire rollup into `src/reconcile.sh` orchestration — gated on `mapping.status_rollup.enabled`; off by default leaves only the spec-level status set
-- [ ] T037 [US4] Integration test `tests/integration/us4_rollup.bats` — rollup on: a fully-checked phase transitions to done, an all-specs-done repo transitions its top issue to done, a re-run on unchanged completion fires no transition; rollup off sets only the spec-level status (spec scenarios 1–4, SC-006)
+- [x] T032 [P] [US4] Unit test `tests/unit/rollup_completion.bats` — `rollup::compute_completion` returns `complete` when all phase tasks are checked (phase level) or all specs are done (repo/top level), else `partial` (Q11)
+- [x] T033 [P] [US4] Unit test `tests/unit/rollup_idempotent.bats` — `rollup::transition_if_changed` transitions ONLY when computed completion ≠ prior (forward and backward); unchanged completion fires no transition; rollup off sets only the spec-level status (today's behavior) (Q11, FR-012)
+- [x] T034 [US4] Implement `rollup::compute_completion` in `src/jira_sink.sh` — phase completion from task checks, repo/top completion from spec states (engine-sink-interface-002 §status rollup)
+- [x] T035 [US4] Implement `rollup::transition_if_changed` in `src/jira_sink.sh` — reuse the 001 `transition_issue` / `config::get_status_transition` levers; fire only on a real completion-state change (FR-011, FR-012)
+- [x] T036 [US4] Wire rollup into `src/reconcile.sh` orchestration — gated on `mapping.status_rollup.enabled`; off by default leaves only the spec-level status set
+- [x] T037 [US4] Integration test `tests/integration/us4_rollup.bats` — rollup on: a fully-checked phase transitions to done, an all-specs-done repo transitions its top issue to done, a re-run on unchanged completion fires no transition; rollup off sets only the spec-level status (spec scenarios 1–4, SC-006)
 
 **Checkpoint**: US4 closes the "looks undone when it's done" gap, idempotently.
 

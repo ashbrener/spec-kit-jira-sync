@@ -1245,6 +1245,77 @@ sync_body_checklist() {
 }
 
 # =============================================================================
+# Feature 002 — Phase 6/US4: status rollup (transition only on changed
+# completion). OFF by default (mapping.status_rollup.enabled). Reuses the 001
+# transition_issue / config::get_status_transition levers — NO new status
+# surface (Q11, FR-011/FR-012). The "done" status is the one the terminal
+# lifecycle phase (`merged`) maps to; a regressed (complete→partial) issue
+# transitions back to the active (`implementing`) status.
+# =============================================================================
+
+# rollup::compute_completion <kind> <items_json>
+#   kind=phase: <items_json> is the phase's tasks array [{done}], `complete`
+#     iff it is non-empty AND every task is checked.
+#   kind=repo:  <items_json> is the specs' lifecycle states ["implementing",…],
+#     `complete` iff non-empty AND every spec is in the terminal `merged` state.
+#   Anything else (or empty) is `partial` — no vacuous done. Echoes the verdict.
+rollup::compute_completion() {
+    local kind="${1:-}" items="${2:-[]}"
+    local complete=1
+    case "$kind" in
+        phase)
+            printf '%s' "$items" \
+                | jq -e '(length > 0) and (all(.[]; (.done // false) == true))' \
+                    >/dev/null 2>&1 || complete=0 ;;
+        repo)
+            printf '%s' "$items" \
+                | jq -e '(length > 0) and (all(.[]; . == "merged"))' \
+                    >/dev/null 2>&1 || complete=0 ;;
+        *)
+            complete=0 ;;
+    esac
+    if (( complete == 1 )); then printf 'complete\n'; else printf 'partial\n'; fi
+    return 0
+}
+
+# rollup::done_status_id
+#   The status id the rollup treats as "done" — the one the terminal lifecycle
+#   phase (`merged`) maps to. Echoes the status id (empty if unmapped). Used by
+#   the caller to derive an issue's PRIOR completion from its current status.
+rollup::done_status_id() {
+    local st
+    st="$(config::get_status_transition "merged" 2>/dev/null)" || { printf ''; return 0; }
+    printf '%s\n' "${st%%$'\t'*}"
+}
+
+# rollup::transition_if_changed <issue_key> <computed> <prior>
+#   Transition <issue_key> to reflect <computed> completion ONLY when it differs
+#   from <prior> (forward AND backward); equal ⇒ `noop`, no write (FR-012).
+#   complete ⇒ the done status (`merged`); partial ⇒ the active status
+#   (`implementing`). Reuses config::get_status_transition + transition_issue.
+#   Echoes `transitioned` or `noop`; a transport failure returns rc 1.
+rollup::transition_if_changed() {
+    local key="${1:-}" computed="${2:-partial}" prior="${3:-}"
+    if [[ "$computed" == "$prior" ]]; then
+        printf 'noop\n'
+        return 0
+    fi
+    local phase target
+    if [[ "$computed" == "complete" ]]; then phase="merged"; else phase="implementing"; fi
+    if ! target="$(config::get_status_transition "$phase" 2>/dev/null)"; then
+        # No status mapping for the target phase → nothing to transition to.
+        printf 'noop\n'
+        return 0
+    fi
+    if ! transition_issue "$key" "$target"; then
+        jira_sink::_log "rollup::transition_if_changed: transition for ${key} failed"
+        return 1
+    fi
+    printf 'transitioned\n'
+    return 0
+}
+
+# =============================================================================
 # Feature 002 — Phase 4/US2: mapping-driven level projection
 # (engine-sink-interface-002 §mapping-driven projection).
 #

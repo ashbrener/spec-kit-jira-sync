@@ -109,6 +109,9 @@ declare -g _RECONCILE_OVERVIEW_WARNED=0
 # (newline-separated): `<lifecycle_phase>\t<last_touched_epoch>`.
 declare -g _RECONCILE_LIFECYCLE_ROWS=""
 
+# Repo slug captured once (US4 repo-level rollup runs post-loop and needs it).
+declare -g _RECONCILE_REPO_SLUG=""
+
 # Per-spec workstate-item cache. reconcile::sync_spec_issue builds the neutral
 # workstate item once and stashes it here so reconcile::sync_task_phase_subissues
 # reuses it without re-parsing the spec dir. Reset on each process_spec entry.
@@ -1016,6 +1019,104 @@ reconcile::_phase_is_checklist() {
     [[ "$artifact" == "checklist" ]]
 }
 
+# reconcile::_rollup_enabled
+#   0 (true) when the optional status rollup is on (mapping.status_rollup.enabled,
+#   US4). OFF by default — so the default path never touches rollup.
+reconcile::_rollup_enabled() {
+    [[ "${CONFIG_VALUES[mapping.status_rollup.enabled]:-false}" == "true" ]]
+}
+
+# reconcile::rollup_phases <item_json> <phase_map_json> <feature_number>
+#   US4 phase-level rollup (3-level only): transition each phase Subtask to the
+#   done status when all its tasks are checked, and back to the active status
+#   when not — firing ONLY on a real completion-state change (FR-012). `prior` is
+#   derived from the Subtask's current status. An unreadable read fails closed.
+reconcile::rollup_phases() {
+    local item_json="$1" phase_map="$2" feature_number="$3"
+    local done_status
+    done_status="$(rollup::done_status_id)"
+
+    local phase_index key
+    while IFS=$'\t' read -r phase_index key; do
+        [[ -n "$key" && "$key" != "null" ]] || continue
+        local tasks computed
+        tasks="$(printf '%s' "$item_json" | jq -c --arg p "$phase_index" '
+            [ (.children // [])[]
+              | select((((.id // "") | [match("[0-9]+$")?][0].string) // "") == $p)
+              | (.extensions.tasks // [])[] ]' 2>/dev/null || printf '[]')"
+        computed="$(rollup::compute_completion phase "$tasks")"
+
+        local cur cur_status prior
+        if ! cur="$(query_issue_full "$key")"; then
+            summary::add error "spec ${feature_number}: phase ${phase_index} rollup status read unreadable — fail-closed (Jira may be incomplete)"
+            reconcile::promote_exit 3
+            continue
+        fi
+        cur_status="$(printf '%s' "$cur" | jq -r '.status.id // ""' 2>/dev/null || printf '')"
+        if [[ -n "$done_status" && "$cur_status" == "$done_status" ]]; then
+            prior="complete"
+        else
+            prior="partial"
+        fi
+
+        local verdict rc=0
+        verdict="$(rollup::transition_if_changed "$key" "$computed" "$prior")" || rc=$?
+        if (( rc != 0 )); then
+            summary::add error "spec ${feature_number}: phase ${phase_index} rollup transition failed (transport) — board status not applied"
+            reconcile::promote_exit 1
+        elif [[ "$verdict" == "transitioned" ]]; then
+            summary::add updated "spec ${feature_number}: phase ${phase_index} Subtask rolled up (${computed})"
+        fi
+    done < <(printf '%s' "$phase_map" | jq -r 'to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null || true)
+}
+
+# reconcile::rollup_repo_epic
+#   US4 repo-level rollup (post-loop): transition the repo Epic to the done
+#   status when EVERY spec is merged, and back to active otherwise — firing ONLY
+#   on a real completion-state change. Off-path unless rollup is enabled. Reads
+#   the accumulated lifecycle states (_RECONCILE_LIFECYCLE_ROWS) + the captured
+#   repo slug; fail-closed on an unreadable Epic read.
+reconcile::rollup_repo_epic() {
+    reconcile::_rollup_enabled || return 0
+    [[ -n "${_RECONCILE_REPO_SLUG:-}" ]] || return 0
+    [[ -n "${_RECONCILE_LIFECYCLE_ROWS:-}" ]] || return 0
+
+    local states computed
+    states="$(printf '%s\n' "$_RECONCILE_LIFECYCLE_ROWS" \
+        | awk -F'\t' 'NF{print $1}' \
+        | jq -Rsc 'split("\n") | map(select(length > 0))' 2>/dev/null || printf '[]')"
+    computed="$(rollup::compute_completion repo "$states")"
+
+    local epic_key
+    if ! epic_key="$(ensure_repo_epic "$_RECONCILE_REPO_SLUG")"; then
+        summary::add error "repo Epic rollup unreadable — fail-closed, top-level status not applied"
+        reconcile::promote_exit 3
+        return 0
+    fi
+    local cur done_status cur_status prior
+    if ! cur="$(query_issue_full "$epic_key")"; then
+        summary::add error "repo Epic rollup status read unreadable — fail-closed"
+        reconcile::promote_exit 3
+        return 0
+    fi
+    done_status="$(rollup::done_status_id)"
+    cur_status="$(printf '%s' "$cur" | jq -r '.status.id // ""' 2>/dev/null || printf '')"
+    if [[ -n "$done_status" && "$cur_status" == "$done_status" ]]; then
+        prior="complete"
+    else
+        prior="partial"
+    fi
+
+    local verdict rc=0
+    verdict="$(rollup::transition_if_changed "$epic_key" "$computed" "$prior")" || rc=$?
+    if (( rc != 0 )); then
+        summary::add error "repo Epic rollup transition failed (transport) — top-level status not applied"
+        reconcile::promote_exit 1
+    elif [[ "$verdict" == "transitioned" ]]; then
+        summary::add updated "repo Epic rolled up (${computed})"
+    fi
+}
+
 # reconcile::sync_task_phase_subissues <spec_issue_id> <feature_number> <spec_dir>
 #   For each task phase (a workstate child), create one Subtask under the Story.
 #   Returns the per-phase sub-issue ids as a JSON object keyed by phase index
@@ -1563,6 +1664,15 @@ reconcile::process_spec() {
     # Feature branch is the canonical `<NNN>-<short-name>`.
     local feature_branch="${feature_number}-${short_name}"
 
+    # Capture the repo slug once (same derivation the sink uses) so the post-loop
+    # repo-level rollup (US4) can resolve the Epic without a spec_dir in hand.
+    if [[ -z "${_RECONCILE_REPO_SLUG:-}" ]]; then
+        _RECONCILE_REPO_SLUG="$(git rev-parse --show-toplevel 2>/dev/null | xargs -r basename 2>/dev/null || true)"
+        if [[ -z "$_RECONCILE_REPO_SLUG" ]]; then
+            _RECONCILE_REPO_SLUG="$(basename "$(dirname "$(dirname "${spec_dir%/}")")" 2>/dev/null || true)"
+        fi
+    fi
+
     # --- Phase inference ----------------------------------------------
     # Hand the PR-state hint through to the parser so retroactive sync
     # lands directly on `merged` / `ready_to_merge` without simulating
@@ -1770,6 +1880,13 @@ reconcile::process_spec() {
         fi
     fi
 
+    # --- Status rollup: phase Subtasks (US4; off by default) ----------
+    # 3-level only: in 2-level mode phase_map is `{}` (no Subtasks) so this
+    # no-ops. Reuses the neutral item rebuilt for the links/comments pass.
+    if reconcile::_rollup_enabled && [[ "$phase_map" != "{}" && -n "$_us4_item" ]]; then
+        reconcile::rollup_phases "$_us4_item" "$phase_map" "$feature_number"
+    fi
+
     # --- Record lifecycle for the Project Status aggregate ------------
     # A drift `abort` returns before this point, so an operator-skipped spec
     # does not influence Project Status decisions.
@@ -1944,6 +2061,11 @@ reconcile::main() {
     for spec_dir in "${spec_dirs[@]}"; do
         reconcile::process_spec "$spec_dir"
     done
+
+    # Step 4.5 — repo-level status rollup (US4; off by default). Runs once after
+    # the per-spec loop so "every spec merged" is known; transitions the repo
+    # Epic to done only on a real completion-state change.
+    reconcile::rollup_repo_epic
 
     # Step 5 — summary emission (Principle VIII).
     summary::emit
