@@ -28,8 +28,8 @@ untouched except for the `--workstate` input source (FR-018).
 
 ## Phase 1: Setup
 
-- [ ] T001 [P] Add the feature's empty fixture trees for the new modes: `tests/fixtures/jira_responses/issuetype_meta/` (available-type probe responses) and `tests/fixtures/workstate/direct/` (workstate-direct inputs), placeholders only
-- [ ] T002 [P] Add a committed placeholder `config-template.yml` `mapping:` block (initiative/levels/status_rollup, all defaults) mirroring `contracts/mapping-config.md` — no real coordinates
+- [x] T001 [P] Add the feature's empty fixture trees for the new modes: `tests/fixtures/jira_responses/issuetype_meta/` (available-type probe responses) and `tests/fixtures/workstate/direct/` (workstate-direct inputs), placeholders only
+- [x] T002 [P] Add a committed placeholder `config-template.yml` `mapping:` block (initiative/levels/status_rollup, all defaults) mirroring `contracts/mapping-config.md` — no real coordinates
 
 ---
 
@@ -111,12 +111,12 @@ rendered via a keyed sub-tree byte-diff so re-runs are zero-churn (Q7).
 child issues are created, the parent body carries the checklist, and a re-run
 against unchanged tasks performs zero writes.
 
-- [ ] T026 [P] [US3] Unit test `tests/unit/checklist_subtree.bats` — `render_checklist_subtree` keys each item by its workstate task id with stable byte ordering; a single stable provenance marker line renders above the sub-tree (Q9) without perturbing the byte compare (`adf.sh`)
-- [ ] T027 [P] [US3] Unit test `tests/unit/checklist_diff.bats` — `diff_checklist_subtree` byte-compares ONLY the checklist sub-tree (not the full body); `sync_body_checklist` skips the write when `unchanged`; a reorder / completion-toggle / rename re-renders keyed items with no duplication and no unrelated-edit rewrite (Q7, FR-008)
-- [ ] T028 [US3] Implement `render_checklist_subtree` in `src/adf.sh` — isolated, byte-stable ADF taskList fragment keyed by workstate task id, with the stable provenance marker line above it (Q7, Q9)
-- [ ] T029 [US3] Implement `diff_checklist_subtree` + `sync_body_checklist` in `src/jira_sink.sh` — sub-tree byte-compare; write the body only when the sub-tree changed; `checklist`-sentinel levels create no child issue (engine-sink-interface-002 §2-level render)
-- [ ] T030 [US3] Wire 2-level mode in `src/reconcile.sh` orchestration — when the phase/task levels resolve to `checklist`, render into the parent spec body instead of creating Subtask/Task children
-- [ ] T031 [US3] Integration test `tests/integration/us3_checklist_zerochurn.bats` — 2-level mode creates no Subtask/Task children and carries the in-body checklist; a re-run with no task changes performs zero writes (byte-identical sub-tree); toggling one task's completion updates only the affected issue's body with no duplicate checklist (spec scenarios 1–3, SC-004)
+- [x] T026 [P] [US3] Unit test `tests/unit/checklist_subtree.bats` — `render_checklist_subtree` keys each item by its workstate task id with stable byte ordering; a single stable provenance marker line renders above the sub-tree (Q9) without perturbing the byte compare (`adf.sh`)
+- [x] T027 [P] [US3] Unit test `tests/unit/checklist_diff.bats` — `diff_checklist_subtree` byte-compares ONLY the checklist sub-tree (not the full body); `sync_body_checklist` skips the write when `unchanged`; a reorder / completion-toggle / rename re-renders keyed items with no duplication and no unrelated-edit rewrite (Q7, FR-008)
+- [x] T028 [US3] Implement `render_checklist_subtree` in `src/adf.sh` — isolated, byte-stable ADF taskList fragment keyed by workstate task id, with the stable provenance marker line above it (Q7, Q9)
+- [x] T029 [US3] Implement `diff_checklist_subtree` + `sync_body_checklist` in `src/jira_sink.sh` — sub-tree byte-compare; write the body only when the sub-tree changed; `checklist`-sentinel levels create no child issue (engine-sink-interface-002 §2-level render)
+- [x] T030 [US3] Wire 2-level mode in `src/reconcile.sh` orchestration — when the phase/task levels resolve to `checklist`, render into the parent spec body instead of creating Subtask/Task children
+- [x] T031 [US3] Integration test `tests/integration/us3_checklist_zerochurn.bats` — 2-level mode creates no Subtask/Task children and carries the in-body checklist; a re-run with no task changes performs zero writes (byte-identical sub-tree); toggling one task's completion updates only the affected issue's body with no duplicate checklist (spec scenarios 1–3, SC-004)
 
 **Checkpoint**: US3 delivers the leaner-board mode with the zero-churn guarantee
 intact.

@@ -779,6 +779,35 @@ sync_spec_issue() {
     local description
     description="$(adf::from_markdown "$body")"
 
+    # 2-level (checklist) mode (US3): when the phase level resolves to the
+    # `checklist` sentinel, the task phases/tasks collapse into an in-body
+    # checklist carried by THIS Story — no Subtask children. Compose the keyed
+    # sub-tree once (flattening every phase's tasks, each keyed by a stable
+    # <phase>.<ordinal> workstate task id). The CREATE path embeds it under the
+    # prose; the UPDATE path reconciles ONLY the sub-tree via sync_body_checklist
+    # so a human's prose edit is preserved and re-runs stay zero-churn (FR-008).
+    # The default path (phase→Subtask) leaves two_level=0 and is byte-for-byte 001.
+    local two_level=0 checklist_subtree=""
+    local _phase_artifact
+    _phase_artifact="$(mapping::resolve_level phase 2>/dev/null | cut -f1)"
+    if [[ "$_phase_artifact" == "checklist" ]]; then
+        two_level=1
+        local _tasks_json
+        _tasks_json="$(printf '%s' "$item_json" | jq -c '
+            [ (.children // []) | to_entries[]
+              | (.key) as $i | (.value) as $c
+              | ( ($c.id // "") | ([match("[0-9]+$")?][0].string) ) as $cap
+              | ($cap // (($i + 1) | tostring)) as $p
+              | ($c.extensions.tasks // []) | to_entries[]
+              | { id: ($p + "." + (.key | tostring)),
+                  text: (.value.text // ""),
+                  done: (.value.done // false) } ]' 2>/dev/null || printf '[]')"
+        checklist_subtree="$(adf::render_checklist_subtree "$_tasks_json")"
+        # CREATE body = the prose blocks + the checklist sub-tree (one write).
+        description="$(jq -cn --argjson prose "$description" --argjson st "$checklist_subtree" \
+            '{version:1, type:"doc", content: ((($prose.content) // []) + $st)}')"
+    fi
+
     # The desired status id the lifecycle phase maps to (vendor lever). The
     # config getter may hand us `<status-id>\t<transition-id>`; the status id
     # is the part before the tab. Empty when the phase has no status mapping.
@@ -867,12 +896,18 @@ sync_spec_issue() {
         diff="$(printf '%s' "$diff" | jq -c --arg s "$summary" '. + {summary: $s}')"
     fi
     # ADF descriptions are key-order-insensitive — normalize both sides before
-    # comparing so a semantically-identical body produces no diff entry.
-    local desired_desc_norm current_desc_norm
-    desired_desc_norm="$(jira_sink::_normalize_adf "$description")"
-    current_desc_norm="$(jira_sink::_normalize_adf "$cur_description")"
-    if [[ "$desired_desc_norm" != "$current_desc_norm" ]]; then
-        diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+    # comparing so a semantically-identical body produces no diff entry. In
+    # 2-level mode the description is CO-OWNED (prose preamble is human-editable);
+    # the bridge owns only the checklist sub-tree, reconciled below via
+    # sync_body_checklist — so the full-body description diff is SKIPPED here to
+    # avoid clobbering the human's prose (Q7, US3 scenario 3).
+    if (( two_level == 0 )); then
+        local desired_desc_norm current_desc_norm
+        desired_desc_norm="$(jira_sink::_normalize_adf "$description")"
+        current_desc_norm="$(jira_sink::_normalize_adf "$cur_description")"
+        if [[ "$desired_desc_norm" != "$current_desc_norm" ]]; then
+            diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+        fi
     fi
     if ! jira_sink::_labels_equal "$labels_json" "$cur_labels"; then
         diff="$(printf '%s' "$diff" | jq -c --argjson l "$labels_json" '. + {labels: $l}')"
@@ -908,6 +943,25 @@ sync_spec_issue() {
             # available" is rc 0 and never reaches here (US5 observable failure).
             JIRA_SINK_SPEC_TRANSITION_FAILED=1
             jira_sink::_log "sync_spec_issue: transition for ${existing_key} (phase ${state}) did not apply"
+        fi
+    fi
+
+    # 2-level mode: reconcile the in-body checklist sub-tree (preserving the
+    # prose preamble). A write here counts as an update; an unreadable read fails
+    # closed (rc 3); a write failure surfaces (rc 1). An unchanged sub-tree is a
+    # no-op (zero churn).
+    if (( two_level == 1 )); then
+        local _ck_rc=0
+        sync_body_checklist "$existing_key" "$checklist_subtree" || _ck_rc=$?
+        if (( _ck_rc == 3 )); then
+            jira_sink::_log "sync_spec_issue: checklist read for ${existing_key} unreadable; failing closed (rc 3)"
+            return 3
+        elif (( _ck_rc != 0 )); then
+            jira_sink::_log "sync_spec_issue: checklist write for ${existing_key} failed"
+            return 1
+        fi
+        if [[ "$JIRA_SINK_CHECKLIST_DISPOSITION" == "updated" ]]; then
+            wrote_update=1
         fi
     fi
 
@@ -1055,6 +1109,139 @@ sync_task_phase_subissues() {
 
     JIRA_SINK_SUBISSUE_DISPOSITIONS="$dispositions"
     printf '%s\n' "$map"
+}
+
+# =============================================================================
+# Feature 002 — Phase 5/US3: 2-level checklist mode (keyed sub-tree byte-diff).
+#
+# In 2-level mode the phase + task levels resolve to the `checklist` sentinel:
+# no Subtask/Task child issues are created; the tasks collapse into an in-body
+# ADF checklist carried by the SPEC issue's description. The body is CO-OWNED —
+# the prose above the marker is human-editable and PRESERVED across re-runs; the
+# bridge owns only the checklist SUB-TREE (marker paragraph + taskList). The
+# sub-tree is byte-compared in isolation so (a) an unchanged re-run writes
+# nothing (FR-008, SC-004) and (b) an unrelated prose edit does NOT trigger a
+# rewrite (Q7, US3 scenario 3). The render lives in adf.sh
+# (adf::render_checklist_subtree, keyed by workstate task id); these helpers do
+# the read/compare/write.
+# =============================================================================
+
+# Disposition channel for the 2-level checklist body write, mirroring the spec /
+# subissue channels (read by reconcile.sh for the run summary).
+JIRA_SINK_CHECKLIST_DISPOSITION=""
+
+# jira_sink::_split_body_at_marker <description_json>
+#   Split an ADF description doc at the stable checklist marker (Q9). Echoes a
+#   JSON object {preamble:[…], subtree:[…]} where `preamble` is the content
+#   nodes BEFORE the marker paragraph (the human-owned prose) and `subtree` is
+#   the marker paragraph plus everything after it (the bridge-owned checklist).
+#   When no marker is present (a fresh issue, or one mirrored before 2-level),
+#   `preamble` is the whole content and `subtree` is `[]`. A null/absent
+#   description yields empty preamble + empty subtree.
+jira_sink::_split_body_at_marker() {
+    local desc="${1:-null}"
+    printf '%s' "$desc" | jq -c --arg m "$ADF_CHECKLIST_MARKER" '
+        ((. // {}) | .content // []) as $c
+        | ( [ $c
+              | to_entries[]
+              | select(.value.type == "paragraph"
+                       and (([.value.content[]?.text] | join("")) == $m))
+              | .key ] | first ) as $idx
+        | if $idx == null
+          then { preamble: $c, subtree: [] }
+          else { preamble: $c[0:$idx], subtree: $c[$idx:] }
+          end
+    ' 2>/dev/null || printf '{"preamble":[],"subtree":[]}'
+}
+
+# jira_sink::_canonical_subtree <subtree_json_array>
+#   Canonical, comparison-stable form of a checklist sub-tree array. Wraps the
+#   array in a doc and reuses the live-proven ADF normalizer (jira_sink::_normalize_adf:
+#   recursive key sort + empty-paragraph collapse) so a round-tripped Jira body
+#   and a freshly rendered one compare EQUAL despite key-order differences. An
+#   empty/absent sub-tree canonicalizes to the empty string.
+jira_sink::_canonical_subtree() {
+    local subtree="${1:-[]}"
+    local doc
+    doc="$(printf '%s' "$subtree" | jq -c '{version:1,type:"doc",content:(. // [])}' 2>/dev/null || printf 'null')"
+    jira_sink::_normalize_adf "$doc"
+}
+
+# diff_checklist_subtree <issue_key> <rendered_subtree>
+#   Byte-compare ONLY the checklist sub-tree of <issue_key>'s description against
+#   <rendered_subtree>. Echoes `unchanged` (sub-trees canonically equal → no
+#   write needed) or `changed`. Reads via query_issue_full; an unreadable read
+#   fails closed (rc 3) so the engine never blind-writes (FR-017).
+diff_checklist_subtree() {
+    local key="${1:-}" rendered="${2:-[]}"
+
+    local fields
+    if ! fields="$(query_issue_full "$key")"; then
+        jira_sink::_log "diff_checklist_subtree: ${key} read unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    local cur_desc cur_subtree
+    cur_desc="$(printf '%s' "$fields" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+    cur_subtree="$(jira_sink::_split_body_at_marker "$cur_desc" | jq -c '.subtree' 2>/dev/null || printf '[]')"
+
+    local cur_norm desired_norm
+    cur_norm="$(jira_sink::_canonical_subtree "$cur_subtree")"
+    desired_norm="$(jira_sink::_canonical_subtree "$rendered")"
+
+    if [[ "$cur_norm" == "$desired_norm" ]]; then
+        printf 'unchanged\n'
+    else
+        printf 'changed\n'
+    fi
+    return 0
+}
+
+# sync_body_checklist <issue_key> <rendered_subtree>
+#   Reconcile the in-body checklist sub-tree of <issue_key>. Reads the current
+#   description, isolates the sub-tree, and:
+#     * sub-tree unchanged → SKIP the write (zero churn); disposition `skipped`.
+#     * sub-tree changed    → PUT a description = the PRESERVED prose preamble +
+#       the new sub-tree (so a human's prose edit survives and no duplicate
+#       checklist is appended); disposition `updated`.
+#   An unreadable read fails closed (rc 3, no write). Records the verdict on
+#   JIRA_SINK_CHECKLIST_DISPOSITION.
+sync_body_checklist() {
+    local key="${1:-}" rendered="${2:-[]}"
+    JIRA_SINK_CHECKLIST_DISPOSITION=""
+
+    local fields
+    if ! fields="$(query_issue_full "$key")"; then
+        jira_sink::_log "sync_body_checklist: ${key} read unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    local cur_desc split preamble cur_subtree
+    cur_desc="$(printf '%s' "$fields" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+    split="$(jira_sink::_split_body_at_marker "$cur_desc")"
+    preamble="$(printf '%s' "$split" | jq -c '.preamble' 2>/dev/null || printf '[]')"
+    cur_subtree="$(printf '%s' "$split" | jq -c '.subtree' 2>/dev/null || printf '[]')"
+
+    local cur_norm desired_norm
+    cur_norm="$(jira_sink::_canonical_subtree "$cur_subtree")"
+    desired_norm="$(jira_sink::_canonical_subtree "$rendered")"
+    if [[ "$cur_norm" == "$desired_norm" ]]; then
+        JIRA_SINK_CHECKLIST_DISPOSITION="skipped"
+        return 0
+    fi
+
+    # Compose the desired body: PRESERVE the prose preamble, swap in the new
+    # sub-tree. Building the doc in jq keeps text escaped + key order fixed.
+    local desired_desc payload
+    desired_desc="$(jq -cn --argjson pre "$preamble" --argjson st "$rendered" \
+        '{version:1, type:"doc", content: ($pre + $st)}')"
+    payload="$(jq -cn --argjson d "$desired_desc" '{fields: {description: $d}}')"
+
+    if ! mutate_issue_update "$key" "$payload"; then
+        jira_sink::_log "sync_body_checklist: description write for ${key} failed"
+        JIRA_SINK_CHECKLIST_DISPOSITION="failed"
+        return 1
+    fi
+    JIRA_SINK_CHECKLIST_DISPOSITION="updated"
+    return 0
 }
 
 # =============================================================================

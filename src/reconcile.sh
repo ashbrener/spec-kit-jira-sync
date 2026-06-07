@@ -1004,6 +1004,18 @@ reconcile::sync_spec_issue() {
     printf '%s\n' "$spec_issue_id"
 }
 
+# reconcile::_phase_is_checklist
+#   0 (true) when the phase level resolves to the `checklist` sentinel — i.e.
+#   2-level mode (US3): the task phases/tasks collapse into the Story's in-body
+#   checklist (composed by the sink's sync_spec_issue), so NO Subtask children
+#   are created and process_spec skips the sub-issue pass. The default mapping
+#   (phase→Subtask) returns 1 (false), preserving the 001 path byte-for-byte.
+reconcile::_phase_is_checklist() {
+    local artifact
+    artifact="$(mapping::resolve_level phase 2>/dev/null | cut -f1)"
+    [[ "$artifact" == "checklist" ]]
+}
+
 # reconcile::sync_task_phase_subissues <spec_issue_id> <feature_number> <spec_dir>
 #   For each task phase (a workstate child), create one Subtask under the Story.
 #   Returns the per-phase sub-issue ids as a JSON object keyed by phase index
@@ -1671,8 +1683,15 @@ reconcile::process_spec() {
     fi
 
     # --- Task-phase sub-issues ----------------------------------------
-    local phase_map
-    if ! phase_map="$(reconcile::sync_task_phase_subissues \
+    # 2-level (checklist) mode (US3): the phase level resolves to `checklist`, so
+    # the tasks live in the Story's in-body checklist (already reconciled inside
+    # sync_spec_issue above) and NO Subtask children are created. Skip the
+    # sub-issue pass entirely; the Story disposition already folded the checklist
+    # write/skip. The default path (phase→Subtask) runs the 001 sub-issue block.
+    local phase_map='{}'
+    if reconcile::_phase_is_checklist; then
+        summary::add skipped "spec ${feature_number}: tasks rendered in-body (2-level checklist); no Subtasks"
+    elif ! phase_map="$(reconcile::sync_task_phase_subissues \
         "$spec_issue_id" "$feature_number" "$spec_dir")"; then
         summary::add error "spec ${feature_number}: sync_task_phase_subissues failed"
         # Continue to comments — sub-issue failures don't block the rest.
