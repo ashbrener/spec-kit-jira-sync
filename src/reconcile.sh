@@ -112,6 +112,11 @@ declare -g _RECONCILE_LIFECYCLE_ROWS=""
 # Repo slug captured once (US4 repo-level rollup runs post-loop and needs it).
 declare -g _RECONCILE_REPO_SLUG=""
 
+# Initiative narrative captured from the FIRST spec's spec.md "Input:" line (the
+# explicit spec_input source, FR-014 — never inferred). Empty in --workstate mode
+# (spec_input gracefully absent). The post-loop Initiative super-level reads it.
+declare -g _RECONCILE_INITIATIVE_NARRATIVE=""
+
 # Per-spec workstate-item cache. reconcile::sync_spec_issue builds the neutral
 # workstate item once and stashes it here so reconcile::sync_task_phase_subissues
 # reuses it without re-parsing the spec dir. Reset on each process_spec entry.
@@ -1151,6 +1156,83 @@ reconcile::rollup_repo_epic() {
     fi
 }
 
+# reconcile::_extract_spec_input <spec_dir>
+#   Echo the spec.md "Input:" line text — the explicit spec_input narrative
+#   source for the Initiative super-level (FR-014; never inferred). Empty when no
+#   spec.md or no Input line exists.
+reconcile::_extract_spec_input() {
+    local spec_dir="${1%/}" md="${1%/}/spec.md"
+    [[ -s "$md" ]] || { printf ''; return 0; }
+    sed -n 's/^\*\*Input\*\*:[[:space:]]*//p' "$md" | head -1
+}
+
+# reconcile::sync_initiative
+#   US6 post-loop Initiative super-level (off by default). Probes the project for
+#   the Initiative type: present ⇒ ensure the repo Initiative (narrative from the
+#   explicit spec_input source); absent ⇒ fold the narrative onto the repo Epic
+#   (graceful degradation, never hard-failing). Fail-closed on an unreadable
+#   probe / lookup. spec_input is gracefully absent in --workstate mode.
+reconcile::sync_initiative() {
+    [[ "${CONFIG_VALUES[mapping.initiative.enabled]:-false}" == "true" ]] || return 0
+    [[ -n "${_RECONCILE_REPO_SLUG:-}" ]] || return 0
+
+    local narrative="${_RECONCILE_INITIATIVE_NARRATIVE:-}"
+    local epic_key
+    if ! epic_key="$(ensure_repo_epic "$_RECONCILE_REPO_SLUG")"; then
+        summary::add error "Initiative super-level: repo Epic unreadable — fail-closed (no write)"
+        reconcile::promote_exit 3
+        return 0
+    fi
+
+    local avail prc=0
+    avail="$(initiative::probe_available)" || prc=$?
+    if (( prc != 0 )); then
+        summary::add error "Initiative super-level: issue-type probe unreadable — fail-closed (no write)"
+        reconcile::promote_exit 3
+        return 0
+    fi
+
+    JIRA_SINK_INITIATIVE_DISPOSITION=""
+    if [[ "$avail" == "present" ]]; then
+        # Call in the CURRENT shell (stdout to a tempfile) so the disposition
+        # global survives (a $(...) subshell would discard it).
+        local _out _irc init_key
+        _out="$(mktemp "${TMPDIR:-/tmp}/reconcile-init.XXXXXX")"
+        if ensure_initiative "$narrative" "$_RECONCILE_REPO_SLUG" >"$_out"; then _irc=0; else _irc=$?; fi
+        init_key="$(cat "$_out")"; rm -f "$_out"
+        if (( _irc == 3 )); then
+            summary::add error "Initiative super-level: lookup/read unreadable — fail-closed"
+            reconcile::promote_exit 3
+            return 0
+        elif (( _irc != 0 )); then
+            summary::add error "Initiative super-level: Initiative write failed (Jira may be incomplete)"
+            reconcile::promote_exit 1
+            return 0
+        fi
+        case "${JIRA_SINK_INITIATIVE_DISPOSITION:-created}" in
+            updated) summary::add updated "Initiative ${init_key}" ;;
+            skipped) summary::add skipped "Initiative ${init_key} unchanged" ;;
+            *)       summary::add created "Initiative ${init_key}" ;;
+        esac
+    else
+        local _irc=0
+        initiative::degrade_onto_epic "$epic_key" "$narrative" "$_RECONCILE_REPO_SLUG" || _irc=$?
+        if (( _irc == 3 )); then
+            summary::add error "Initiative super-level: Epic read unreadable — fail-closed"
+            reconcile::promote_exit 3
+            return 0
+        elif (( _irc != 0 )); then
+            summary::add error "Initiative super-level: degrade write failed (Jira may be incomplete)"
+            reconcile::promote_exit 1
+            return 0
+        fi
+        case "${JIRA_SINK_INITIATIVE_DISPOSITION:-updated}" in
+            updated) summary::add updated "Initiative narrative folded onto Epic ${epic_key} (degraded)" ;;
+            skipped) summary::add skipped "Initiative narrative on Epic ${epic_key} unchanged (degraded)" ;;
+        esac
+    fi
+}
+
 # reconcile::sync_task_phase_subissues <spec_issue_id> <feature_number> <spec_dir>
 #   For each task phase (a workstate child), create one Subtask under the Story.
 #   Returns the per-phase sub-issue ids as a JSON object keyed by phase index
@@ -1706,6 +1788,11 @@ reconcile::process_spec() {
             _RECONCILE_REPO_SLUG="$(basename "$(dirname "$(dirname "${spec_dir%/}")")" 2>/dev/null || true)"
         fi
     fi
+    # Capture the Initiative narrative from the first spec carrying an Input line
+    # (the explicit spec_input source; US6, FR-014).
+    if [[ -z "${_RECONCILE_INITIATIVE_NARRATIVE:-}" ]]; then
+        _RECONCILE_INITIATIVE_NARRATIVE="$(reconcile::_extract_spec_input "$spec_dir")"
+    fi
 
     # --- Phase inference ----------------------------------------------
     # Hand the PR-state hint through to the parser so retroactive sync
@@ -2259,6 +2346,11 @@ reconcile::main() {
         # the repo Epic to done only on a real completion-state change.
         reconcile::rollup_repo_epic
     fi
+
+    # Step 4.6 — Initiative super-level (US6; off by default). Runs once after
+    # the loop: probe-then-create-or-degrade above the repo Epic. Self-gates on
+    # mapping.initiative.enabled.
+    reconcile::sync_initiative
 
     # Step 5 — summary emission (Principle VIII).
     summary::emit

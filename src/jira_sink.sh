@@ -1140,7 +1140,8 @@ JIRA_SINK_CHECKLIST_DISPOSITION=""
 #   description yields empty preamble + empty subtree.
 jira_sink::_split_body_at_marker() {
     local desc="${1:-null}"
-    printf '%s' "$desc" | jq -c --arg m "$ADF_CHECKLIST_MARKER" '
+    local marker="${2:-$ADF_CHECKLIST_MARKER}"
+    printf '%s' "$desc" | jq -c --arg m "$marker" '
         ((. // {}) | .content // []) as $c
         | ( [ $c
               | to_entries[]
@@ -1312,6 +1313,163 @@ rollup::transition_if_changed() {
         return 1
     fi
     printf 'transitioned\n'
+    return 0
+}
+
+# =============================================================================
+# Feature 002 — Phase 8/US6: Initiative super-level + graceful degradation.
+# OFF by default (mapping.initiative.enabled). Maps the narrative super-level to
+# a Jira Initiative where the instance supports it, and folds the narrative onto
+# the repo Epic (behind a stable marker, with the repo grouping label) where it
+# does not — NEVER hard-failing for lack of the Initiative type (Q5, FR-013/
+# FR-014, SC-007). The narrative is populated ONLY from the explicit spec_input
+# source (never inferred); in --workstate mode it is gracefully absent.
+# =============================================================================
+
+# query_initiative <repo_label> <project> <initiative_type_id>
+#   Find the repo's Initiative by its repo identity label AND issue type (so it
+#   never collides with the same-labelled Epic). Echoes the `.issues` array; rc 3
+#   on an unreadable read, rc 0 + `[]` when absent.
+query_initiative() {
+    local label="${1:-}" project="${2:-}" itype="${3:-}"
+    jira_sink::_search_issues \
+        "labels = \"${label}\" AND issuetype = \"${itype}\" AND project = \"${project}\" ORDER BY updated DESC"
+}
+
+# initiative::probe_available
+#   `present` when the target project lists the configured initiative artifact in
+#   its issue-type metadata, else `absent`. An unreadable probe fails closed
+#   (rc 3) — the caller then leaves the super-level untouched (no blind write).
+initiative::probe_available() {
+    local want names
+    want="$(config::get mapping.initiative.artifact 2>/dev/null || printf 'Initiative')"
+    if ! names="$(mapping::detect_available_types)"; then
+        return 3
+    fi
+    if printf '%s\n' "$names" | grep -qxF "$want"; then
+        printf 'present\n'
+    else
+        printf 'absent\n'
+    fi
+    return 0
+}
+
+# ensure_initiative <narrative> <repo_slug>
+#   Find-or-create the repo's Initiative (issue_types.initiative), carrying the
+#   repo identity label and the narrative as its body. Idempotent: an existing
+#   Initiative is matched (by repo label + type) and its description/labels are
+#   reconciled only on a real diff (zero churn). Echoes the Initiative key. rc 3
+#   on an unreadable lookup/read; rc 1 on a write failure.
+ensure_initiative() {
+    local narrative="${1:-}" repo_slug="${2:-}"
+    local project itype repo_prefix label
+    project="$(config::get project_key)"
+    itype="$(jira_sink::_artifact_issue_type_id "$(config::get mapping.initiative.artifact 2>/dev/null || printf 'Initiative')")"
+    repo_prefix="$(config::get labels.repo_prefix)"
+    label="${repo_prefix}${repo_slug}"
+
+    local description
+    description="$(adf::from_markdown "$narrative")"
+    local labels_json
+    labels_json="$(jq -cn --arg l "$label" '[$l]')"
+
+    local existing existing_key
+    if ! existing="$(query_initiative "$label" "$project" "$itype")"; then
+        jira_sink::_log "ensure_initiative: lookup unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    existing_key="$(printf '%s' "$existing" | jq -r '(.[0].key // "")' 2>/dev/null || printf '')"
+
+    if [[ -z "$existing_key" || "$existing_key" == "null" ]]; then
+        local fields created key
+        fields="$(jq -cn \
+            --arg project "$project" --arg itype "$itype" \
+            --arg summary "${repo_slug} — Initiative" \
+            --argjson description "$description" --argjson labels "$labels_json" \
+            '{fields:{project:{key:$project},issuetype:{id:$itype},
+              summary:$summary,description:$description,labels:$labels}}')"
+        if ! created="$(mutate_issue_create "$fields")"; then
+            jira_sink::_log "ensure_initiative: create failed"
+            return 1
+        fi
+        key="$(printf '%s' "$created" | jq -r '.key // ""' 2>/dev/null || printf '')"
+        JIRA_SINK_INITIATIVE_DISPOSITION="created"
+        printf '%s\n' "$key"
+        return 0
+    fi
+
+    # PRESENT → reconcile description + labels only on a real diff.
+    local current cur_desc cur_labels
+    if ! current="$(query_issue_full "$existing_key")"; then
+        jira_sink::_log "ensure_initiative: ${existing_key} read unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    cur_desc="$(printf '%s' "$current" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+    cur_labels="$(printf '%s' "$current" | jq -c '.labels // []' 2>/dev/null || printf '[]')"
+
+    local diff='{}'
+    if [[ "$(jira_sink::_normalize_adf "$description")" != "$(jira_sink::_normalize_adf "$cur_desc")" ]]; then
+        diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+    fi
+    if ! jira_sink::_labels_equal "$labels_json" "$cur_labels"; then
+        diff="$(printf '%s' "$diff" | jq -c --argjson l "$labels_json" '. + {labels: $l}')"
+    fi
+    if [[ "$diff" != "{}" ]]; then
+        if ! mutate_issue_update "$existing_key" "$(printf '%s' "$diff" | jq -c '{fields: .}')"; then
+            jira_sink::_log "ensure_initiative: update for ${existing_key} failed"
+            return 1
+        fi
+        JIRA_SINK_INITIATIVE_DISPOSITION="updated"
+    else
+        JIRA_SINK_INITIATIVE_DISPOSITION="skipped"
+    fi
+    printf '%s\n' "$existing_key"
+    return 0
+}
+
+# Disposition channel for the Initiative super-level (read by reconcile.sh across
+# the engine↔sink seam; -gx also silences SC2034 in the isolated file scan).
+declare -gx JIRA_SINK_INITIATIVE_DISPOSITION=""
+
+# initiative::degrade_onto_epic <epic_key> <narrative> <repo_slug>
+#   When the instance lacks the Initiative type, fold the narrative onto the repo
+#   Epic behind the stable ADF_INITIATIVE_MARKER, preserving the Epic's other
+#   body content; the repo grouping rides the existing repo_prefix label (already
+#   on the Epic). Idempotent: the marker-delimited narrative section is byte-
+#   compared in isolation, so a degraded re-run (or an unrelated Epic body edit)
+#   writes nothing. NEVER hard-fails for lack of Initiative; an unreadable Epic
+#   read still fails closed (rc 3).
+initiative::degrade_onto_epic() {
+    local epic_key="${1:-}" narrative="${2:-}" repo_slug="${3:-}"
+    : "${repo_slug:=}"
+
+    local current cur_desc
+    if ! current="$(query_issue_full "$epic_key")"; then
+        jira_sink::_log "initiative::degrade_onto_epic: ${epic_key} read unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    cur_desc="$(printf '%s' "$current" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+
+    local section split preamble cur_section
+    section="$(adf::render_initiative_section "$narrative")"
+    split="$(jira_sink::_split_body_at_marker "$cur_desc" "$ADF_INITIATIVE_MARKER")"
+    preamble="$(printf '%s' "$split" | jq -c '.preamble' 2>/dev/null || printf '[]')"
+    cur_section="$(printf '%s' "$split" | jq -c '.subtree' 2>/dev/null || printf '[]')"
+
+    if [[ "$(jira_sink::_canonical_subtree "$cur_section")" == "$(jira_sink::_canonical_subtree "$section")" ]]; then
+        JIRA_SINK_INITIATIVE_DISPOSITION="skipped"
+        return 0
+    fi
+
+    local desired_desc payload
+    desired_desc="$(jq -cn --argjson pre "$preamble" --argjson sec "$section" \
+        '{version:1, type:"doc", content: ($pre + $sec)}')"
+    payload="$(jq -cn --argjson d "$desired_desc" '{fields: {description: $d}}')"
+    if ! mutate_issue_update "$epic_key" "$payload"; then
+        jira_sink::_log "initiative::degrade_onto_epic: description write for ${epic_key} failed"
+        return 1
+    fi
+    JIRA_SINK_INITIATIVE_DISPOSITION="updated"
     return 0
 }
 

@@ -343,6 +343,30 @@ ADF_CHECKLIST_MARKER="Tasks — mirrored by spec-kit-jira-sync (edits above this
 # "task-<id>" (keyed by id); `state` is DONE when done==true else TODO. Built
 # entirely in jq so text is escaped and key order is fixed (byte-stable).
 # ----------------------------------------------------------------------------
+# The stable marker line that delimits the degraded-Initiative narrative folded
+# onto the repo Epic (US6). Fixed constant (no timestamp) so the round-trip is
+# byte-stable and the sink can isolate the narrative section from the Epic's
+# other body content. Exposed for the sink + tests.
+ADF_INITIATIVE_MARKER="Initiative (mirrored by spec-kit-jira-sync — narrative folded here on a board without the Initiative type)"
+
+# ----------------------------------------------------------------------------
+# adf::render_initiative_section <narrative-markdown>
+#
+# Emit the degraded-Initiative narrative SUB-TREE as a JSON array of ADF block
+# nodes: [ <marker paragraph>, <narrative blocks…> ]. The narrative is rendered
+# via adf::from_markdown (escaped, bounded subset). An empty narrative still
+# yields the marker so the section is locatable + byte-stable.
+# ----------------------------------------------------------------------------
+adf::render_initiative_section() {
+  local narrative="${1:-}"
+  local blocks
+  blocks="$(adf::from_markdown "$narrative" | jq -c '.content // []')"
+  jq -cn --argjson blocks "$blocks" --arg marker "$ADF_INITIATIVE_MARKER" '
+    [ { type: "paragraph", content: [ { type: "text", text: $marker } ] } ]
+    + $blocks
+  '
+}
+
 adf::render_checklist_subtree() {
   local tasks_json="${1:-[]}"
   : "${tasks_json:=[]}"
