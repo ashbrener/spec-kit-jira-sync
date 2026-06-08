@@ -31,6 +31,30 @@ underlying insight that makes destruction acceptable: bridge-owned *content* is
 fully regenerable from the specs, so it needs no backup; the only non-regenerable
 data is human collaboration added directly on the issues.
 
+## Clarifications
+
+### Session 2026-06-08
+
+- Q: Destruction model when pruning bridge-owned orphans? → A:
+  **Operator-selectable, default hard-delete.** Because the content is
+  regenerable from the source-of-truth specs, hard-delete is the default (cleanest
+  board); archive/supersede (preserving the human layer) is available as a
+  per-project option.
+- Q: Safety guard for the destructive re-mode? → A: **Destructive by default
+  behind the explicit `--remode` flag; `--remode --dry-run` previews.** There is
+  no separate confirmation step. The destruction is gated only by the deliberate
+  opt-in flag — the operator accepted the residual scoping-bug risk in exchange
+  for a faster experimentation loop. (Consequence: fail-safe scoping, US2, is now
+  the **sole** load-bearing safety net and gets the heaviest adversarial coverage.)
+- Q: How is the to-be-pruned (orphan) set identified? → A: **Diff the
+  desired-shape bridge-owned set against the existing bridge-owned set on the
+  board, scoped by the `speckit-*` identity labels.** The labels are the manifest;
+  unlabelled (operator) issues are structurally excluded from the prune set.
+- Q: Should the ordinary (non-re-mode) reconcile warn on detected orphans? → A:
+  **Yes — warn and suggest `--remode`, but never prune.** The default reconcile
+  stays non-destructive; it surfaces stale-shape drift so the operator isn't
+  surprised.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Switch mapping modes cleanly (Priority: P1) 🎯 MVP
@@ -93,31 +117,38 @@ issue is untouched while only bridge-owned orphans are pruned.
 
 ---
 
-### User Story 3 - Destruction is previewed and confirmed (the guard) (Priority: P1)
+### User Story 3 - Destruction is opt-in and previewable (the guard) (Priority: P1)
 
-Before any artifact is removed, the operator sees a precise preview of exactly
-what would be pruned and what would be regenerated, and destruction proceeds only
-after an explicit confirmation. The ordinary reconcile never prunes — pruning is
-a separate, deliberate operation.
+The destructive re-mode is reachable **only** through an explicit `--remode`
+flag; the ordinary reconcile never prunes. Before committing, the operator can
+preview the exact prune + regenerate set with `--remode --dry-run`. Once
+`--remode` is invoked without `--dry-run`, it acts — it prunes and regenerates
+without a further confirmation step (the operator accepted this in exchange for a
+faster experimentation loop; see Clarifications 2026-06-08). The explicit opt-in
+flag is the deliberate boundary between the safe mirror and the destructive
+re-mode.
 
-**Why this priority**: A destructive operation with no preview or confirmation is
-unacceptable for a tool that writes to a shared board. The guard is what makes
-the destruction safe to invoke.
+**Why this priority**: The opt-in flag plus an accurate dry-run preview are the
+guard. With no separate confirmation and a default of hard-delete, this guard
+plus the fail-safe scoping of US2 are the only things standing between a
+mapping experiment and the board — so the explicit boundary and a faithful
+preview are essential.
 
-**Independent Test**: Invoke the re-mode without confirmation and confirm it only
-previews (zero destructive writes); invoke the ordinary reconcile and confirm it
-never prunes; invoke the re-mode with confirmation and confirm it prunes exactly
-the previewed set.
+**Independent Test**: Run the ordinary reconcile and confirm it never prunes;
+run `--remode --dry-run` and confirm it previews the exact set with zero writes;
+run `--remode` and confirm it prunes + regenerates exactly the set the dry-run
+previewed — nothing more.
 
 **Acceptance Scenarios**:
 
-1. **Given** a mapping change that would prune artifacts, **When** the operator
-   runs the re-mode without confirming, **Then** the bridge previews the exact
-   prune + regenerate set and performs zero destructive writes.
-2. **Given** the previewed set, **When** the operator confirms, **Then** exactly
-   that set is pruned and regenerated — nothing more.
-3. **Given** the ordinary (non-re-mode) reconcile, **When** it runs in any mode,
-   **Then** it performs zero destructive operations.
+1. **Given** the ordinary (non-`--remode`) reconcile, **When** it runs in any
+   mapping mode, **Then** it performs zero destructive operations.
+2. **Given** a mapping change that would prune artifacts, **When** the operator
+   runs `--remode --dry-run`, **Then** the bridge previews the exact prune +
+   regenerate set and performs zero writes.
+3. **Given** that previewed set, **When** the operator runs `--remode` (without
+   `--dry-run`), **Then** exactly that set is pruned and regenerated — the
+   preview faithfully matched the action.
 
 ---
 
@@ -182,9 +213,12 @@ re-mode again with no change and confirm zero writes.
   carrying the bridge's identity labels). The system MUST NEVER prune, relabel, or
   otherwise modify an operator-created issue. When ownership cannot be proven, the
   artifact is left untouched (fail-safe default).
-- **FR-003**: The re-mode MUST be preview-first: before any destructive write it
-  MUST present the exact set of artifacts to be pruned and regenerated, and MUST
-  require an explicit confirmation before performing any destructive write.
+- **FR-003**: The destructive re-mode MUST be reachable ONLY via an explicit
+  `--remode` flag; the ordinary reconcile MUST NOT prune. `--remode --dry-run`
+  MUST preview the exact prune + regenerate set with zero writes, and that
+  preview MUST faithfully match what a subsequent `--remode` does. There is no
+  separate confirmation step — the explicit opt-in flag is the gate
+  (Clarifications 2026-06-08).
 - **FR-004**: The ordinary (non-re-mode) reconcile MUST remain non-destructive —
   it MUST NOT prune in any mapping mode.
 - **FR-005**: The re-mode MUST be fail-closed: an unreadable Jira read MUST abort
@@ -205,9 +239,19 @@ re-mode again with no change and confirm zero writes.
 - **FR-010**: Backward-drift on a to-be-pruned bridge-owned issue (a human edited
   it in Jira) MUST be surfaced before that issue is pruned, so the operator is
   warned that human-edited content is being removed.
-- **FR-011**: The destruction MUST follow a defined destruction model
-  (resolved in clarify — see Open Questions); whatever the model, FR-002 scoping
-  and FR-003 preview/confirm hold.
+- **FR-011**: The destruction model is **operator-selectable, defaulting to
+  hard-delete** (bridge content is regenerable from the specs); archive/supersede
+  — preserving the human layer (comments/links) — is the per-project alternative.
+  Whatever the model, FR-002 scoping holds (Clarifications 2026-06-08).
+- **FR-014**: The ordinary (non-`--remode`) reconcile MUST WARN when it detects
+  bridge-owned orphans from a prior mapping shape — listing them and suggesting
+  `--remode` — but MUST NOT prune them (Clarifications 2026-06-08).
+- **FR-015**: Orphans MUST be identified by diffing the desired-shape bridge-owned
+  set against the existing bridge-owned set on the board, scoped by the
+  `speckit-*` identity labels — so unlabelled (operator) issues are structurally
+  excluded from the prune set. With the destructive-by-default guard and default
+  hard-delete, this label-scoping is the **sole load-bearing safety net** and
+  MUST carry adversarial test coverage (Clarifications 2026-06-08).
 - **FR-012**: No real Jira coordinates or PII may appear in any tracked file
   (Privacy IX); the privacy guard stays green.
 - **FR-013**: This feature introduces **controlled destruction**, a deliberate
@@ -239,8 +283,10 @@ re-mode again with no change and confirm zero writes.
 - **SC-002**: Across a board mixing bridge-owned and operator-created issues, a
   re-mode modifies **zero** operator-created issues (0 pruned, 0 relabeled, 0
   edited) — the fail-safe scoping guarantee.
-- **SC-003**: 100% of destructive writes are preceded by a preview and an explicit
-  confirmation — no artifact is ever removed without both.
+- **SC-003**: Destructive writes occur ONLY under the explicit `--remode` flag
+  (never in the ordinary reconcile), and a `--remode --dry-run` preview matches
+  exactly the artifacts a subsequent `--remode` prunes/regenerates (preview
+  fidelity).
 - **SC-004**: The ordinary reconcile performs **zero** destructive operations in
   every mapping mode.
 - **SC-005**: After a re-mode, an ordinary reconcile is zero-churn, and a re-mode
@@ -271,23 +317,17 @@ re-mode again with no change and confirm zero writes.
   bidirectional sync; pruning or modifying operator-created issues; auto-pruning
   in the default reconcile (re-mode is always explicit).
 
-### Open Questions (to resolve in /speckit-clarify)
+### Open Questions — RESOLVED in clarify (Session 2026-06-08)
 
-These are carried forward deliberately — not resolved in this spec — because they
-are the high-impact design choices the clarify pass exists to pin:
+All five are now pinned (see the Clarifications section above):
 
-1. **Destruction model**: archive / supersede (preserve the human layer) vs
-   hard-delete (cleanest board; safe given content regenerates) vs relabel/detach
-   (least destructive) — and whether it is operator-selectable per project. No
-   single reasonable default; this is the primary clarify question.
-2. **Orphan identification**: how the to-be-pruned set is computed — the leading
-   approach is diffing the desired-shape bridge-owned set against the existing
-   bridge-owned set on the board.
-3. **Guard surface**: the exact invocation (flag name), whether preview/dry-run is
-   the default, and how confirmation works on a **non-interactive / CI** run
-   (leading lean: an explicit confirm flag; never auto-confirm destruction).
-4. **Default-reconcile orphan warning**: whether the ordinary non-destructive
-   reconcile should WARN when it detects orphans from a prior mapping (without
-   pruning them) — leading lean: yes, warn (helpful and non-destructive).
-5. **Fate of human comments/links** on a pruned issue under each destruction
-   model — follows from question 1.
+1. **Destruction model** → operator-selectable, **default hard-delete**;
+   archive/supersede available per project (FR-011).
+2. **Orphan identification** → diff desired-shape vs existing bridge-owned set,
+   scoped by `speckit-*` identity labels (FR-015).
+3. **Guard surface** → destructive by default behind the explicit `--remode`
+   flag; `--remode --dry-run` previews; no separate confirmation (FR-003).
+4. **Default-reconcile orphan warning** → yes, warn + suggest `--remode`, never
+   prune (FR-014).
+5. **Fate of human comments/links** → follows from the destruction model: lost on
+   hard-delete (the default), preserved under the archive option (FR-011).
