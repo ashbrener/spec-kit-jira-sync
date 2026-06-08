@@ -2683,6 +2683,63 @@ reconcile::remode() {
     return 0
 }
 
+# reconcile::warn_orphans
+#   FR-014 — the ordinary (non-re-mode) reconcile WARNS when it detects
+#   bridge-owned orphans left over from a prior mapping shape: it lists them and
+#   suggests --remode, but NEVER prunes. Reuses the same PURE repo-root find +
+#   read-only reconcile::compute_orphans the re-mode read-phase uses, so the
+#   warning's orphan set is the exact set --remode would prune (no divergence).
+#
+#   Zero destructive writes; fail-SOFT — any unreadable read here degrades to NO
+#   warning rather than breaking the ordinary reconcile (the ordinary path's own
+#   fail-closed reads already gate the writes; this is purely advisory). Emits at
+#   most ONE `summary::add warned` row naming the orphans + the remedy.
+#
+#   Vendor-neutral: level names + config label-prefix strings only — no vendor
+#   issue-type / artifact-name / relationship literals.
+reconcile::warn_orphans() {
+    local -a spec_dirs=("$@")
+
+    # Repo slug (same derivation as the re-mode read-phase, with the same
+    # non-git / detached-checkout fallbacks so the repo identity is stable).
+    local repo_slug
+    repo_slug="$(git rev-parse --show-toplevel 2>/dev/null | xargs -r basename 2>/dev/null || true)"
+    if [[ -z "$repo_slug" ]]; then
+        repo_slug="$(basename "$(pwd)" 2>/dev/null || true)"
+    fi
+
+    # Desired items for every in-scope spec (read-only; fail-soft per spec).
+    local items='[]' sd it
+    for sd in "${spec_dirs[@]}"; do
+        if it="$(workstate::item_for_spec "$sd" 2>/dev/null)"; then
+            items="$(jq -cn --argjson a "$items" --argjson i "$it" '$a + [$i]' 2>/dev/null || printf '%s' "$items")"
+        fi
+    done
+
+    # Resolve the root by a PURE find. Fail-SOFT: an unreadable lookup (or no
+    # root yet) degrades to no warning — the ordinary reconcile is unaffected.
+    local project existing_root root_key
+    project="$(config::get project_key 2>/dev/null || true)"
+    [[ -n "$project" ]] || return 0
+    existing_root="$(query_spec_issue "$(reconcile::compose_identity repo '{}' "$repo_slug")" "$project" 2>/dev/null)" || return 0
+    root_key="$(printf '%s' "$existing_root" | jq -r '.[0].key // ""' 2>/dev/null || printf '')"
+    [[ -n "$root_key" ]] || return 0
+
+    # Read-only orphan diff (O = E \ D). Fail-SOFT on an unreadable enumeration.
+    local orphans orphan_count
+    orphans="$(reconcile::compute_orphans "$root_key" "$repo_slug" "$items" 2>/dev/null)" || return 0
+    orphan_count="$(printf '%s' "$orphans" | jq 'length' 2>/dev/null || printf '0')"
+    [[ "$orphan_count" =~ ^[0-9]+$ ]] || return 0
+    (( orphan_count > 0 )) || return 0
+
+    # ONE warning row: list the orphans + suggest --remode. NEVER prune (FR-004).
+    local listed
+    listed="$(printf '%s' "$orphans" | jq -r 'map("\(.key) [\(.identity_label)]") | join(", ")' 2>/dev/null || printf '')"
+    summary::add warned "detected ${orphan_count} bridge-owned orphan(s) from a prior mapping shape: ${listed} — run --remode to prune them (the ordinary reconcile does not prune)"
+    reconcile::promote_exit 1
+    return 0
+}
+
 reconcile::main() {
     reconcile::parse_args "$@"
 
@@ -2746,6 +2803,12 @@ reconcile::main() {
         # after the per-spec loop so "every spec merged" is known; transitions
         # the repo Epic to done only on a real completion-state change.
         reconcile::rollup_repo_epic
+
+        # Step 4.7 — orphan WARNING (FR-014). The ordinary reconcile stays
+        # non-destructive: if a prior mapping shape left bridge-owned orphans,
+        # surface them + suggest --remode, but NEVER prune. Fail-soft (an
+        # unreadable advisory read here does not break the reconcile).
+        reconcile::warn_orphans "${spec_dirs[@]}"
     fi
 
     # Step 4.6 — Initiative super-level (US6; off by default). Runs once after
