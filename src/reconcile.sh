@@ -117,6 +117,11 @@ declare -g _RECONCILE_REPO_SLUG=""
 # (spec_input gracefully absent). The post-loop Initiative super-level reads it.
 declare -g _RECONCILE_INITIATIVE_NARRATIVE=""
 
+# Per-spec projected-id cache for the neutral level loop (feature 003): maps a
+# level name → the issue id/key the projection returned, so a child level resolves
+# its parent. Reset per process_spec entry.
+declare -gA _RECONCILE_LEVEL_IDS=()
+
 # Per-spec workstate-item cache. reconcile::sync_spec_issue builds the neutral
 # workstate item once and stashes it here so reconcile::sync_task_phase_subissues
 # reuses it without re-parsing the spec dir. Reset on each process_spec entry.
@@ -1056,6 +1061,89 @@ reconcile::_phase_is_checklist() {
     local artifact
     artifact="$(mapping::resolve_level phase 2>/dev/null | cut -f1)"
     [[ "$artifact" == "checklist" ]]
+}
+
+# =============================================================================
+# Feature 003 — neutral level-loop primitives (the vendor-neutral engine seam).
+#
+# These compose the NEUTRAL inputs the generic projection (sync_level_artifact)
+# consumes for each level, reproducing exactly what the 001 orchestrators emitted
+# — but referencing ONLY workstate fields + config LABEL PREFIXES, never a Jira
+# issue-type id, artifact name, or relationship term (FR-006). ADF rendering +
+# issue-type/status resolution stay in the sink. Auditied by the FR-012 gate.
+# =============================================================================
+
+# reconcile::ordered_levels
+#   The structural levels the engine iterates, parent→child. `task` resolves to
+#   the in-body checklist sentinel; the optional `initiative` super-level is
+#   driven post-loop (sync_initiative), not here.
+reconcile::ordered_levels() {
+    printf '%s\n' repo spec phase task
+}
+
+# reconcile::compose_identity <level> <item_json> <repo_slug> [phase_index]
+#   The stable identity label for find-or-match, from config label prefixes only.
+reconcile::compose_identity() {
+    local level="$1" item_json="$2" repo_slug="$3" phase_index="${4:-}"
+    case "$level" in
+        repo)  printf '%s%s' "$(config::get labels.repo_prefix)" "$repo_slug" ;;
+        spec)  printf '%s%s' "$(config::get labels.spec_prefix)" \
+                   "$(printf '%s' "$item_json" | jq -r '.id | split("-")[0]')" ;;
+        phase) printf '%s%s' "$(config::get labels.phase_prefix)" "$phase_index" ;;
+        *)     printf '' ;;
+    esac
+}
+
+# reconcile::compose_payload <level> <item_json> <repo_slug> [phase_index]
+#   The NEUTRAL level payload the sink projects. Shape (level-dependent):
+#     repo  → {summary}                       (no description — matches 001 Epic)
+#     spec  → {summary, body, labels, state}  (state drives the Story transition)
+#     phase → {summary, tasks, labels}        (tasks render to the in-body taskList)
+#   `labels` EXCLUDES the identity label (the sink unions it). References only
+#   workstate fields + config label prefixes (no Jira tokens).
+reconcile::compose_payload() {
+    local level="$1" item_json="$2" repo_slug="$3" phase_index="${4:-}"
+    local lifecycle_prefix
+    lifecycle_prefix="$(config::get labels.lifecycle_prefix)"
+    case "$level" in
+        repo)
+            jq -cn --arg s "Specs — ${repo_slug}" '{summary: $s}'
+            ;;
+        spec)
+            printf '%s' "$item_json" | jq -c \
+                --arg lp "$lifecycle_prefix" '
+                (.id | split("-")[0]) as $n
+                | { summary: ($n + " — " + (.title // "")),
+                    body:    (.body // ""),
+                    labels:  ([($lp + (.state // ""))] + (.labels // []) | unique),
+                    state:   (.state // "") }'
+            ;;
+        phase)
+            printf '%s' "$item_json" | jq -c --argjson n "${phase_index:-0}" '
+                ( [ (.children // [])[]
+                    | ((.id // "") | [match("[0-9]+$")?][0].string) as $cap
+                    | select(($cap // "") == ($n | tostring)) ] | .[0] ) as $c
+                | { summary: ($c.title // ""),
+                    tasks:   ($c.extensions.tasks // []),
+                    labels:  [] }'
+            ;;
+        *)
+            printf '{}'
+            ;;
+    esac
+}
+
+# reconcile::parent_projected_id <level>
+#   Echo the projected issue id of <level>'s parent from the per-spec id cache
+#   (_RECONCILE_LEVEL_IDS), or empty for the top (repo) level.
+reconcile::parent_projected_id() {
+    local level="$1"
+    case "$level" in
+        repo)  printf '' ;;
+        spec)  printf '%s' "${_RECONCILE_LEVEL_IDS[repo]:-}" ;;
+        phase) printf '%s' "${_RECONCILE_LEVEL_IDS[spec]:-}" ;;
+        *)     printf '' ;;
+    esac
 }
 
 # reconcile::_rollup_enabled
