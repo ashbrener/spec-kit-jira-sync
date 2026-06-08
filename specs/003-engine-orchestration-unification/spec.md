@@ -16,6 +16,26 @@ dogfood stay byte-for-byte identical). Build from EXTRACTION-PLAN.md and the
 deferred tasks T055/T056. Out of scope: the multi-repo carve-out, the
 iso_to_epoch fix-at-source, any rename."
 
+## Clarifications
+
+### Session 2026-06-08
+
+- Q: Physical scope — split the engine into its own file/repo now, or make it
+  vendor-neutral in place? → A: **Vendor-neutral IN PLACE, no physical file/repo
+  split in this feature.** Establish a clean, *enforced* logical engine↔sink seam
+  so the eventual physical lift is near-mechanical and done **once** (directly to
+  the shared repo in the carve-out feature), rather than splitting files twice.
+- Q: What happens to the 001-era orchestrators (`ensure_repo_epic` /
+  `sync_spec_issue` / `sync_task_phase_subissues`) once the generic projection
+  drives all levels? → A: **Delete them once unused** — migrate their behavior
+  (disposition tally, spec→Story drift anchor, status transitions, repo-Epic
+  find-or-create) into the generic projection, leaving no second Jira-shaped path.
+- Q: Is the engine's vendor-neutrality (SC-003 / US2) an enforced gate or a
+  documented criterion? → A: **An enforced committed test gate** — a static audit
+  over the enumerated engine-orchestration functions that FAILS CI if any Jira
+  issue-type id, artifact-name literal (Epic / Story / Subtask / Task), or
+  relationship term leaks in.
+
 ## User Scenarios & Testing *(mandatory)*
 
 This feature is an **internal re-platforming** of the reconcile engine's
@@ -76,10 +96,11 @@ criterion for the subsequent multi-repo extraction. Without it, an extracted
 engine would still embed the default 3-level Jira call shape, making the lift a
 rewrite rather than a move.
 
-**Independent Test**: A static audit of the engine orchestration path (the
-per-spec / per-item driver and its helpers) finds zero Jira issue-type ids, zero
-artifact-name literals, and zero relationship-vocabulary references — every such
-concept is resolved behind the sink + config seam.
+**Independent Test**: The enforced committed neutrality gate (FR-012) — a static
+audit over the enumerated engine-orchestration functions — passes: zero Jira
+issue-type ids, zero artifact-name literals, and zero relationship-vocabulary
+references in the engine path; every such concept is resolved behind the sink +
+config seam, and CI fails if one leaks back in.
 
 **Acceptance Scenarios**:
 
@@ -148,7 +169,11 @@ across every level.
   task, and the optional Initiative super-level) through the mapping-driven
   projection (`sync_level_artifact` + `link_to_parent`, plus the existing
   2-level checklist / status-rollup / Initiative wiring), replacing the 001-era
-  per-level orchestrators in the per-spec driver.
+  per-level orchestrators in the per-spec driver. The 001-era orchestrators
+  (`ensure_repo_epic` / `sync_spec_issue` / `sync_task_phase_subissues`) MUST be
+  **deleted once unused** — their behavior (disposition tally, spec→Story drift
+  anchor, status transitions, repo-Epic find-or-create) migrates into the generic
+  projection, leaving no second Jira-shaped path (Clarifications 2026-06-08).
 - **FR-002**: The re-platformed orchestration MUST produce identical observable
   Jira writes — the same creates, field updates, links, comments, and
   transitions, with the same payloads, identity labels, and parents — to the
@@ -181,6 +206,17 @@ across every level.
   usage and exit codes.
 - **FR-011**: No real Jira coordinates or PII may appear in any tracked file
   (Privacy IX); the privacy guard stays green.
+- **FR-012**: The vendor-neutral boundary MUST be guarded by an **enforced
+  committed test** — a static audit over the enumerated engine-orchestration
+  functions that fails CI if any Jira issue-type id, artifact-name literal
+  (Epic / Story / Subtask / Task), or relationship-vocabulary term appears in the
+  engine path (Clarifications 2026-06-08). The audited surface is enumerated in
+  the plan; the gate makes SC-003 self-checking and prevents lift-readiness from
+  silently regressing.
+- **FR-013**: This feature performs **no physical file or repo split**: the
+  engine orchestration becomes vendor-neutral where it lives, behind a clean,
+  enforced logical engine↔sink seam. The physical lift into a shared repo is
+  deferred to the carve-out feature (Clarifications 2026-06-08).
 
 ### Key Entities *(include if feature involves data)*
 
@@ -207,7 +243,8 @@ across every level.
 - **SC-003**: A static audit of the engine orchestration path finds **zero**
   Jira issue-type ids, **zero** artifact-name literals, and **zero**
   relationship-vocabulary references — all such concepts resolve behind the sink
-  + config seam.
+  + config seam. This audit is an **enforced committed test** (FR-012), not a
+  one-time manual check, so the boundary cannot silently regress.
 - **SC-004**: The new full-stack non-default-shape idempotency test asserts
   0 created / 0 updated / 0 parent-write across every parent-bearing level on a
   re-run.
@@ -225,9 +262,12 @@ across every level.
   not against the engine's internal call order. Re-platforming may change *how*
   the projection is driven, never *what* reaches Jira.
 - The 001-era orchestrators (`ensure_repo_epic` / `sync_spec_issue` /
-  `sync_task_phase_subissues`) may be removed once unused, or retained as thin
-  adapters over the generic projection — an implementation choice to be settled in
-  plan, constrained only by FR-002 equivalence and FR-006 vendor-neutrality.
+  `sync_task_phase_subissues`) are **deleted once unused** (resolved in
+  Clarifications 2026-06-08); their behavior migrates into the generic projection.
+  No second Jira-shaped path remains.
+- This feature does **no physical file/repo split** (resolved in Clarifications
+  2026-06-08); the engine becomes vendor-neutral in place behind an enforced
+  logical seam, and the physical lift is the carve-out feature's job.
 - The Initiative super-level and status rollup keep their existing (already
   level-aware) wiring; unification need not relocate them so long as behavior is
   identical.
