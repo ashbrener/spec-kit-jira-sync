@@ -1,8 +1,8 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: (none) → 1.0.0  (initial ratification, greenfield repo)
-Ratification date: 2026-05-31
+Version change: 1.0.0 → 1.1.0  (MINOR — scoped controlled-destruction carve-out)
+Ratification date: 2026-05-31 | Last amended: 2026-06-08
 
 Origin: adapted from the shipped spec-kit-linear Constitution v2.0.0. The proven
 engine principles (filesystem-source-of-truth, reconcile-never-event-push,
@@ -17,14 +17,22 @@ Added (first-class for THIS repo, beyond the inherited set):
   IX. No Real Identifiers In The Tracked Tree (Privacy)
   X.  workstate Is The Internal Contract
 
-Templates / dependent docs to keep in sync (forward-facing):
-  ✅ .specify/templates/{spec,plan,tasks,checklist}-template.md — generic;
-     no principle-specific references; nothing to propagate at v1.0.0.
-  ⛳ commands/*.md, README.md, CONTRIBUTING.md — not yet authored; when written
-     they MUST reflect the principles below (especially IX privacy).
+v1.1.0 amendment (2026-06-08, feature 004 — mapping re-mode / orphan pruning):
+  Principle I gains a SCOPED controlled-destruction carve-out. The ordinary
+  mirror stays strictly non-destructive; an explicit, opt-in re-mode operation
+  MAY remove bridge-owned artifacts (those carrying the `speckit-*` identity
+  labels) the current mapping no longer projects. The carve-out is bounded by
+  four MUSTs (flag-only / bridge-owned-only / dry-run-previewable / fail-closed)
+  and is cross-referenced in the Architectural Constraints. This is MINOR: no
+  principle is removed, the data-model mapping is unchanged, both layers remain —
+  a new scoped constraint is ADDED. Rationale: feature 004 research R9.
 
-Follow-up TODOs: the first feature spec (core bridge) MUST pass the
-/speckit-plan Constitution Check against this v1.0.0 document.
+Templates / dependent docs to keep in sync:
+  ✅ .specify/templates/{spec,plan,tasks,checklist}-template.md — generic.
+  ⛳ commands/*.md, README.md, CONTRIBUTING.md — when written they MUST reflect
+     the principles below (especially IX privacy and the re-mode carve-out).
+
+Follow-up TODOs: feature 004's plan Constitution Check gates on THIS v1.1.0.
 -->
 
 # spec-kit-jira-sync Constitution
@@ -60,6 +68,26 @@ outages or site migrations.
 - Jira → filesystem flow is OUT OF SCOPE indefinitely.
 - Task-phase checklists mirrored into Jira MUST carry a header noting they are
   read-only mirrors of `tasks.md`.
+
+**Controlled-destruction carve-out (v1.1.0, amended 2026-06-08)**:
+The mirror is non-destructive **except** through an explicit, opt-in **re-mode**
+operation, which MAY remove (hard-delete or archive) **bridge-owned** artifacts —
+those carrying the `speckit-*` identity labels — when the current mapping no
+longer projects them (the orphans a prior mapping shape left behind). Bridge-owned
+*content* is fully regenerable from the source-of-truth specs, which is what makes
+its removal acceptable. The carve-out is bounded by four MUSTs:
+- **Flag-only**: reachable ONLY via an explicit flag (e.g. `--remode`); NEVER
+  auto-fired on a hook. The ordinary reconcile (including every `after_*` hook)
+  stays strictly non-destructive and only *warns* on detected orphans.
+- **Bridge-owned-only**: it MUST NEVER prune, relabel, or modify an
+  operator-created issue. When ownership cannot be proven (no identity label), the
+  artifact is left untouched (fail-safe default).
+- **Dry-run-previewable**: a dry-run MUST preview the exact prune + regenerate set
+  with zero writes, byte-faithful to what the real run does.
+- **Fail-closed**: an unreadable Jira read MUST abort the operation before any
+  destructive write — never a partial destruction on an unreadable read.
+This carve-out does not reopen Jira → filesystem flow; the bridge remains a
+one-way mirror and the specs remain the source of truth.
 
 ### II. Reconcile, Never Event-Push
 
@@ -321,6 +349,15 @@ labeled, temporary debt; see PLAN.md §11). It MUST stay vendor-neutral — Jira
 specifics live in the sink and config, never in the engine — so the two copies
 can later be extracted into one.
 
+The **re-mode** controlled-destruction carve-out (Principle I, v1.1.0) is
+constitutional: destruction is confined to the explicit, opt-in re-mode, scoped to
+bridge-owned (identity-labelled) artifacts, dry-run-previewable, and fail-closed.
+The orphan **diff** (which bridge-owned artifacts the current mapping no longer
+projects) is vendor-neutral and lives in the engine; the **prune mechanic**
+(hard-delete vs archive) is Jira-specific and lives in the sink — preserving the
+engine/sink seam above. Widening destruction beyond this scope (e.g. into the
+ordinary reconcile, or onto operator-created issues) is a MAJOR amendment.
+
 ## Operational Workflow
 
 **Install** (per consumer repo): `specify extension add jira` → resolve the
@@ -365,4 +402,4 @@ added, removed, or redefined.
   constitutional constraint.
 - **PATCH**: clarifications, wording, typo fixes.
 
-**Version**: 1.0.0 | **Ratified**: 2026-05-31 | **Last Amended**: 2026-05-31
+**Version**: 1.1.0 | **Ratified**: 2026-05-31 | **Last Amended**: 2026-06-08
