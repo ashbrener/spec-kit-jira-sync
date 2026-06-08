@@ -2176,23 +2176,28 @@ reconcile::process_workstate_item() {
     feature_number="$(printf '%s' "$item_json" | jq -r '.id | split("-")[0]' 2>/dev/null || printf '')"
     state="$(printf '%s' "$item_json" | jq -r '.state // ""' 2>/dev/null || printf '')"
 
-    # Repo Epic (fail-closed on an unreadable lookup).
-    local epic_id
-    if ! epic_id="$(ensure_repo_epic "$repo_slug")"; then
+    # Repo Epic via the neutral level loop (feature 003 T009), find-or-create-only.
+    local epic_id _repo_out
+    if ! _repo_out="$(sync_level_artifact repo \
+        "$(reconcile::compose_identity repo "$item_json" "$repo_slug")" "" \
+        "$(reconcile::compose_payload repo "$item_json" "$repo_slug")" 1)"; then
         summary::add error "item ${feature_number}: repo Epic unreadable — skipped, no write (fail-closed)"
         reconcile::promote_exit 3
         return 0
     fi
+    epic_id="$(printf '%s' "$_repo_out" | jq -r '.key // ""' 2>/dev/null || printf '')"
+    _RECONCILE_LEVEL_IDS[repo]="$epic_id"
 
-    # Spec Story — call in the CURRENT shell (stdout to a tempfile, NOT a $(...)
-    # subshell) so the sink's disposition globals survive (mirrors the
-    # specs/-tree wrapper).
+    # Spec Story via the neutral level loop — current shell (stdout to a tempfile,
+    # NOT a $(...) subshell) so the sink's disposition globals survive.
     local _out _rc spec_issue_id
     _out="$(mktemp "${TMPDIR:-/tmp}/reconcile-ws.XXXXXX")"
-    JIRA_SINK_SPEC_DISPOSITION=""
-    JIRA_SINK_SPEC_TRANSITION_FAILED=0
-    if sync_spec_issue "$item_json" "$epic_id" >"$_out"; then _rc=0; else _rc=$?; fi
-    spec_issue_id="$(cat "$_out")"; rm -f "$_out"
+    JIRA_SINK_LEVEL_DISPOSITION=""
+    JIRA_SINK_LEVEL_TRANSITION_FAILED=0
+    if sync_level_artifact spec \
+        "$(reconcile::compose_identity spec "$item_json" "$repo_slug")" "$epic_id" \
+        "$(reconcile::compose_payload spec "$item_json" "$repo_slug")" >"$_out"; then _rc=0; else _rc=$?; fi
+    spec_issue_id="$(jq -r '.key // ""' <"$_out" 2>/dev/null || cat "$_out")"; rm -f "$_out"
     if (( _rc != 0 )); then
         summary::add error "item ${feature_number}: spec mirror failed (rc ${_rc}; Jira may be incomplete)"
         reconcile::promote_exit "$(( _rc == 3 ? 3 : 1 ))"
@@ -2202,12 +2207,13 @@ reconcile::process_workstate_item() {
         summary::add error "item ${feature_number}: no issue id resolved"
         return 0
     fi
-    case "${JIRA_SINK_SPEC_DISPOSITION:-created}" in
+    _RECONCILE_LEVEL_IDS[spec]="$spec_issue_id"
+    case "${JIRA_SINK_LEVEL_DISPOSITION:-created}" in
         updated) summary::add updated "item ${feature_number}: Story ${spec_issue_id}" ;;
         skipped) summary::add skipped "item ${feature_number}: Story ${spec_issue_id} unchanged" ;;
         *)       summary::add created "item ${feature_number}: Story ${spec_issue_id}" ;;
     esac
-    if [[ "${JIRA_SINK_SPEC_TRANSITION_FAILED:-0}" == "1" ]]; then
+    if [[ "${JIRA_SINK_LEVEL_TRANSITION_FAILED:-0}" == "1" ]]; then
         summary::add warned "item ${feature_number}: Story status transition failed (transport) — status not applied"
         reconcile::promote_exit 1
     fi
@@ -2218,29 +2224,38 @@ reconcile::process_workstate_item() {
     if reconcile::_phase_is_checklist; then
         summary::add skipped "item ${feature_number}: tasks rendered in-body (2-level checklist); no Subtasks"
     else
-        JIRA_SINK_SUBISSUE_DISPOSITIONS='{}'
-        local _sout _src
-        _sout="$(mktemp "${TMPDIR:-/tmp}/reconcile-ws-sub.XXXXXX")"
-        if sync_task_phase_subissues "$spec_issue_id" "$item_json" >"$_sout"; then _src=0; else _src=$?; fi
-        phase_map="$(cat "$_sout")"; rm -f "$_sout"
-        if (( _src != 0 )); then
-            summary::add error "item ${feature_number}: task-phase Subtasks failed (rc ${_src}; Jira may be incomplete)"
-            reconcile::promote_exit "$(( _src == 3 ? 3 : 1 ))"
-            phase_map='{}'
-        else
-            local _p _d
-            while IFS=$'\t' read -r _p _d; do
-                [[ -n "$_p" ]] || continue
-                case "$_d" in
-                    updated) summary::add updated "item ${feature_number}: Subtask" ;;
-                    skipped) summary::add skipped "item ${feature_number}: Subtask unchanged" ;;
-                    created) summary::add created "item ${feature_number}: Subtask" ;;
-                    failed)
-                        summary::add error "item ${feature_number}: a task-phase Subtask did not mirror (write failed)"
-                        reconcile::promote_exit 1 ;;
-                esac
-            done < <(printf '%s' "$JIRA_SINK_SUBISSUE_DISPOSITIONS" | jq -r 'to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null || true)
-        fi
+        # Phase Subtasks via the neutral level loop (feature 003 T009), one
+        # sync_level_artifact(phase,…,find_only=0,reconcile_parent=0) per child —
+        # identical to reconcile::sync_task_phase_subissues.
+        local _wchildren _wi
+        _wchildren="$(printf '%s' "$item_json" | jq -r '(.children // []) | length' 2>/dev/null || printf '0')"
+        for (( _wi = 0; _wi < _wchildren; _wi++ )); do
+            local _wchild _wcid _wpx _wident _wpayload _wpf _wprc _wpkey
+            _wchild="$(printf '%s' "$item_json" | jq -c --argjson n "$_wi" '.children[$n]')"
+            _wcid="$(printf '%s' "$_wchild" | jq -r '.id // ""')"
+            _wpx="${_wcid##*-}"; [[ "$_wpx" =~ ^[0-9]+$ ]] || _wpx="$(( _wi + 1 ))"
+            _wident="$(reconcile::compose_identity phase "$item_json" "" "$_wpx")"
+            _wpayload="$(reconcile::compose_payload phase "$item_json" "" "$_wpx")"
+            _wpf="$(mktemp "${TMPDIR:-/tmp}/reconcile-ws-ph.XXXXXX")"
+            JIRA_SINK_LEVEL_DISPOSITION=""; _wprc=0
+            if sync_level_artifact phase "$_wident" "$spec_issue_id" "$_wpayload" 0 0 >"$_wpf"; then :; else _wprc=$?; fi
+            _wpkey="$(jq -r '.key // ""' <"$_wpf" 2>/dev/null || printf '')"; rm -f "$_wpf"
+            if (( _wprc == 3 )); then
+                summary::add error "item ${feature_number}: task-phase Subtasks unreadable (fail-closed; Jira may be incomplete)"
+                reconcile::promote_exit 3
+                break
+            elif (( _wprc != 0 )); then
+                summary::add error "item ${feature_number}: a task-phase Subtask did not mirror (write failed)"
+                reconcile::promote_exit 1
+                continue
+            fi
+            [[ -n "$_wpkey" && "$_wpkey" != "null" ]] && phase_map="$(printf '%s' "$phase_map" | jq -c --arg p "$_wpx" --arg k "$_wpkey" '. + {($p): $k}')"
+            case "${JIRA_SINK_LEVEL_DISPOSITION:-created}" in
+                updated) summary::add updated "item ${feature_number}: Subtask" ;;
+                skipped) summary::add skipped "item ${feature_number}: Subtask unchanged" ;;
+                *)       summary::add created "item ${feature_number}: Subtask" ;;
+            esac
+        done
     fi
 
     # Cross-spec dependency links + clarify comments (idempotent at-most-once),

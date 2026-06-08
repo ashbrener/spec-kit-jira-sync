@@ -139,7 +139,7 @@ re-reconcile in each mode is zero churn.
 
 - [x] T007 [US1] Wire `reconcile::process_spec` in `src/reconcile.sh` onto the neutral level loop — iterate `ordered_levels`, drive `sync_level_artifact` + `link_to_parent` per level via `compose_identity`/`compose_payload`/`parent_projected_id`, preserving the per-level disposition tally, the spec→Story drift anchor, and the cross-spec-links/clarify-comments/rollup wiring. Replace the `ensure_repo_epic` / `sync_spec_issue` / `sync_task_phase_subissues` call path.
 - [x] T008 [US1] Run the FULL suite (`bats --recursive tests/unit tests/integration`) — every test passes UNCHANGED. Diff the curl-shim request log against the T001 baseline; reconcile any byte difference until it is zero (the equivalence gate for the specs/-tree path).
-- [ ] T009 [US1] Wire `reconcile::process_workstate_item` onto the same neutral loop; run the full suite UNCHANGED + diff the workstate-direct request log against baseline (zero difference).
+- [x] T009 [US1] Wire `reconcile::process_workstate_item` onto the same neutral loop; run the full suite UNCHANGED + diff the workstate-direct request log against baseline (zero difference).
 - [ ] T010 [US1] Delete the now-unused 001 orchestrators (`ensure_repo_epic`, `sync_spec_issue`, `sync_task_phase_subissues`) from `src/jira_sink.sh` and their reconcile wrappers if unused; run the full suite UNCHANGED (proves they were truly dead). `shellcheck --severity=style src/*.sh` clean.
 - [ ] T011 [US1] Live-dogfood equivalence: re-reconcile the already-mirrored board in each mode (default 3-level, 2-level checklist, status rollup, Initiative degrade, workstate-direct) and confirm **0 created / 0 updated** (zero churn) — SC-002, the real-world equivalence proof.
 
