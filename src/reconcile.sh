@@ -1173,6 +1173,19 @@ reconcile::parent_projected_id() {
     esac
 }
 
+# reconcile::_repo_epic_key
+#   Resolve the repo Epic's key via the neutral projection (find-or-create-only),
+#   for the post-loop rollup / initiative steps. Propagates the sink rc on an
+#   unreadable lookup (fail-closed). Reads _RECONCILE_REPO_SLUG.
+reconcile::_repo_epic_key() {
+    local out rc=0
+    out="$(sync_level_artifact repo \
+        "$(reconcile::compose_identity repo '{}' "$_RECONCILE_REPO_SLUG")" "" \
+        "$(reconcile::compose_payload repo '{}' "$_RECONCILE_REPO_SLUG")" 1)" || rc=$?
+    (( rc != 0 )) && return "$rc"
+    printf '%s\n' "$(printf '%s' "$out" | jq -r '.key // ""' 2>/dev/null || printf '')"
+}
+
 # reconcile::_rollup_enabled
 #   0 (true) when the optional status rollup is on (mapping.status_rollup.enabled,
 #   US4). OFF by default — so the default path never touches rollup.
@@ -1242,7 +1255,7 @@ reconcile::rollup_repo_epic() {
     computed="$(rollup::compute_completion repo "$states")"
 
     local epic_key
-    if ! epic_key="$(ensure_repo_epic "$_RECONCILE_REPO_SLUG")"; then
+    if ! epic_key="$(reconcile::_repo_epic_key)"; then
         summary::add error "repo Epic rollup unreadable — fail-closed, top-level status not applied"
         reconcile::promote_exit 3
         return 0
@@ -1293,7 +1306,7 @@ reconcile::sync_initiative() {
 
     local narrative="${_RECONCILE_INITIATIVE_NARRATIVE:-}"
     local epic_key
-    if ! epic_key="$(ensure_repo_epic "$_RECONCILE_REPO_SLUG")"; then
+    if ! epic_key="$(reconcile::_repo_epic_key)"; then
         summary::add error "Initiative super-level: repo Epic unreadable — fail-closed (no write)"
         reconcile::promote_exit 3
         return 0
