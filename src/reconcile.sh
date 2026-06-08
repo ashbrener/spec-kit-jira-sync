@@ -1368,27 +1368,53 @@ reconcile::sync_task_phase_subissues() {
         item_json="$(workstate::item_for_spec "$spec_dir")" || return 1
     fi
 
-    # Call the sink in the CURRENT shell (stdout via a tempfile, NOT `$(...)`)
-    # so its JIRA_SINK_SUBISSUE_DISPOSITIONS global survives for the verdict
-    # accounting; a command-sub subshell would discard it.
-    local _out_file _rc phase_map
-    _out_file="$(mktemp "${TMPDIR:-/tmp}/reconcile-sub.XXXXXX")"
-    JIRA_SINK_SUBISSUE_DISPOSITIONS="{}"
-    if sync_task_phase_subissues "$spec_issue_id" "$item_json" >"$_out_file"; then
-        _rc=0
-    else
-        _rc=$?
-    fi
-    phase_map="$(cat "$_out_file")"
-    rm -f "$_out_file"
-    if (( _rc != 0 )); then
-        return "$_rc"
-    fi
+    # Phase Subtasks via the neutral level loop (feature 003 T007): one
+    # sync_level_artifact(phase,…, find_only=0, reconcile_parent=0) per workstate
+    # child. Reproduces the 001 sink sync_task_phase_subissues exactly — per-phase
+    # verdict, the phase_index→key map, fail-closed on an unreadable read (rc 3),
+    # and a per-phase write failure recorded `failed` while the others continue
+    # (FR-014). reconcile_parent=0 because a Subtask's parent is immutable and the
+    # 001 sink never re-parented on update (no spurious zero-churn PUT). Phase
+    # identity/payload don't need the repo slug.
+    local children_count i
+    children_count="$(printf '%s' "$item_json" | jq -r '(.children // []) | length' 2>/dev/null || printf '0')"
+    local phase_map='{}' dispositions='{}'
+    for (( i = 0; i < children_count; i++ )); do
+        local child child_id phase_index identity payload
+        child="$(printf '%s' "$item_json" | jq -c --argjson n "$i" '.children[$n]')"
+        child_id="$(printf '%s' "$child" | jq -r '.id // ""')"
+        phase_index="${child_id##*-}"
+        [[ "$phase_index" =~ ^[0-9]+$ ]] || phase_index="$(( i + 1 ))"
+        identity="$(reconcile::compose_identity phase "$item_json" "" "$phase_index")"
+        payload="$(reconcile::compose_payload phase "$item_json" "" "$phase_index")"
+
+        # Call in the CURRENT shell (stdout via a tempfile, NOT `$(...)`) so the
+        # JIRA_SINK_LEVEL_DISPOSITION global survives for the verdict tally — a
+        # command-sub subshell would discard it and default every phase to
+        # `created`, mis-reporting zero-churn re-runs.
+        local _pout _prc=0 _pf
+        _pf="$(mktemp "${TMPDIR:-/tmp}/reconcile-ph.XXXXXX")"
+        JIRA_SINK_LEVEL_DISPOSITION=""
+        if sync_level_artifact phase "$identity" "$spec_issue_id" "$payload" 0 0 >"$_pf"; then _prc=0; else _prc=$?; fi
+        _pout="$(cat "$_pf")"; rm -f "$_pf"
+        if (( _prc == 3 )); then
+            return 3   # unreadable read → fail closed (matches the 001 sink)
+        elif (( _prc != 0 )); then
+            dispositions="$(printf '%s' "$dispositions" | jq -c --arg p "$phase_index" '. + {($p): "failed"}')"
+            continue
+        fi
+        local _pkey
+        _pkey="$(printf '%s' "$_pout" | jq -r '.key // ""' 2>/dev/null || printf '')"
+        if [[ -n "$_pkey" && "$_pkey" != "null" ]]; then
+            phase_map="$(printf '%s' "$phase_map" | jq -c --arg p "$phase_index" --arg k "$_pkey" '. + {($p): $k}')"
+            dispositions="$(printf '%s' "$dispositions" | jq -c --arg p "$phase_index" --arg d "${JIRA_SINK_LEVEL_DISPOSITION:-created}" '. + {($p): $d}')"
+        fi
+    done
 
     # Surface the per-phase create/update/skip verdicts to process_spec via the
     # disposition file (one `subtask\t<verdict>` line per phase).
     if [[ -n "${RECONCILE_DISPOSITION_FILE:-}" ]]; then
-        printf '%s' "${JIRA_SINK_SUBISSUE_DISPOSITIONS:-{}}" \
+        printf '%s' "$dispositions" \
             | jq -r 'to_entries[] | "subtask\t" + .value' 2>/dev/null \
             >>"$RECONCILE_DISPOSITION_FILE" || true
     fi

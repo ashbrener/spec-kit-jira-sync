@@ -1522,7 +1522,7 @@ declare -gx JIRA_SINK_LEVEL_TRANSITION_FAILED=0
 #   `{id,key}` of the issue (empty for a checklist sentinel). Records the verdict
 #   on JIRA_SINK_LEVEL_DISPOSITION. rc 3 on an unreadable lookup (fail-closed).
 sync_level_artifact() {
-    local level="${1:-}" identity_label="${2:-}" parent_id="${3:-}" input_json="${4:-}" find_only="${5:-0}"
+    local level="${1:-}" identity_label="${2:-}" parent_id="${3:-}" input_json="${4:-}" find_only="${5:-0}" reconcile_parent="${6:-1}"
 
     JIRA_SINK_LEVEL_DISPOSITION=""
     JIRA_SINK_LEVEL_TRANSITION_FAILED=0
@@ -1709,7 +1709,12 @@ sync_level_artifact() {
     if ! jira_sink::_labels_equal "$labels_json" "$cur_labels"; then
         diff="$(printf '%s' "$diff" | jq -c --argjson l "$labels_json" '. + {labels: $l}')"
     fi
-    if (( set_parent == 1 )) && [[ "$parent_id" != "$cur_parent" ]]; then
+    # Re-parent on update only when the level reconciles its parent (spec→Epic is
+    # mutable, reconcile_parent=1 default — matches sync_spec_issue). A native
+    # Subtask parent is immutable in Jira and was NEVER reconciled on update by
+    # sync_task_phase_subissues, so the phase wire passes reconcile_parent=0 (no
+    # spurious parent PUT on a zero-churn re-run).
+    if (( set_parent == 1 && reconcile_parent == 1 )) && [[ "$parent_id" != "$cur_parent" ]]; then
         diff="$(printf '%s' "$diff" | jq -c --arg p "$parent_id" '. + {parent: {key: $p}}')"
     fi
 
