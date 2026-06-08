@@ -146,7 +146,7 @@ change writes nothing.
 - [x] T037 [P] `CHANGELOG.md`: add the `### Added` entry for the re-mode capability (note the controlled-destruction amendment v1.1.0).
 - [x] T038 Run `scripts/check.sh` to green (shellcheck `--severity=style`, yamllint relaxed, markdownlint, full bats) with the dogfood config moved aside (clean-checkout parity); fix any lint.
 - [x] T039 Confirm the **003 neutrality gate** still passes (engine path carries no Jira vocabulary after the orphan-diff additions) and the **existing 365-test suite is unchanged** (no behavior regression in the non-re-mode path).
-- [ ] T040 Open the `004 → main` PR after green; the PR description MUST name the amended principle (Governance) and link the constitution v1.1.0 change.
+- [x] T040 Open the `004 → main` PR after green; the PR description MUST name the amended principle (Governance) and link the constitution v1.1.0 change.
 
 ---
 
