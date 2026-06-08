@@ -1,0 +1,155 @@
+# =============================================================================
+# spec-kit-jira-sync — spec-kit extension manifest
+# =============================================================================
+#
+# This file is the installation contract read by `specify extension add jira`
+# (the specify-cli extensions installer). The CLI validates this manifest,
+# copies the repo into the consumer's `.specify/extensions/jira/`, registers
+# any hooks below into the consumer's `.specify/extensions.yml`, and (if the
+# consumer initialised with `--ai-skills`) auto-generates one SKILL.md per
+# command under `.claude/skills/spec-kit-jira-<sub>/`.
+#
+# Field shape mirrors the sibling extension `spec-kit-linear-sync`
+# (extension.yml) exactly for every field the framework cares about. The
+# jira-sync surface is intentionally narrower: this bridge ships the two
+# on-demand reconcile commands (push + status) and registers no hooks — the
+# operator drives reconcile explicitly. Informational fields (`config:`) are
+# still listed so operators reading the manifest understand the config seam.
+#
+# Privacy (constitution Principle IX): this manifest is committed to a PUBLIC
+# repo and MUST stay free of real Jira coordinates/PII — no site, project key,
+# account ids, cloudIds, or tokens. Real binding values live ONLY in the
+# gitignored `.specify/extensions/jira/jira-config.yml` and `.env`.
+# =============================================================================
+
+# Manifest schema version. The CLI hard-requires "1.0"; any other value aborts
+# install before anything else runs.
+schema_version: "1.0"
+
+# ---------------------------------------------------------------------------
+# `extension:` — identity, version, attribution.
+# id / name / version / description are required by the CLI validator;
+# author / repository / license / homepage are optional but surfaced in the
+# community catalog UI.
+# ---------------------------------------------------------------------------
+extension:
+  # Lowercase-kebab id used throughout the framework and as the directory name
+  # under `.specify/extensions/`. MUST match ^[a-z0-9-]+$. Command names below
+  # are required to start with `speckit.<id>.` — i.e. `speckit.jira.`.
+  #
+  # NOTE: the framework id is `jira` (the install directory + command
+  # namespace). The COMMUNITY CATALOG id is `jira-sync` — the bare `jira`
+  # catalog slot is taken by an unrelated prompt-file extension, so the listing
+  # uses `jira-sync` while the installed extension lives under
+  # `.specify/extensions/jira/`.
+  id: "jira"
+
+  # Human-readable name surfaced in `specify extension list` and the catalog.
+  name: "spec-kit-jira-sync"
+
+  # PEP 440 version. First public release of the end-to-end reconcile bridge
+  # (feature 001 core bridge + feature 002 configurable mapping).
+  version: "0.1.0"
+
+  # One-line description — matches the catalog entry + README cover.
+  description: "A real reconcile engine — idempotent, drift-aware, fail-closed — that mirrors spec-kit specs into Jira (Epic per repo, Story per spec, Subtask per phase) and never corrupts your board."
+
+  # Optional fields — author + repo make the manifest self-describing.
+  author: "Ash Brener"
+  repository: "https://github.com/ashbrener/spec-kit-jira-sync"
+  license: "MIT"
+  homepage: "https://github.com/ashbrener/spec-kit-jira-sync"
+
+# ---------------------------------------------------------------------------
+# `requires:` — runtime preconditions the CLI validates at install.
+# Only `speckit_version` is first-class. The Jira REST endpoint + Basic-auth
+# credential checks are not declarable here; they are enforced at reconcile
+# time inside the sink (config::validate + the fail-closed Jira read), which
+# exits 2 on missing/invalid config and 3 on an unreadable Jira.
+# ---------------------------------------------------------------------------
+requires:
+  # Conventional floor used by sibling community extensions. Keep at ">=0.1.0"
+  # until a specific framework feature forces a higher floor.
+  speckit_version: ">=0.1.0"
+  # NOTE: Jira base URL, Basic-auth token (JIRA_BASE_URL / JIRA_EMAIL /
+  # JIRA_API_TOKEN), and `jira-config.yml` validity are NOT declarable in
+  # `requires:`. They are resolved from the gitignored `.env` /
+  # `.specify/extensions/jira/jira-config.yml` and checked at reconcile time.
+
+# ---------------------------------------------------------------------------
+# `provides:` — what this extension contributes to the consumer repo.
+# Must contain at least one of `commands` or `hooks`. This bridge ships two
+# on-demand commands and registers NO hooks: reconcile is operator-driven so
+# the board is never mutated as a silent side effect of a lifecycle command.
+# ---------------------------------------------------------------------------
+provides:
+
+  # -------------------------------------------------------------------------
+  # `commands:` — the slash-command surface area of this extension.
+  #
+  # Naming convention enforced by the CLI: each `name` MUST match
+  # `speckit.<extension.id>.<sub>` — i.e. `speckit.jira.<sub>`.
+  #
+  # `file` is the path RELATIVE TO this extension's root and points at the
+  # Markdown body the host agent (Claude Code, etc.) executes when the operator
+  # runs the corresponding slash command. These two files are the installable
+  # twins of the dev-layout `.claude/commands/speckit-jira-*.md` and carry the
+  # identical behaviour — they only differ in frontmatter shape (manifest-style
+  # `name:` + `arguments:`) so the installer can register them.
+  # -------------------------------------------------------------------------
+  commands:
+
+    # The core reconcile entry point. Reads the consumer repo's filesystem
+    # state for every `specs/NNN-feature/` directory and pushes whatever Jira
+    # needs to converge. Idempotent, drift-aware, fail-closed. The ONLY path
+    # that mutates Jira.
+    - name: "speckit.jira.push"
+      file: "commands/jira-push.md"
+      description: "Reconcile filesystem spec state -> Jira for every spec (or one --spec NNN) in the consumer repo. Idempotent; drift-aware; the only path that mutates Jira."
+
+    # Read-only visibility: runs the reconcile engine in --dry-run, planning
+    # every write but issuing none. Mutates neither Jira nor the filesystem.
+    - name: "speckit.jira.status"
+      file: "commands/jira-status.md"
+      description: "Read-only sync status / drift preview: what would be created/updated/transitioned, plus any backward-drift (Jira ahead of disk). Never mutates."
+
+  # -------------------------------------------------------------------------
+  # `config:` — INFORMATIONAL. The CLI does NOT auto-scaffold this file on
+  # install. The runtime binding `jira-config.yml` is produced by copying the
+  # committed `config-template.yml` into
+  # `.specify/extensions/jira/jira-config.yml` and filling in the real ids
+  # (project key, issue-type ids, phase->status ids). The resolved copy is
+  # gitignored; only the placeholder template is committed.
+  # -------------------------------------------------------------------------
+  config:
+    - name: "jira-config.yml"
+      template: "config-template.yml"
+      description: "Per-repo Jira binding: project_key, issue_types (epic/story/subtask), phase_status map, label prefixes, optional configurable mapping. Copied from config-template.yml into .specify/extensions/jira/ and filled with the project's real ids. Gitignored (Principle IX)."
+      required: true
+
+# ---------------------------------------------------------------------------
+# `tags:` — free-form catalog metadata. No framework behaviour depends on
+# these; they exist to make the community catalog searchable.
+# ---------------------------------------------------------------------------
+tags:
+  - "issue-tracking"
+  - "jira"
+  - "tasks-sync"
+  - "lifecycle-mirror"
+  - "reconcile"
+  - "drift-aware"
+
+# ---------------------------------------------------------------------------
+# `defaults:` — install-time defaults the install/seed steps may consult.
+# Best-effort safe defaults; the sink verifies the real binding against Jira
+# at reconcile time and fails closed on any mismatch.
+#
+# IMPORTANT: no secrets. The Jira Basic-auth token + email live ONLY in the
+# operator's gitignored `.env` (JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN).
+# This manifest is committed to the public repo and MUST stay secret-free.
+# ---------------------------------------------------------------------------
+defaults:
+  # Jira Cloud REST base path the sink targets. The operator sets the actual
+  # site origin via JIRA_BASE_URL in their gitignored `.env`; this default
+  # documents the REST API version the bridge speaks (v3).
+  rest_api_version: "3"
