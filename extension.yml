@@ -47,9 +47,10 @@ extension:
   # Human-readable name surfaced in `specify extension list` and the catalog.
   name: "spec-kit-jira-sync"
 
-  # PEP 440 version. First public release of the end-to-end reconcile bridge
-  # (feature 001 core bridge + feature 002 configurable mapping).
-  version: "0.1.0"
+  # PEP 440 version. Adds feature 003 (engine orchestration unification) and
+  # feature 004 (guarded re-mode / orphan pruning, constitution v1.1.0) on top
+  # of the 001 core bridge + 002 configurable mapping baseline.
+  version: "0.2.0"
 
   # One-line description — matches the catalog entry + README cover.
   description: "A real reconcile engine — idempotent, drift-aware, fail-closed — that mirrors spec-kit specs into Jira (Epic per repo, Story per spec, Subtask per phase) and never corrupts your board."
