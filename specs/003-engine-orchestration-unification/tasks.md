@@ -141,7 +141,7 @@ re-reconcile in each mode is zero churn.
 - [x] T008 [US1] Run the FULL suite (`bats --recursive tests/unit tests/integration`) — every test passes UNCHANGED. Diff the curl-shim request log against the T001 baseline; reconcile any byte difference until it is zero (the equivalence gate for the specs/-tree path).
 - [x] T009 [US1] Wire `reconcile::process_workstate_item` onto the same neutral loop; run the full suite UNCHANGED + diff the workstate-direct request log against baseline (zero difference).
 - [x] T010 [US1] Delete the now-unused 001 orchestrators (`ensure_repo_epic`, `sync_spec_issue`, `sync_task_phase_subissues`) from `src/jira_sink.sh` and their reconcile wrappers if unused; run the full suite UNCHANGED (proves they were truly dead). `shellcheck --severity=style src/*.sh` clean.
-- [ ] T011 [US1] Live-dogfood equivalence: re-reconcile the already-mirrored board in each mode (default 3-level, 2-level checklist, status rollup, Initiative degrade, workstate-direct) and confirm **0 created / 0 updated** (zero churn) — SC-002, the real-world equivalence proof.
+- [x] T011 [US1] Live-dogfood equivalence: re-reconcile the already-mirrored board in each mode (default 3-level, 2-level checklist, status rollup, Initiative degrade, workstate-direct) and confirm **0 created / 0 updated** (zero churn) — SC-002, the real-world equivalence proof.
 
 **Checkpoint**: US1 delivers the unification with proven zero behavior change — the MVP.
 
@@ -175,12 +175,12 @@ engine functions.
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T015 [P] `shellcheck --severity=style src/*.sh` clean; fix any finding from the re-platforming.
-- [ ] T016 [P] markdownlint-clean across `specs/003-engine-orchestration-unification/**/*.md` and any touched `*.md`.
-- [ ] T017 [P] Update `CHANGELOG.md` (Unreleased: engine orchestration unification — internal re-platforming, no operator-observable change; engine path is now vendor-neutral, gate-enforced).
-- [ ] T018 [P] Extend `tests/unit/no-real-identifiers.bats` only if new fixtures were added (T056's config) — confirm placeholders only (Privacy IX).
-- [ ] T019 Run the exact CI locally via `scripts/check.sh` (shellcheck + yamllint + markdownlint + bats) and fix to green before pushing.
-- [ ] T020 Final live-dogfood equivalence pass + a light holistic review (idempotency/drift/fail-closed unchanged in every mode), then open the `003 → main` PR.
+- [x] T015 [P] `shellcheck --severity=style src/*.sh` clean; fix any finding from the re-platforming.
+- [x] T016 [P] markdownlint-clean across `specs/003-engine-orchestration-unification/**/*.md` and any touched `*.md`.
+- [x] T017 [P] Update `CHANGELOG.md` (Unreleased: engine orchestration unification — internal re-platforming, no operator-observable change; engine path is now vendor-neutral, gate-enforced).
+- [x] T018 [P] Extend `tests/unit/no-real-identifiers.bats` only if new fixtures were added (T056's config) — confirm placeholders only (Privacy IX).
+- [x] T019 Run the exact CI locally via `scripts/check.sh` (shellcheck + yamllint + markdownlint + bats) and fix to green before pushing.
+- [x] T020 Final live-dogfood equivalence pass + a light holistic review (idempotency/drift/fail-closed unchanged in every mode), then open the `003 → main` PR.
 
 ---
 

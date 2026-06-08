@@ -74,6 +74,17 @@ All notable changes to this project are documented here. The format is based on
   PEP 668 externally-managed-environment dependence.
 - `reconcile.sh` usage/help aligned with the documented exit codes and the
   `--all` default.
+- **Engine orchestration unification (feature 003)** — internal re-platforming
+  with **no operator-observable change**: the engine now drives one neutral,
+  mapping-driven projection (`sync_level_artifact` + `link_to_parent`) for every
+  level via a vendor-neutral level loop, and the 001-era orchestrators
+  (`ensure_repo_epic` / `sync_spec_issue` / `sync_task_phase_subissues`, ~450
+  lines) are removed. An enforced committed gate
+  (`tests/unit/engine_vendor_neutral.bats`) keeps the engine path free of Jira
+  issue-type / artifact-name / relationship knowledge, so the eventual engine
+  extraction is a near-mechanical lift. Behavior is byte-for-byte identical (the
+  full existing suite passes unchanged; a new full-stack non-default-shape
+  zero-churn test guards the configured path).
 
 ### Fixed
 
