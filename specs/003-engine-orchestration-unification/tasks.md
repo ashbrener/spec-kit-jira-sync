@@ -69,6 +69,19 @@ Verify per-level: wire repo → run full suite green; wire spec (3-level) → gr
 add 2-level absorption → `us3*` green; wire phase → green; then delete the 001
 orchestrators (T010) and confirm the suite is still **byte-for-byte unchanged**.
 
+**Second gotcha — found in a repo-level wiring spike (reverted to stay green):**
+`ensure_repo_epic` is **find-or-create-ONLY** — for an existing Epic it returns
+the key from the SEARCH and does NO field reconcile + NO `query_issue_full` GET.
+`sync_level_artifact`, by contrast, always reads the existing issue (GET) and
+diffs/updates fields. Routing repo through it added an Epic GET + a potential
+field PUT that the 001 path never did — which fails the us2 fixtures (no Epic GET
+stubbed) and breaks byte-equivalence (us2 "manual status edit" 322/323, us3
+toggle 329). **Fix in T007:** give the repo level a find-or-create-only mode
+(skip the present-path read+diff when the level is `repo`, or pass a
+`reconcile_fields:false`-style flag) so it matches `ensure_repo_epic` exactly.
+The compose helpers + the spike confirmed the repo create payload itself is
+byte-identical (omit_description) — only the existing-Epic read/reconcile differs.
+
 ---
 
 ## Phase 2: Foundational (blocking prerequisites for the unification)
