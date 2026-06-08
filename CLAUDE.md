@@ -38,11 +38,17 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **002-configurable-mapping** (active) — configurable artifact mapping in the
-  sink + config layer (alias-layer default, per-level mapping + available-type
-  validation, 2-level checklist, status rollup, Initiative super-level,
-  workstate-direct input). Plan: `specs/002-configurable-mapping/plan.md`
-- **001-core-bridge** — parser→workstate→jira-sink reconcile (Layer D). Complete:
-  built, live-dogfood-proven, analyze-clean; pending merge to main.
+- **003-engine-orchestration-unification** (active) — behavior-preserving
+  re-platforming: replace the 001-era orchestrators with one neutral
+  mapping-driven level loop, delete them, and enforce a vendor-neutral engine path
+  (the extraction prerequisite). Spec+plan done; 347-test suite is the equivalence
+  oracle. Plan: `specs/003-engine-orchestration-unification/plan.md`
+- **002-configurable-mapping** — configurable artifact mapping (alias default,
+  per-level mapping + available-type validation, 2-level checklist, status
+  rollup, Initiative super-level, workstate-direct). Merged to main (PR #3),
+  live-dogfood-proven. Plan: `specs/002-configurable-mapping/plan.md`
+- **004-mapping-remode** — guarded re-mode / orphan pruning (specced+clarified,
+  on its own branch; impl after 003). Plan: pending.
+- **001-core-bridge** — parser→workstate→jira-sink reconcile (Layer D). Merged.
   Plan: `specs/001-core-bridge/plan.md`
 <!-- SPECKIT END -->

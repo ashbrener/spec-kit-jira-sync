@@ -117,6 +117,11 @@ declare -g _RECONCILE_REPO_SLUG=""
 # (spec_input gracefully absent). The post-loop Initiative super-level reads it.
 declare -g _RECONCILE_INITIATIVE_NARRATIVE=""
 
+# Per-spec projected-id cache for the neutral level loop (feature 003): maps a
+# level name → the issue id/key the projection returned, so a child level resolves
+# its parent. Reset per process_spec entry.
+declare -gA _RECONCILE_LEVEL_IDS=()
+
 # Per-spec workstate-item cache. reconcile::sync_spec_issue builds the neutral
 # workstate item once and stashes it here so reconcile::sync_task_phase_subissues
 # reuses it without re-parsing the spec dir. Reset on each process_spec entry.
@@ -1000,46 +1005,57 @@ reconcile::sync_spec_issue() {
         repo_slug="$(basename "$(dirname "$(dirname "${spec_dir%/}")")" 2>/dev/null || true)"
     fi
 
-    # ensure_repo_epic + sync_spec_issue own the find-or-create + transition.
-    # A failed ensure_repo_epic is fail-closed (e.g. an unreadable Epic lookup,
-    # rc 3): surface it as an error and promote exit 3 — the per-spec loop
-    # ignores process_spec's return, so a bare `return 1` would skip the spec
-    # silently and still exit 0 (Principle VIII / FR-015: no silent skip).
-    if ! epic_id="$(ensure_repo_epic "$repo_slug")"; then
+    # Repo Epic via the neutral level loop (feature 003 T007), in find-or-create-
+    # ONLY mode (the 5th arg) to match ensure_repo_epic exactly — no present-path
+    # read/diff, no field PUT. Byte-identical: omit_description repo create;
+    # find-or-reuse with zero writes. A non-zero rc is fail-closed (unreadable
+    # lookup rc 3, or a create failure): surface + promote exit 3 (Principle VIII /
+    # FR-015: no silent skip — the per-spec loop ignores process_spec's return).
+    local _repo_out _repo_rc=0
+    _repo_out="$(sync_level_artifact repo \
+        "$(reconcile::compose_identity repo "$item_json" "$repo_slug")" "" \
+        "$(reconcile::compose_payload repo "$item_json" "$repo_slug")" 1)" || _repo_rc=$?
+    if (( _repo_rc != 0 )); then
         summary::add error "spec ${feature_number}: repo Epic unreadable/unresolved — skipped, no write (fail-closed; Jira unchanged)"
         reconcile::promote_exit 3
         return 1
     fi
+    epic_id="$(printf '%s' "$_repo_out" | jq -r '.key // ""' 2>/dev/null || printf '')"
+    _RECONCILE_LEVEL_IDS[repo]="$epic_id"
 
     # Call sync_spec_issue in the CURRENT shell (stdout captured via a tempfile,
     # NOT a `$(...)` subshell) so its JIRA_SINK_SPEC_DISPOSITION global survives.
     # A command-sub subshell would discard the verdict (US2 summary accounting).
+    # Spec Story via the neutral level loop (feature 003 T007): the sink absorbs
+    # the labels/status/2-level behavior; the engine composes neutral inputs.
+    # Called in the CURRENT shell (stdout via a tempfile, not a $(...) subshell)
+    # so JIRA_SINK_LEVEL_* survive.
     local _out_file _rc
     _out_file="$(mktemp "${TMPDIR:-/tmp}/reconcile-out.XXXXXX")"
-    JIRA_SINK_SPEC_DISPOSITION=""
-    # Reset the US5 transition-failure channel before the call so a stale value
-    # from a prior spec cannot leak into this one's verdict.
-    JIRA_SINK_SPEC_TRANSITION_FAILED=0
-    # `set -e`-safe rc capture: a bare `cmd; rc=$?` aborts under set -e when cmd
-    # fails before the rc line runs, so capture via the if/else fork.
-    if sync_spec_issue "$item_json" "$epic_id" >"$_out_file"; then
+    JIRA_SINK_LEVEL_DISPOSITION=""
+    JIRA_SINK_LEVEL_TRANSITION_FAILED=0
+    if sync_level_artifact spec \
+        "$(reconcile::compose_identity spec "$item_json" "$repo_slug")" \
+        "$epic_id" \
+        "$(reconcile::compose_payload spec "$item_json" "$repo_slug")" >"$_out_file"; then
         _rc=0
     else
         _rc=$?
     fi
-    spec_issue_id="$(cat "$_out_file")"
+    spec_issue_id="$(jq -r '.key // ""' <"$_out_file" 2>/dev/null || cat "$_out_file")"
     rm -f "$_out_file"
     if (( _rc != 0 )); then
         return "$_rc"
     fi
+    _RECONCILE_LEVEL_IDS[spec]="$spec_issue_id"
     # Surface the sink's create/update/skip verdict to process_spec.
     if [[ -n "${RECONCILE_DISPOSITION_FILE:-}" ]]; then
-        printf 'spec\t%s\n' "${JIRA_SINK_SPEC_DISPOSITION:-created}" \
+        printf 'spec\t%s\n' "${JIRA_SINK_LEVEL_DISPOSITION:-created}" \
             >>"$RECONCILE_DISPOSITION_FILE"
         # A real transition TRANSPORT failure (the POST failed, not the benign
         # "no transition available" case) surfaces as its own disposition line so
         # process_spec can warn + promote the exit (US5 observable failure).
-        if [[ "${JIRA_SINK_SPEC_TRANSITION_FAILED:-0}" == "1" ]]; then
+        if [[ "${JIRA_SINK_LEVEL_TRANSITION_FAILED:-0}" == "1" ]]; then
             printf 'spec-transition\tfailed\n' >>"$RECONCILE_DISPOSITION_FILE"
         fi
     fi
@@ -1056,6 +1072,118 @@ reconcile::_phase_is_checklist() {
     local artifact
     artifact="$(mapping::resolve_level phase 2>/dev/null | cut -f1)"
     [[ "$artifact" == "checklist" ]]
+}
+
+# =============================================================================
+# Feature 003 — neutral level-loop primitives (the vendor-neutral engine seam).
+#
+# These compose the NEUTRAL inputs the generic projection (sync_level_artifact)
+# consumes for each level, reproducing exactly what the 001 orchestrators emitted
+# — but referencing ONLY workstate fields + config LABEL PREFIXES, never a Jira
+# issue-type id, artifact name, or relationship term (FR-006). ADF rendering +
+# issue-type/status resolution stay in the sink. Auditied by the FR-012 gate.
+# =============================================================================
+
+# reconcile::ordered_levels
+#   The structural levels the engine iterates, parent→child. `task` resolves to
+#   the in-body checklist sentinel; the optional `initiative` super-level is
+#   driven post-loop (sync_initiative), not here.
+reconcile::ordered_levels() {
+    printf '%s\n' repo spec phase task
+}
+
+# reconcile::compose_identity <level> <item_json> <repo_slug> [phase_index]
+#   The stable identity label for find-or-match, from config label prefixes only.
+reconcile::compose_identity() {
+    local level="$1" item_json="$2" repo_slug="$3" phase_index="${4:-}"
+    case "$level" in
+        repo)  printf '%s%s' "$(config::get labels.repo_prefix)" "$repo_slug" ;;
+        spec)  printf '%s%s' "$(config::get labels.spec_prefix)" \
+                   "$(printf '%s' "$item_json" | jq -r '.id | split("-")[0]')" ;;
+        phase) printf '%s%s' "$(config::get labels.phase_prefix)" "$phase_index" ;;
+        *)     printf '' ;;
+    esac
+}
+
+# reconcile::compose_payload <level> <item_json> <repo_slug> [phase_index]
+#   The NEUTRAL level payload the sink projects. Shape (level-dependent):
+#     repo  → {summary}                       (no description — matches 001 Epic)
+#     spec  → {summary, body, labels, state}  (state drives the Story transition)
+#     phase → {summary, tasks, labels}        (tasks render to the in-body taskList)
+#   `labels` EXCLUDES the identity label (the sink unions it). References only
+#   workstate fields + config label prefixes (no Jira tokens).
+reconcile::compose_payload() {
+    local level="$1" item_json="$2" repo_slug="$3" phase_index="${4:-}"
+    local lifecycle_prefix
+    lifecycle_prefix="$(config::get labels.lifecycle_prefix)"
+    case "$level" in
+        repo)
+            jq -cn --arg s "Specs — ${repo_slug}" '{summary: $s}'
+            ;;
+        spec)
+            # 2-level mode (phase resolves to checklist): carry the NEUTRAL
+            # flattened checklist tasks (keyed <phase>.<ordinal>, matching the 001
+            # 2-level path) so the sink composes the in-body checklist in ONE
+            # create. mapping::resolve_level is config (neutral), not Jira.
+            local _two_level=0
+            [[ "$(mapping::resolve_level phase 2>/dev/null | cut -f1)" == "checklist" ]] && _two_level=1
+            printf '%s' "$item_json" | jq -c \
+                --arg lp "$lifecycle_prefix" --argjson tl "$_two_level" '
+                (.id | split("-")[0]) as $n
+                | { summary: ($n + " — " + (.title // "")),
+                    body:    (.body // ""),
+                    labels:  ([($lp + (.state // ""))] + (.labels // []) | unique),
+                    state:   (.state // "") }
+                + (if $tl == 1 then
+                    { checklist_tasks: [ (.children // []) | to_entries[]
+                        | (.key) as $i | (.value) as $c
+                        | ( ($c.id // "") | ([match("[0-9]+$")?][0].string) ) as $cap
+                        | ($cap // (($i + 1) | tostring)) as $p
+                        | ($c.extensions.tasks // []) | to_entries[]
+                        | { id: ($p + "." + (.key | tostring)),
+                            text: (.value.text // ""),
+                            done: (.value.done // false) } ] }
+                   else {} end)'
+            ;;
+        phase)
+            printf '%s' "$item_json" | jq -c --argjson n "${phase_index:-0}" '
+                ( [ (.children // [])[]
+                    | ((.id // "") | [match("[0-9]+$")?][0].string) as $cap
+                    | select(($cap // "") == ($n | tostring)) ] | .[0] ) as $c
+                | { summary: ($c.title // ""),
+                    tasks:   ($c.extensions.tasks // []),
+                    labels:  [] }'
+            ;;
+        *)
+            printf '{}'
+            ;;
+    esac
+}
+
+# reconcile::parent_projected_id <level>
+#   Echo the projected issue id of <level>'s parent from the per-spec id cache
+#   (_RECONCILE_LEVEL_IDS), or empty for the top (repo) level.
+reconcile::parent_projected_id() {
+    local level="$1"
+    case "$level" in
+        repo)  printf '' ;;
+        spec)  printf '%s' "${_RECONCILE_LEVEL_IDS[repo]:-}" ;;
+        phase) printf '%s' "${_RECONCILE_LEVEL_IDS[spec]:-}" ;;
+        *)     printf '' ;;
+    esac
+}
+
+# reconcile::_repo_epic_key
+#   Resolve the repo Epic's key via the neutral projection (find-or-create-only),
+#   for the post-loop rollup / initiative steps. Propagates the sink rc on an
+#   unreadable lookup (fail-closed). Reads _RECONCILE_REPO_SLUG.
+reconcile::_repo_epic_key() {
+    local out rc=0
+    out="$(sync_level_artifact repo \
+        "$(reconcile::compose_identity repo '{}' "$_RECONCILE_REPO_SLUG")" "" \
+        "$(reconcile::compose_payload repo '{}' "$_RECONCILE_REPO_SLUG")" 1)" || rc=$?
+    (( rc != 0 )) && return "$rc"
+    printf '%s\n' "$(printf '%s' "$out" | jq -r '.key // ""' 2>/dev/null || printf '')"
 }
 
 # reconcile::_rollup_enabled
@@ -1127,7 +1255,7 @@ reconcile::rollup_repo_epic() {
     computed="$(rollup::compute_completion repo "$states")"
 
     local epic_key
-    if ! epic_key="$(ensure_repo_epic "$_RECONCILE_REPO_SLUG")"; then
+    if ! epic_key="$(reconcile::_repo_epic_key)"; then
         summary::add error "repo Epic rollup unreadable — fail-closed, top-level status not applied"
         reconcile::promote_exit 3
         return 0
@@ -1178,7 +1306,7 @@ reconcile::sync_initiative() {
 
     local narrative="${_RECONCILE_INITIATIVE_NARRATIVE:-}"
     local epic_key
-    if ! epic_key="$(ensure_repo_epic "$_RECONCILE_REPO_SLUG")"; then
+    if ! epic_key="$(reconcile::_repo_epic_key)"; then
         summary::add error "Initiative super-level: repo Epic unreadable — fail-closed (no write)"
         reconcile::promote_exit 3
         return 0
@@ -1253,27 +1381,53 @@ reconcile::sync_task_phase_subissues() {
         item_json="$(workstate::item_for_spec "$spec_dir")" || return 1
     fi
 
-    # Call the sink in the CURRENT shell (stdout via a tempfile, NOT `$(...)`)
-    # so its JIRA_SINK_SUBISSUE_DISPOSITIONS global survives for the verdict
-    # accounting; a command-sub subshell would discard it.
-    local _out_file _rc phase_map
-    _out_file="$(mktemp "${TMPDIR:-/tmp}/reconcile-sub.XXXXXX")"
-    JIRA_SINK_SUBISSUE_DISPOSITIONS="{}"
-    if sync_task_phase_subissues "$spec_issue_id" "$item_json" >"$_out_file"; then
-        _rc=0
-    else
-        _rc=$?
-    fi
-    phase_map="$(cat "$_out_file")"
-    rm -f "$_out_file"
-    if (( _rc != 0 )); then
-        return "$_rc"
-    fi
+    # Phase Subtasks via the neutral level loop (feature 003 T007): one
+    # sync_level_artifact(phase,…, find_only=0, reconcile_parent=0) per workstate
+    # child. Reproduces the 001 sink sync_task_phase_subissues exactly — per-phase
+    # verdict, the phase_index→key map, fail-closed on an unreadable read (rc 3),
+    # and a per-phase write failure recorded `failed` while the others continue
+    # (FR-014). reconcile_parent=0 because a Subtask's parent is immutable and the
+    # 001 sink never re-parented on update (no spurious zero-churn PUT). Phase
+    # identity/payload don't need the repo slug.
+    local children_count i
+    children_count="$(printf '%s' "$item_json" | jq -r '(.children // []) | length' 2>/dev/null || printf '0')"
+    local phase_map='{}' dispositions='{}'
+    for (( i = 0; i < children_count; i++ )); do
+        local child child_id phase_index identity payload
+        child="$(printf '%s' "$item_json" | jq -c --argjson n "$i" '.children[$n]')"
+        child_id="$(printf '%s' "$child" | jq -r '.id // ""')"
+        phase_index="${child_id##*-}"
+        [[ "$phase_index" =~ ^[0-9]+$ ]] || phase_index="$(( i + 1 ))"
+        identity="$(reconcile::compose_identity phase "$item_json" "" "$phase_index")"
+        payload="$(reconcile::compose_payload phase "$item_json" "" "$phase_index")"
+
+        # Call in the CURRENT shell (stdout via a tempfile, NOT `$(...)`) so the
+        # JIRA_SINK_LEVEL_DISPOSITION global survives for the verdict tally — a
+        # command-sub subshell would discard it and default every phase to
+        # `created`, mis-reporting zero-churn re-runs.
+        local _pout _prc=0 _pf
+        _pf="$(mktemp "${TMPDIR:-/tmp}/reconcile-ph.XXXXXX")"
+        JIRA_SINK_LEVEL_DISPOSITION=""
+        if sync_level_artifact phase "$identity" "$spec_issue_id" "$payload" 0 0 >"$_pf"; then _prc=0; else _prc=$?; fi
+        _pout="$(cat "$_pf")"; rm -f "$_pf"
+        if (( _prc == 3 )); then
+            return 3   # unreadable read → fail closed (matches the 001 sink)
+        elif (( _prc != 0 )); then
+            dispositions="$(printf '%s' "$dispositions" | jq -c --arg p "$phase_index" '. + {($p): "failed"}')"
+            continue
+        fi
+        local _pkey
+        _pkey="$(printf '%s' "$_pout" | jq -r '.key // ""' 2>/dev/null || printf '')"
+        if [[ -n "$_pkey" && "$_pkey" != "null" ]]; then
+            phase_map="$(printf '%s' "$phase_map" | jq -c --arg p "$phase_index" --arg k "$_pkey" '. + {($p): $k}')"
+            dispositions="$(printf '%s' "$dispositions" | jq -c --arg p "$phase_index" --arg d "${JIRA_SINK_LEVEL_DISPOSITION:-created}" '. + {($p): $d}')"
+        fi
+    done
 
     # Surface the per-phase create/update/skip verdicts to process_spec via the
     # disposition file (one `subtask\t<verdict>` line per phase).
     if [[ -n "${RECONCILE_DISPOSITION_FILE:-}" ]]; then
-        printf '%s' "${JIRA_SINK_SUBISSUE_DISPOSITIONS:-{}}" \
+        printf '%s' "$dispositions" \
             | jq -r 'to_entries[] | "subtask\t" + .value' 2>/dev/null \
             >>"$RECONCILE_DISPOSITION_FILE" || true
     fi
@@ -2035,23 +2189,28 @@ reconcile::process_workstate_item() {
     feature_number="$(printf '%s' "$item_json" | jq -r '.id | split("-")[0]' 2>/dev/null || printf '')"
     state="$(printf '%s' "$item_json" | jq -r '.state // ""' 2>/dev/null || printf '')"
 
-    # Repo Epic (fail-closed on an unreadable lookup).
-    local epic_id
-    if ! epic_id="$(ensure_repo_epic "$repo_slug")"; then
+    # Repo Epic via the neutral level loop (feature 003 T009), find-or-create-only.
+    local epic_id _repo_out
+    if ! _repo_out="$(sync_level_artifact repo \
+        "$(reconcile::compose_identity repo "$item_json" "$repo_slug")" "" \
+        "$(reconcile::compose_payload repo "$item_json" "$repo_slug")" 1)"; then
         summary::add error "item ${feature_number}: repo Epic unreadable — skipped, no write (fail-closed)"
         reconcile::promote_exit 3
         return 0
     fi
+    epic_id="$(printf '%s' "$_repo_out" | jq -r '.key // ""' 2>/dev/null || printf '')"
+    _RECONCILE_LEVEL_IDS[repo]="$epic_id"
 
-    # Spec Story — call in the CURRENT shell (stdout to a tempfile, NOT a $(...)
-    # subshell) so the sink's disposition globals survive (mirrors the
-    # specs/-tree wrapper).
+    # Spec Story via the neutral level loop — current shell (stdout to a tempfile,
+    # NOT a $(...) subshell) so the sink's disposition globals survive.
     local _out _rc spec_issue_id
     _out="$(mktemp "${TMPDIR:-/tmp}/reconcile-ws.XXXXXX")"
-    JIRA_SINK_SPEC_DISPOSITION=""
-    JIRA_SINK_SPEC_TRANSITION_FAILED=0
-    if sync_spec_issue "$item_json" "$epic_id" >"$_out"; then _rc=0; else _rc=$?; fi
-    spec_issue_id="$(cat "$_out")"; rm -f "$_out"
+    JIRA_SINK_LEVEL_DISPOSITION=""
+    JIRA_SINK_LEVEL_TRANSITION_FAILED=0
+    if sync_level_artifact spec \
+        "$(reconcile::compose_identity spec "$item_json" "$repo_slug")" "$epic_id" \
+        "$(reconcile::compose_payload spec "$item_json" "$repo_slug")" >"$_out"; then _rc=0; else _rc=$?; fi
+    spec_issue_id="$(jq -r '.key // ""' <"$_out" 2>/dev/null || cat "$_out")"; rm -f "$_out"
     if (( _rc != 0 )); then
         summary::add error "item ${feature_number}: spec mirror failed (rc ${_rc}; Jira may be incomplete)"
         reconcile::promote_exit "$(( _rc == 3 ? 3 : 1 ))"
@@ -2061,12 +2220,13 @@ reconcile::process_workstate_item() {
         summary::add error "item ${feature_number}: no issue id resolved"
         return 0
     fi
-    case "${JIRA_SINK_SPEC_DISPOSITION:-created}" in
+    _RECONCILE_LEVEL_IDS[spec]="$spec_issue_id"
+    case "${JIRA_SINK_LEVEL_DISPOSITION:-created}" in
         updated) summary::add updated "item ${feature_number}: Story ${spec_issue_id}" ;;
         skipped) summary::add skipped "item ${feature_number}: Story ${spec_issue_id} unchanged" ;;
         *)       summary::add created "item ${feature_number}: Story ${spec_issue_id}" ;;
     esac
-    if [[ "${JIRA_SINK_SPEC_TRANSITION_FAILED:-0}" == "1" ]]; then
+    if [[ "${JIRA_SINK_LEVEL_TRANSITION_FAILED:-0}" == "1" ]]; then
         summary::add warned "item ${feature_number}: Story status transition failed (transport) — status not applied"
         reconcile::promote_exit 1
     fi
@@ -2077,29 +2237,38 @@ reconcile::process_workstate_item() {
     if reconcile::_phase_is_checklist; then
         summary::add skipped "item ${feature_number}: tasks rendered in-body (2-level checklist); no Subtasks"
     else
-        JIRA_SINK_SUBISSUE_DISPOSITIONS='{}'
-        local _sout _src
-        _sout="$(mktemp "${TMPDIR:-/tmp}/reconcile-ws-sub.XXXXXX")"
-        if sync_task_phase_subissues "$spec_issue_id" "$item_json" >"$_sout"; then _src=0; else _src=$?; fi
-        phase_map="$(cat "$_sout")"; rm -f "$_sout"
-        if (( _src != 0 )); then
-            summary::add error "item ${feature_number}: task-phase Subtasks failed (rc ${_src}; Jira may be incomplete)"
-            reconcile::promote_exit "$(( _src == 3 ? 3 : 1 ))"
-            phase_map='{}'
-        else
-            local _p _d
-            while IFS=$'\t' read -r _p _d; do
-                [[ -n "$_p" ]] || continue
-                case "$_d" in
-                    updated) summary::add updated "item ${feature_number}: Subtask" ;;
-                    skipped) summary::add skipped "item ${feature_number}: Subtask unchanged" ;;
-                    created) summary::add created "item ${feature_number}: Subtask" ;;
-                    failed)
-                        summary::add error "item ${feature_number}: a task-phase Subtask did not mirror (write failed)"
-                        reconcile::promote_exit 1 ;;
-                esac
-            done < <(printf '%s' "$JIRA_SINK_SUBISSUE_DISPOSITIONS" | jq -r 'to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null || true)
-        fi
+        # Phase Subtasks via the neutral level loop (feature 003 T009), one
+        # sync_level_artifact(phase,…,find_only=0,reconcile_parent=0) per child —
+        # identical to reconcile::sync_task_phase_subissues.
+        local _wchildren _wi
+        _wchildren="$(printf '%s' "$item_json" | jq -r '(.children // []) | length' 2>/dev/null || printf '0')"
+        for (( _wi = 0; _wi < _wchildren; _wi++ )); do
+            local _wchild _wcid _wpx _wident _wpayload _wpf _wprc _wpkey
+            _wchild="$(printf '%s' "$item_json" | jq -c --argjson n "$_wi" '.children[$n]')"
+            _wcid="$(printf '%s' "$_wchild" | jq -r '.id // ""')"
+            _wpx="${_wcid##*-}"; [[ "$_wpx" =~ ^[0-9]+$ ]] || _wpx="$(( _wi + 1 ))"
+            _wident="$(reconcile::compose_identity phase "$item_json" "" "$_wpx")"
+            _wpayload="$(reconcile::compose_payload phase "$item_json" "" "$_wpx")"
+            _wpf="$(mktemp "${TMPDIR:-/tmp}/reconcile-ws-ph.XXXXXX")"
+            JIRA_SINK_LEVEL_DISPOSITION=""; _wprc=0
+            if sync_level_artifact phase "$_wident" "$spec_issue_id" "$_wpayload" 0 0 >"$_wpf"; then :; else _wprc=$?; fi
+            _wpkey="$(jq -r '.key // ""' <"$_wpf" 2>/dev/null || printf '')"; rm -f "$_wpf"
+            if (( _wprc == 3 )); then
+                summary::add error "item ${feature_number}: task-phase Subtasks unreadable (fail-closed; Jira may be incomplete)"
+                reconcile::promote_exit 3
+                break
+            elif (( _wprc != 0 )); then
+                summary::add error "item ${feature_number}: a task-phase Subtask did not mirror (write failed)"
+                reconcile::promote_exit 1
+                continue
+            fi
+            [[ -n "$_wpkey" && "$_wpkey" != "null" ]] && phase_map="$(printf '%s' "$phase_map" | jq -c --arg p "$_wpx" --arg k "$_wpkey" '. + {($p): $k}')"
+            case "${JIRA_SINK_LEVEL_DISPOSITION:-created}" in
+                updated) summary::add updated "item ${feature_number}: Subtask" ;;
+                skipped) summary::add skipped "item ${feature_number}: Subtask unchanged" ;;
+                *)       summary::add created "item ${feature_number}: Subtask" ;;
+            esac
+        done
     fi
 
     # Cross-spec dependency links + clarify comments (idempotent at-most-once),
