@@ -82,6 +82,33 @@ toggle 329). **Fix in T007:** give the repo level a find-or-create-only mode
 The compose helpers + the spike confirmed the repo create payload itself is
 byte-identical (omit_description) — only the existing-Epic read/reconcile differs.
 
+### T007 progress — repo + spec levels WIRED (green), phase level pending
+
+Committed + green (359/359):
+
+- `859c984` — **repo level** wired via `sync_level_artifact(repo,…,find_only=1)`
+  (the find-or-create-only 5th arg fixes the first gotcha).
+- `1ca4387` — **spec level** wired, including the **2-level single-create
+  absorption** (the second gotcha is SOLVED): `compose_payload(spec)` carries the
+  neutral flattened `checklist_tasks` in 2-level mode; `sync_level_artifact`
+  composes prose+sub-tree in one create and reconciles the sub-tree via
+  `sync_body_checklist` on update. us3 stays byte-identical.
+
+**Phase level — third gotcha (wire reverted to keep green; investigate next):**
+routing phase Subtasks through `sync_level_artifact(phase)` **re-created** the
+Subtasks on a zero-churn re-run (`created=2`, broke us1_default_zerochurn 295–298,
+us1_merged_transition 304, us2_idempotent 320–323). The 001 sink found phase
+Subtasks via `query_subissue_for_phase` (**parent**-scoped: `parent="<story>" AND
+labels=...`), whereas `sync_level_artifact` searches via `query_spec_issue`
+(**project**-scoped: `labels=... AND project=...`). Both URLs contain the
+`task-phase%3A1` label so the shim glob matches either — yet the existing Subtask
+wasn't matched, so a request-level trace is needed to pin the exact divergence
+(likely the search scope or the `&fields=` shape). **Fix candidate:** give
+`sync_level_artifact` a parent-scoped identity search for child levels (mirror
+`query_subissue_for_phase`) when a parent_id is present, verified against
+us2_idempotent + us1_default_zerochurn. After phase is green: delete the 001
+orchestrators (T010), add the neutrality gate (T012/US2), and T056 (T014/US3).
+
 ---
 
 ## Phase 2: Foundational (blocking prerequisites for the unification)
