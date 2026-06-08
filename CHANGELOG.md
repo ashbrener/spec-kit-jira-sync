@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-08
+
 ### Added
 
 - **Mapping re-mode / orphan pruning (feature 004)** — a guarded, opt-in
@@ -117,4 +119,5 @@ All notable changes to this project are documented here. The format is based on
 - Parser phase normalization corrected in the producer half.
 - POST idempotency and feature-pin handling hardened in the foundational sink.
 
-[Unreleased]: https://keepachangelog.com/en/1.1.0/
+[Unreleased]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ashbrener/spec-kit-jira-sync/releases/tag/v0.2.0
