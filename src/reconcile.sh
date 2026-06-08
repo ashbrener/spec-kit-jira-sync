@@ -1026,32 +1026,36 @@ reconcile::sync_spec_issue() {
     # Call sync_spec_issue in the CURRENT shell (stdout captured via a tempfile,
     # NOT a `$(...)` subshell) so its JIRA_SINK_SPEC_DISPOSITION global survives.
     # A command-sub subshell would discard the verdict (US2 summary accounting).
+    # Spec Story via the neutral level loop (feature 003 T007): the sink absorbs
+    # the labels/status/2-level behavior; the engine composes neutral inputs.
+    # Called in the CURRENT shell (stdout via a tempfile, not a $(...) subshell)
+    # so JIRA_SINK_LEVEL_* survive.
     local _out_file _rc
     _out_file="$(mktemp "${TMPDIR:-/tmp}/reconcile-out.XXXXXX")"
-    JIRA_SINK_SPEC_DISPOSITION=""
-    # Reset the US5 transition-failure channel before the call so a stale value
-    # from a prior spec cannot leak into this one's verdict.
-    JIRA_SINK_SPEC_TRANSITION_FAILED=0
-    # `set -e`-safe rc capture: a bare `cmd; rc=$?` aborts under set -e when cmd
-    # fails before the rc line runs, so capture via the if/else fork.
-    if sync_spec_issue "$item_json" "$epic_id" >"$_out_file"; then
+    JIRA_SINK_LEVEL_DISPOSITION=""
+    JIRA_SINK_LEVEL_TRANSITION_FAILED=0
+    if sync_level_artifact spec \
+        "$(reconcile::compose_identity spec "$item_json" "$repo_slug")" \
+        "$epic_id" \
+        "$(reconcile::compose_payload spec "$item_json" "$repo_slug")" >"$_out_file"; then
         _rc=0
     else
         _rc=$?
     fi
-    spec_issue_id="$(cat "$_out_file")"
+    spec_issue_id="$(jq -r '.key // ""' <"$_out_file" 2>/dev/null || cat "$_out_file")"
     rm -f "$_out_file"
     if (( _rc != 0 )); then
         return "$_rc"
     fi
+    _RECONCILE_LEVEL_IDS[spec]="$spec_issue_id"
     # Surface the sink's create/update/skip verdict to process_spec.
     if [[ -n "${RECONCILE_DISPOSITION_FILE:-}" ]]; then
-        printf 'spec\t%s\n' "${JIRA_SINK_SPEC_DISPOSITION:-created}" \
+        printf 'spec\t%s\n' "${JIRA_SINK_LEVEL_DISPOSITION:-created}" \
             >>"$RECONCILE_DISPOSITION_FILE"
         # A real transition TRANSPORT failure (the POST failed, not the benign
         # "no transition available" case) surfaces as its own disposition line so
         # process_spec can warn + promote the exit (US5 observable failure).
-        if [[ "${JIRA_SINK_SPEC_TRANSITION_FAILED:-0}" == "1" ]]; then
+        if [[ "${JIRA_SINK_LEVEL_TRANSITION_FAILED:-0}" == "1" ]]; then
             printf 'spec-transition\tfailed\n' >>"$RECONCILE_DISPOSITION_FILE"
         fi
     fi
@@ -1117,13 +1121,29 @@ reconcile::compose_payload() {
             jq -cn --arg s "Specs — ${repo_slug}" '{summary: $s}'
             ;;
         spec)
+            # 2-level mode (phase resolves to checklist): carry the NEUTRAL
+            # flattened checklist tasks (keyed <phase>.<ordinal>, matching the 001
+            # 2-level path) so the sink composes the in-body checklist in ONE
+            # create. mapping::resolve_level is config (neutral), not Jira.
+            local _two_level=0
+            [[ "$(mapping::resolve_level phase 2>/dev/null | cut -f1)" == "checklist" ]] && _two_level=1
             printf '%s' "$item_json" | jq -c \
-                --arg lp "$lifecycle_prefix" '
+                --arg lp "$lifecycle_prefix" --argjson tl "$_two_level" '
                 (.id | split("-")[0]) as $n
                 | { summary: ($n + " — " + (.title // "")),
                     body:    (.body // ""),
                     labels:  ([($lp + (.state // ""))] + (.labels // []) | unique),
-                    state:   (.state // "") }'
+                    state:   (.state // "") }
+                + (if $tl == 1 then
+                    { checklist_tasks: [ (.children // []) | to_entries[]
+                        | (.key) as $i | (.value) as $c
+                        | ( ($c.id // "") | ([match("[0-9]+$")?][0].string) ) as $cap
+                        | ($cap // (($i + 1) | tostring)) as $p
+                        | ($c.extensions.tasks // []) | to_entries[]
+                        | { id: ($p + "." + (.key | tostring)),
+                            text: (.value.text // ""),
+                            done: (.value.done // false) } ] }
+                   else {} end)'
             ;;
         phase)
             printf '%s' "$item_json" | jq -c --argjson n "${phase_index:-0}" '

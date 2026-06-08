@@ -1551,9 +1551,21 @@ sync_level_artifact() {
     #   .body  present → markdown → ADF (the spec body + the 002 callers)
     #   neither        → OMIT the description entirely (matches the 001 repo Epic,
     #                    which carries no description field)
-    local summary description omit_description=0
+    #   .checklist_tasks present → 2-level spec: prose + keyed checklist sub-tree
+    #                    in ONE create; the sub-tree is reconciled in isolation on
+    #                    update (preserving prose), mirroring sync_spec_issue's
+    #                    2-level path.
+    local summary description omit_description=0 two_level_spec=0 _ck_subtree=''
     summary="$(printf '%s' "$input_json" | jq -r '.summary // ""' 2>/dev/null || printf '')"
-    if printf '%s' "$input_json" | jq -e 'has("tasks")' >/dev/null 2>&1; then
+    if printf '%s' "$input_json" | jq -e 'has("checklist_tasks")' >/dev/null 2>&1; then
+        local _ck_tasks _prose
+        _ck_tasks="$(printf '%s' "$input_json" | jq -c '.checklist_tasks // []')"
+        _ck_subtree="$(adf::render_checklist_subtree "$_ck_tasks")"
+        _prose="$(adf::from_markdown "$(printf '%s' "$input_json" | jq -r '.body // ""')")"
+        description="$(jq -cn --argjson p "$_prose" --argjson st "$_ck_subtree" \
+            '{version:1, type:"doc", content: ((($p.content) // []) + $st)}')"
+        two_level_spec=1
+    elif printf '%s' "$input_json" | jq -e 'has("tasks")' >/dev/null 2>&1; then
         local _tasks_json
         _tasks_json="$(printf '%s' "$input_json" | jq -c '.tasks // []')"
         description="$(jq -cn --argjson tl "$(adf::task_list "$_tasks_json")" \
@@ -1682,9 +1694,11 @@ sync_level_artifact() {
     if [[ "$summary" != "$cur_summary" ]]; then
         diff="$(printf '%s' "$diff" | jq -c --arg s "$summary" '. + {summary: $s}')"
     fi
-    # Skip the description diff entirely for a description-less level (the repo
-    # Epic, omit_description=1) so it never PUTs an unwanted description.
-    if (( omit_description == 0 )); then
+    # Skip the description diff for a description-less level (the repo Epic,
+    # omit_description=1) AND for a 2-level spec (two_level_spec=1) — there the
+    # prose is co-owned and the checklist sub-tree is reconciled separately below,
+    # so the full-body diff would clobber human prose (mirrors sync_spec_issue).
+    if (( omit_description == 0 && two_level_spec == 0 )); then
         local desired_desc_norm current_desc_norm
         desired_desc_norm="$(jira_sink::_normalize_adf "$description")"
         current_desc_norm="$(jira_sink::_normalize_adf "$cur_description")"
@@ -1719,6 +1733,20 @@ sync_level_artifact() {
             JIRA_SINK_LEVEL_TRANSITION_FAILED=1
             jira_sink::_log "sync_level_artifact: transition for ${existing_key} (state ${_state}) did not apply"
         fi
+    fi
+
+    # 2-level spec: reconcile the in-body checklist sub-tree (preserving prose),
+    # mirroring sync_spec_issue. A write counts as an update; fail-closed on an
+    # unreadable read; surface a write failure.
+    if (( two_level_spec == 1 )); then
+        local _ck_rc=0
+        sync_body_checklist "$existing_key" "$_ck_subtree" || _ck_rc=$?
+        if (( _ck_rc == 3 )); then
+            return 3
+        elif (( _ck_rc != 0 )); then
+            return 1
+        fi
+        [[ "${JIRA_SINK_CHECKLIST_DISPOSITION}" == "updated" ]] && wrote_update=1
     fi
 
     if (( wrote_update == 1 || wrote_transition == 1 )); then
