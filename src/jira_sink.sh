@@ -1510,6 +1510,10 @@ initiative::degrade_onto_epic() {
 # when the level was a checklist sentinel (no issue). Exported so reconcile.sh
 # (across the seam) can read it and so shellcheck does not flag it unused.
 declare -gx JIRA_SINK_LEVEL_DISPOSITION=""
+# Transport-failure channel for a level's lifecycle status transition (feature
+# 003; mirrors JIRA_SINK_SPEC_TRANSITION_FAILED). Read by the engine to surface
+# a US5 observable failure. -gx silences SC2034 in the isolated file scan.
+declare -gx JIRA_SINK_LEVEL_TRANSITION_FAILED=0
 
 # sync_level_artifact <level> <identity_label> <parent_id> <input_json>
 #   Mapping-driven create/update of the level's CONFIGURED issue type under
@@ -1521,6 +1525,7 @@ sync_level_artifact() {
     local level="${1:-}" identity_label="${2:-}" parent_id="${3:-}" input_json="${4:-}"
 
     JIRA_SINK_LEVEL_DISPOSITION=""
+    JIRA_SINK_LEVEL_TRANSITION_FAILED=0
 
     # Resolve the configured artifact + parent relationship for this level.
     local artifact relationship
@@ -1539,11 +1544,28 @@ sync_level_artifact() {
     project="$(config::get project_key)"
     itype="$(jira_sink::_artifact_issue_type_id "$artifact")"
 
-    # Compose the desired issue from the neutral level input.
-    local summary body description
+    # Compose the desired issue from the neutral level input. Description source
+    # (feature 003 absorption — gated on the neutral input fields so 002 callers,
+    # which pass `body`, are unchanged):
+    #   .tasks present → an in-body ADF taskList (the phase Subtask body)
+    #   .body  present → markdown → ADF (the spec body + the 002 callers)
+    #   neither        → OMIT the description entirely (matches the 001 repo Epic,
+    #                    which carries no description field)
+    local summary description omit_description=0
     summary="$(printf '%s' "$input_json" | jq -r '.summary // ""' 2>/dev/null || printf '')"
-    body="$(printf '%s' "$input_json" | jq -r '.body // ""' 2>/dev/null || printf '')"
-    description="$(adf::from_markdown "$body")"
+    if printf '%s' "$input_json" | jq -e 'has("tasks")' >/dev/null 2>&1; then
+        local _tasks_json
+        _tasks_json="$(printf '%s' "$input_json" | jq -c '.tasks // []')"
+        description="$(jq -cn --argjson tl "$(adf::task_list "$_tasks_json")" \
+            '{version:1, type:"doc", content:[$tl]}')"
+    elif printf '%s' "$input_json" | jq -e 'has("body")' >/dev/null 2>&1; then
+        local _body
+        _body="$(printf '%s' "$input_json" | jq -r '.body // ""')"
+        description="$(adf::from_markdown "$_body")"
+    else
+        omit_description=1
+        description='null'
+    fi
 
     # The desired label set = the identity label (the re-match key — the
     # task_prefix identity for a Task-projected level, FR-009; always carried so a
@@ -1563,6 +1585,17 @@ sync_level_artifact() {
     case "$relationship" in
         parent|Epic-link) [[ -n "$parent_id" ]] && set_parent=1 ;;
     esac
+
+    # Lifecycle status (feature 003 absorption): when the neutral payload carries a
+    # `state` that maps to a status, drive the transition (the spec Story). Gated
+    # on `.state`, so non-stateful levels (repo/phase) and 002 callers skip it.
+    local _state status_transition="" desired_status_id=""
+    _state="$(printf '%s' "$input_json" | jq -r '.state // ""' 2>/dev/null || printf '')"
+    if [[ -n "$_state" ]] && status_transition="$(config::get_status_transition "$_state" 2>/dev/null)"; then
+        desired_status_id="${status_transition%%$'\t'*}"
+    else
+        status_transition=""
+    fi
 
     # --- Find-or-create-or-update by identity label ----------------------
     # query_spec_issue is a generic label+project JQL search; reuse it to match
@@ -1585,14 +1618,15 @@ sync_level_artifact() {
             --argjson description "$description" \
             --argjson labels "$labels_json" \
             --argjson set_parent "$set_parent" \
+            --argjson omit_desc "$omit_description" \
             '{fields:(
                 {
                     project:     {key: $project},
                     issuetype:   {id: $itype},
                     summary:     $summary,
-                    description: $description,
                     labels:      $labels
                 }
+                + (if ($omit_desc == 1) then {} else {description: $description} end)
                 + (if ($set_parent == 1) then {parent: {key: $parent}} else {} end)
             )}')"
 
@@ -1606,6 +1640,13 @@ sync_level_artifact() {
             jira_sink::_log "sync_level_artifact: created ${artifact} has no key"
             return 1
         fi
+        # Drive the lifecycle status on a fresh create (gated on .state).
+        if [[ -n "$status_transition" ]]; then
+            if ! transition_issue "$key" "$status_transition"; then
+                JIRA_SINK_LEVEL_TRANSITION_FAILED=1
+                jira_sink::_log "sync_level_artifact: transition for ${key} (state ${_state}) did not apply"
+            fi
+        fi
         JIRA_SINK_LEVEL_DISPOSITION="created"
         printf '%s\n' "$created"
         return 0
@@ -1618,11 +1659,12 @@ sync_level_artifact() {
         jira_sink::_log "sync_level_artifact: ${level} (${existing_key}) read unreadable; failing closed (rc 3)"
         return 3
     fi
-    local cur_summary cur_description cur_labels cur_parent
+    local cur_summary cur_description cur_labels cur_parent cur_status_id
     cur_summary="$(printf '%s' "$current" | jq -r '.summary // ""' 2>/dev/null || printf '')"
     cur_description="$(printf '%s' "$current" | jq -c '.description // null' 2>/dev/null || printf 'null')"
     cur_labels="$(printf '%s' "$current" | jq -c '.labels // []' 2>/dev/null || printf '[]')"
     cur_parent="$(printf '%s' "$current" | jq -r '.parent.key // ""' 2>/dev/null || printf '')"
+    cur_status_id="$(printf '%s' "$current" | jq -r '.status.id // ""' 2>/dev/null || printf '')"
     local cur_id
     cur_id="$(printf '%s' "$existing" | jq -r '(.[0].id // "")' 2>/dev/null || printf '')"
 
@@ -1630,11 +1672,15 @@ sync_level_artifact() {
     if [[ "$summary" != "$cur_summary" ]]; then
         diff="$(printf '%s' "$diff" | jq -c --arg s "$summary" '. + {summary: $s}')"
     fi
-    local desired_desc_norm current_desc_norm
-    desired_desc_norm="$(jira_sink::_normalize_adf "$description")"
-    current_desc_norm="$(jira_sink::_normalize_adf "$cur_description")"
-    if [[ "$desired_desc_norm" != "$current_desc_norm" ]]; then
-        diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+    # Skip the description diff entirely for a description-less level (the repo
+    # Epic, omit_description=1) so it never PUTs an unwanted description.
+    if (( omit_description == 0 )); then
+        local desired_desc_norm current_desc_norm
+        desired_desc_norm="$(jira_sink::_normalize_adf "$description")"
+        current_desc_norm="$(jira_sink::_normalize_adf "$cur_description")"
+        if [[ "$desired_desc_norm" != "$current_desc_norm" ]]; then
+            diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+        fi
     fi
     if ! jira_sink::_labels_equal "$labels_json" "$cur_labels"; then
         diff="$(printf '%s' "$diff" | jq -c --argjson l "$labels_json" '. + {labels: $l}')"
@@ -1643,6 +1689,7 @@ sync_level_artifact() {
         diff="$(printf '%s' "$diff" | jq -c --arg p "$parent_id" '. + {parent: {key: $p}}')"
     fi
 
+    local wrote_update=0
     if [[ "$diff" != "{}" ]]; then
         local diff_payload
         diff_payload="$(printf '%s' "$diff" | jq -c '{fields: .}')"
@@ -1650,6 +1697,21 @@ sync_level_artifact() {
             jira_sink::_log "sync_level_artifact: update for ${existing_key} (${level}) failed"
             return 1
         fi
+        wrote_update=1
+    fi
+    # Reconcile STATUS (gated on .state): transition ONLY when the current status
+    # differs from the desired (restores a manual edit; a match fires nothing).
+    local wrote_transition=0
+    if [[ -n "$desired_status_id" && "$desired_status_id" != "$cur_status_id" ]]; then
+        if transition_issue "$existing_key" "$status_transition"; then
+            wrote_transition=1
+        else
+            JIRA_SINK_LEVEL_TRANSITION_FAILED=1
+            jira_sink::_log "sync_level_artifact: transition for ${existing_key} (state ${_state}) did not apply"
+        fi
+    fi
+
+    if (( wrote_update == 1 || wrote_transition == 1 )); then
         JIRA_SINK_LEVEL_DISPOSITION="updated"
     else
         JIRA_SINK_LEVEL_DISPOSITION="skipped"
