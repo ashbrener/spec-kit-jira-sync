@@ -145,6 +145,45 @@ Subtask issues) are on the [roadmap](#status--roadmap).
 
 ---
 
+## Changing the mapping: guarded re-mode (`--remode`)
+
+The ordinary reconcile is **add/update-only** — it never deletes. So if you change
+the mapping shape (e.g. 3-level Subtasks → a 2-level in-body checklist, or a
+different issue type for specs), a plain reconcile adds the new-shape artifacts but
+leaves the old ones behind as **orphans**. A plain reconcile *warns* when it
+detects them, and points you at re-mode.
+
+`reconcile.sh --remode` cleans this up in one guarded pass: it prunes the
+bridge-owned artifacts the current mapping no longer projects, then regenerates the
+new shape. It is the **only** destructive operation in the bridge, and it is
+fenced:
+
+- **Opt-in only** — reachable solely via `--remode`; never fired by a hook. The
+  ordinary reconcile (and every `after_*` hook) stays strictly non-destructive.
+- **Bridge-owned only** — it prunes only issues carrying the `speckit-*` identity
+  labels. An issue you created (no identity label) is *structurally* excluded and
+  is never deleted, relabeled, or edited — even under the same Epic or with a
+  lookalike summary.
+- **Preview first** — `reconcile.sh --remode --dry-run` prints the exact prune +
+  regenerate set and writes nothing; the real run acts on exactly that set.
+- **Fail-closed** — an unreadable Jira read aborts the whole re-mode before any
+  delete. A partial prune failure is surfaced and finished by a re-run.
+- **Destruction model** — `remode.destruction: hard-delete` (default; bridge
+  content is regenerable from the specs) or `archive` (transition off-board +
+  detach identity, preserving comments/links).
+
+```bash
+reconcile.sh --remode --dry-run --all   # preview what would be pruned + regenerated
+reconcile.sh --remode --all             # prune orphans + regenerate the new shape
+```
+
+This rests on the regenerable-projection insight: Jira is a one-way mirror of the
+source-of-truth specs, so bridge-owned content needs no backup. See the
+[constitution](.specify/memory/constitution.md) Principle I controlled-destruction
+carve-out (v1.1.0).
+
+---
+
 ## The reconcile decision flow
 
 For every spec, the engine decides — per spec, independently — whether and how

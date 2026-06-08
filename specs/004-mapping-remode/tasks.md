@@ -141,11 +141,11 @@ change writes nothing.
 
 ## Phase 7: Polish & cross-cutting
 
-- [ ] T035 [P] Document the `remode` config block in `config-template.yml` and cross-reference re-mode from `README.md` (recovery/experimentation section) + this feature's `quickstart.md`.
-- [ ] T036 [P] Privacy guard: confirm every new fixture/test uses placeholder coordinates; extend `tests/.private-deny` coverage if needed; `tests/unit/no-real-identifiers.bats` green (Privacy IX / FR-012).
-- [ ] T037 [P] `CHANGELOG.md`: add the `### Added` entry for the re-mode capability (note the controlled-destruction amendment v1.1.0).
-- [ ] T038 Run `scripts/check.sh` to green (shellcheck `--severity=style`, yamllint relaxed, markdownlint, full bats) with the dogfood config moved aside (clean-checkout parity); fix any lint.
-- [ ] T039 Confirm the **003 neutrality gate** still passes (engine path carries no Jira vocabulary after the orphan-diff additions) and the **existing 365-test suite is unchanged** (no behavior regression in the non-re-mode path).
+- [x] T035 [P] Document the `remode` config block in `config-template.yml` and cross-reference re-mode from `README.md` (recovery/experimentation section) + this feature's `quickstart.md`.
+- [x] T036 [P] Privacy guard: confirm every new fixture/test uses placeholder coordinates; extend `tests/.private-deny` coverage if needed; `tests/unit/no-real-identifiers.bats` green (Privacy IX / FR-012).
+- [x] T037 [P] `CHANGELOG.md`: add the `### Added` entry for the re-mode capability (note the controlled-destruction amendment v1.1.0).
+- [x] T038 Run `scripts/check.sh` to green (shellcheck `--severity=style`, yamllint relaxed, markdownlint, full bats) with the dogfood config moved aside (clean-checkout parity); fix any lint.
+- [x] T039 Confirm the **003 neutrality gate** still passes (engine path carries no Jira vocabulary after the orphan-diff additions) and the **existing 365-test suite is unchanged** (no behavior regression in the non-re-mode path).
 - [ ] T040 Open the `004 → main` PR after green; the PR description MUST name the amended principle (Governance) and link the constitution v1.1.0 change.
 
 ---
