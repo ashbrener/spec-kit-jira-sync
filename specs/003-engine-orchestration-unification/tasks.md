@@ -154,8 +154,8 @@ re-reconcile in each mode is zero churn.
 **Independent test**: the committed neutrality gate passes over the enumerated
 engine functions.
 
-- [ ] T012 [US2] Implement the neutrality gate `tests/unit/engine_vendor_neutral.bats` — extract the bodies of the enumerated engine-orchestration functions (per `contracts/engine-sink-interface-003.md` §3: `process_spec`, `process_workstate_item`, `ordered_levels`, `compose_identity`, `compose_payload`, `parent_projected_id`, `rollup_phases`, `rollup_repo_epic`, `sync_initiative`) and FAIL if any contains a Jira issue-type id, an artifact-name literal (`Epic`/`Story`/`Subtask`/`Task`/`Initiative` as a value), or a relationship term (`Epic-link`; `parent`/`checklist` as a Jira relationship value). Whitelist the neutral level names + config label-prefix keys.
-- [ ] T013 [US2] Resolve every violation the gate surfaces — move any residual Jira token out of the engine path and behind the sink/config — until `engine_vendor_neutral.bats` is green AND the full suite still passes UNCHANGED.
+- [x] T012 [US2] Implement the neutrality gate `tests/unit/engine_vendor_neutral.bats` — extract the bodies of the enumerated engine-orchestration functions (per `contracts/engine-sink-interface-003.md` §3: `process_spec`, `process_workstate_item`, `ordered_levels`, `compose_identity`, `compose_payload`, `parent_projected_id`, `rollup_phases`, `rollup_repo_epic`, `sync_initiative`) and FAIL if any contains a Jira issue-type id, an artifact-name literal (`Epic`/`Story`/`Subtask`/`Task`/`Initiative` as a value), or a relationship term (`Epic-link`; `parent`/`checklist` as a Jira relationship value). Whitelist the neutral level names + config label-prefix keys.
+- [x] T013 [US2] Resolve every violation the gate surfaces — move any residual Jira token out of the engine path and behind the sink/config — until `engine_vendor_neutral.bats` is green AND the full suite still passes UNCHANGED.
 
 **Checkpoint**: US2 makes lift-readiness self-enforcing; the engine cannot silently re-acquire Jira knowledge.
 
