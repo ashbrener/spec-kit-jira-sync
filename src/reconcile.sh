@@ -156,6 +156,12 @@ declare -g ARG_RETROACTIVE=0    # 0|1 — DEPRECATED no-op alias. Writing from
 # fires.
 declare -g ARG_ON_DRIFT=""      # "" | abort | proceed
 
+# Re-mode (feature 004): the explicit, opt-in destructive operation. 0 = the
+# ordinary non-destructive reconcile (default); 1 = prune bridge-owned orphans
+# the current mapping no longer projects, then regenerate. Reachable ONLY via
+# --remode (the v1.1.0 controlled-destruction carve-out — never hook-fired).
+declare -g ARG_REMODE=0         # 0|1
+
 # Aggregate exit-code tracker. We start at 0 and monotonically promote
 # to higher severities as failures accumulate.
 declare -g RECONCILE_EXIT_CODE=0
@@ -290,6 +296,10 @@ reconcile::parse_args() {
                 ;;
             --dry-run)
                 ARG_DRY_RUN=1
+                shift
+                ;;
+            --remode)
+                ARG_REMODE=1
                 shift
                 ;;
             --quiet)
@@ -2456,6 +2466,157 @@ reconcile::_desired_project_state() {
 # =============================================================================
 # Main.
 # =============================================================================
+# reconcile::compute_orphans <root_key> <repo_slug> <items_json_array>
+#   The NEUTRAL orphan diff (feature 004): O = E \ D keyed by identity label.
+#   D = the identity labels the CURRENT mapping projects an issue for (built from
+#   compose_identity over repo + each spec + each phase when phase is not the
+#   checklist sentinel). E = the bridge-owned set the sink enumerates beneath the
+#   root. An E-issue is an orphan iff NONE of its identity-prefix labels is in D.
+#   Operator issues carry no identity-prefix label, so they never enter the set.
+#   Echoes a JSON array `[{key, identity_label, parent, updated, status}]`.
+#   rc 3 (fail-closed) propagated from the sink enumerator on an unreadable read.
+#   Vendor-neutral: level names + label-prefix strings only (no vendor tokens).
+reconcile::compute_orphans() {
+    local root_key="$1" repo_slug="$2" items_json="$3"
+
+    # Desired identity set D.
+    local desired
+    desired="$(jq -cn --arg r "$(reconcile::compose_identity repo '{}' "$repo_slug")" '[$r]')"
+    local phase_is_issue=1
+    [[ "$(mapping::resolve_level phase 2>/dev/null | cut -f1)" == "checklist" ]] && phase_is_issue=0
+
+    local count i
+    count="$(printf '%s' "$items_json" | jq 'length' 2>/dev/null || printf '0')"
+    for (( i = 0; i < count; i++ )); do
+        local item
+        item="$(printf '%s' "$items_json" | jq -c --argjson x "$i" '.[$x]')"
+        desired="$(jq -cn --argjson d "$desired" \
+            --arg s "$(reconcile::compose_identity spec "$item" "$repo_slug")" '$d + [$s]')"
+        if (( phase_is_issue == 1 )); then
+            local pidx
+            while IFS= read -r pidx; do
+                [[ -n "$pidx" ]] || continue
+                desired="$(jq -cn --argjson d "$desired" \
+                    --arg p "$(reconcile::compose_identity phase "$item" "$repo_slug" "$pidx")" '$d + [$p]')"
+            done < <(printf '%s' "$item" | jq -r '
+                [ .children[]? | ((.id // "") | [match("[0-9]+$")?][0].string) ]
+                | map(select(. != null)) | .[]')
+        fi
+    done
+    desired="$(printf '%s' "$desired" | jq -c 'unique')"
+
+    # Existing bridge-owned set E (sink read; fail-closed).
+    local existing
+    existing="$(jira_sink::enumerate_bridge_descendants "$root_key")" || return 3
+
+    # Identity prefixes (config — neutral).
+    local prefixes_json
+    prefixes_json="$(printf '%s\n' \
+        "$(config::get labels.repo_prefix 2>/dev/null || true)" \
+        "$(config::get labels.spec_prefix 2>/dev/null || true)" \
+        "$(config::get labels.phase_prefix 2>/dev/null || true)" \
+        "$(config::get labels.task_prefix 2>/dev/null || true)" \
+        | jq -Rcs 'split("\n") | map(select(length > 0))')"
+
+    # O = E-issues whose identity labels are all absent from D.
+    printf '%s' "$existing" | jq -c --argjson d "$desired" --argjson ps "$prefixes_json" '
+        [ .[]
+          | . as $e
+          | ([ ($e.labels // [])[]
+               | select(. as $l | ($ps | any(. as $p | ($l | startswith($p))))) ]) as $ids
+          | select(($ids | length) > 0)
+          | select(($ids | any(. as $x | ($d | index($x)))) | not)
+          | { key: $e.key, identity_label: $ids[0],
+              parent: $e.parent, updated: $e.updated, status: $e.status } ]'
+    return 0
+}
+
+# reconcile::remode
+#   The opt-in re-mode orchestrator (feature 004): read-phase (build E/D/O) →
+#   report plan → --dry-run stop → prune loop → regenerate via the unchanged
+#   projection. Fail-closed: an unreadable read aborts before any prune. The
+#   destructive prune is gated behind --remode + the v1.1.0 carve-out.
+reconcile::remode() {
+    local -a spec_dirs=()
+    local dir
+    while IFS= read -r dir; do
+        [[ -n "$dir" ]] && spec_dirs+=("$dir")
+    done < <(reconcile::enumerate_specs)
+
+    # Repo slug (same derivation as process_spec).
+    local repo_slug
+    repo_slug="$(git rev-parse --show-toplevel 2>/dev/null | xargs -r basename 2>/dev/null || true)"
+    declare -g _RECONCILE_REPO_SLUG="$repo_slug"
+
+    # Build the desired items for every in-scope spec (read-only).
+    local items='[]' sd
+    for sd in "${spec_dirs[@]}"; do
+        local it
+        if it="$(workstate::item_for_spec "$sd" 2>/dev/null)"; then
+            items="$(jq -cn --argjson a "$items" --argjson i "$it" '$a + [$i]')"
+        fi
+    done
+
+    # Resolve the root (repo issue) by a PURE find — no create in the read-phase.
+    local project root_key existing_root
+    project="$(config::get project_key)"
+    if ! existing_root="$(query_spec_issue "$(reconcile::compose_identity repo '{}' "$repo_slug")" "$project")"; then
+        summary::add warned "re-mode aborted: repo lookup unreadable (fail-closed; nothing pruned)"
+        reconcile::promote_exit 3
+        return 1
+    fi
+    root_key="$(printf '%s' "$existing_root" | jq -r '.[0].key // ""' 2>/dev/null || printf '')"
+    if [[ -z "$root_key" ]]; then
+        summary::add info "re-mode: nothing mirrored yet (no bridge-owned root); nothing to prune"
+        return 0
+    fi
+
+    # Compute O = E \ D (fail-closed).
+    local orphans
+    if ! orphans="$(reconcile::compute_orphans "$root_key" "$repo_slug" "$items")"; then
+        summary::add warned "re-mode aborted: bridge-owned enumeration unreadable (fail-closed; nothing pruned)"
+        reconcile::promote_exit 3
+        return 1
+    fi
+
+    local orphan_count
+    orphan_count="$(printf '%s' "$orphans" | jq 'length' 2>/dev/null || printf '0')"
+    summary::add info "re-mode plan: ${orphan_count} orphan(s) to prune, $(( ${#spec_dirs[@]} )) spec(s) to regenerate"
+
+    if (( ARG_DRY_RUN == 1 )); then
+        local oi
+        for (( oi = 0; oi < orphan_count; oi++ )); do
+            summary::add info "re-mode (dry-run) would prune: $(printf '%s' "$orphans" | jq -r --argjson x "$oi" '.[$x] | "\(.key) [\(.identity_label)]"')"
+        done
+        return 0
+    fi
+
+    # Prune each orphan (per the configured destruction model). Failures are
+    # surfaced and the loop continues (resumable on re-run, FR-009).
+    local oi pruned=0 prune_failed=0
+    for (( oi = 0; oi < orphan_count; oi++ )); do
+        local okey
+        okey="$(printf '%s' "$orphans" | jq -r --argjson x "$oi" '.[$x].key')"
+        if jira_sink::prune_artifact "$okey"; then
+            pruned=$(( pruned + 1 ))
+            summary::add info "re-mode pruned: ${okey}"
+        else
+            prune_failed=$(( prune_failed + 1 ))
+            summary::add warned "re-mode: prune of ${okey} failed (surfaced; re-run to complete)"
+            reconcile::promote_exit 1
+        fi
+    done
+    summary::add info "re-mode pruned ${pruned} orphan(s); ${prune_failed} prune failure(s)"
+
+    # Regenerate the new shape via the unchanged projection.
+    local spec_dir
+    for spec_dir in "${spec_dirs[@]}"; do
+        reconcile::process_spec "$spec_dir"
+    done
+    reconcile::rollup_repo_epic
+    return 0
+}
+
 reconcile::main() {
     reconcile::parse_args "$@"
 
@@ -2482,7 +2643,12 @@ reconcile::main() {
     # Step 2 — config load. Exits 2 via config::*'s own halt on failure.
     reconcile::load_config
 
-    if (( ARG_WORKSTATE_SET == 1 )); then
+    if (( ARG_REMODE == 1 )); then
+        # Feature 004 — the explicit, opt-in destructive re-mode: prune the
+        # bridge-owned orphans the current mapping no longer projects, then
+        # regenerate. Distinct code path; the ordinary reconcile never prunes.
+        reconcile::remode
+    elif (( ARG_WORKSTATE_SET == 1 )); then
         # Steps 3–4.5, workstate-direct variant (US5): read + validate a
         # workstate document and project its items through the sink (no specs/
         # tree). Shares the Step 5/6 summary + exit logic below.

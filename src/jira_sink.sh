@@ -1622,3 +1622,192 @@ resolve_labels() {
     fi
     printf '%s\n' "${names[@]}" | jq -Rcs 'split("\n") | map(select(length > 0))'
 }
+
+# =============================================================================
+# Feature 004 — re-mode / orphan pruning (Jira-specific prune mechanic + reads).
+#
+# The engine owns the NEUTRAL orphan diff (reconcile::compute_orphans); the sink
+# owns everything Jira here: the bridge-owned predicate (which labels mark an
+# issue as ours), the descendant enumeration (parent-walk), and the prune
+# mechanic (hard-delete | archive). Destruction is gated by the v1.1.0
+# controlled-destruction carve-out (Principle I): bridge-owned only, flag-only,
+# dry-run-previewable, fail-closed.
+# =============================================================================
+
+# jira_sink::_identity_prefixes
+#   Echo the configured IDENTITY label prefixes (newline-separated). These mark
+#   bridge ownership: repo/spec/phase/task. The lifecycle prefix (phase:*) is a
+#   STATUS label, NOT an identity, so it is deliberately excluded (research R3).
+jira_sink::_identity_prefixes() {
+    local key p
+    for key in repo_prefix spec_prefix phase_prefix task_prefix; do
+        p="$(config::get "labels.${key}" 2>/dev/null || true)"
+        [[ -n "$p" ]] && printf '%s\n' "$p"
+    done
+}
+
+# jira_sink::is_bridge_owned <labels_json>
+#   rc 0 (true) iff the issue carries at least one label whose value BEGINS WITH
+#   a configured identity prefix; rc 1 otherwise. Pure/client-side — no read.
+#   The sole ownership test (FR-002/FR-015): an issue with no identity-prefix
+#   label is the operator's and is left untouched.
+jira_sink::is_bridge_owned() {
+    local labels_json="${1:-[]}"
+    local prefixes_json
+    prefixes_json="$(jira_sink::_identity_prefixes | jq -Rcs 'split("\n") | map(select(length > 0))')"
+    [[ "$prefixes_json" == "[]" ]] && return 1
+    if printf '%s' "$labels_json" | jq -e --argjson ps "$prefixes_json" '
+        any((. // [])[]; . as $l | ($ps | any(. as $p | ($l | startswith($p)))))
+    ' >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+# jira_sink::enumerate_bridge_descendants <root_key>
+#   Echo a JSON array of the BRIDGE-OWNED issues in the root's subtree —
+#   `[{key, labels, parent, updated, status}]` — for the engine's orphan diff.
+#   rc 3 on ANY unreadable read (fail-closed, contract I-2): a partial picture
+#   could misclassify an orphan or miss an operator issue's identity.
+#
+#   Coverage:
+#     * the root itself (the repo Epic) when bridge-owned;
+#     * C1 (research R2 / analyze finding): the root's PARENT when bridge-owned —
+#       a no-longer-wanted Initiative super-level sits ABOVE the root and a
+#       downward walk would miss it;
+#     * every bridge-owned descendant via the `parent = "<key>"` BFS.
+jira_sink::enumerate_bridge_descendants() {
+    local root_key="${1:-}"
+    [[ -n "$root_key" ]] || { printf '[]\n'; return 0; }
+
+    local acc='[]'
+    declare -A _bd_seen=()
+
+    # Root's own record (and its parent, for C1) come from a full read.
+    local root_full
+    root_full="$(query_issue_full "$root_key")" || return 3
+
+    # C1 — inspect one level UP for an orphan super-level (e.g. a disabled
+    # Initiative). Include it if bridge-owned; the diff drops it unless the
+    # current mapping still projects its identity.
+    local parent_key
+    parent_key="$(printf '%s' "$root_full" | jq -r '.parent.key // ""' 2>/dev/null || printf '')"
+    if [[ -n "$parent_key" ]]; then
+        local pfull plabels
+        pfull="$(query_issue_full "$parent_key")" || return 3
+        plabels="$(printf '%s' "$pfull" | jq -c '.labels // []' 2>/dev/null || printf '[]')"
+        if jira_sink::is_bridge_owned "$plabels"; then
+            _bd_seen["$parent_key"]=1
+            acc="$(jq -cn --argjson a "$acc" --arg k "$parent_key" --argjson l "$plabels" \
+                '$a + [{key:$k, labels:$l, parent:null, updated:null, status:null}]')"
+        fi
+    fi
+
+    # Seed the BFS with the root (recorded if bridge-owned).
+    local root_labels
+    root_labels="$(printf '%s' "$root_full" | jq -c '.labels // []' 2>/dev/null || printf '[]')"
+    if jira_sink::is_bridge_owned "$root_labels"; then
+        _bd_seen["$root_key"]=1
+        local root_parent root_updated root_status
+        root_parent="$(printf '%s' "$root_full" | jq -c '.parent.key // null')"
+        root_updated="$(printf '%s' "$root_full" | jq -c '.updated // null')"
+        root_status="$(printf '%s' "$root_full" | jq -c '.status.id // null')"
+        acc="$(jq -cn --argjson a "$acc" --arg k "$root_key" --argjson l "$root_labels" \
+            --argjson p "$root_parent" --argjson u "$root_updated" --argjson st "$root_status" \
+            '$a + [{key:$k, labels:$l, parent:$p, updated:$u, status:$st}]')"
+    fi
+
+    local -a frontier=("$root_key")
+    while (( ${#frontier[@]} )); do
+        local -a next=()
+        local k
+        for k in "${frontier[@]}"; do
+            local kids
+            kids="$(jira_sink::_search_issues "parent = \"${k}\"")" || return 3
+            local count i
+            count="$(printf '%s' "$kids" | jq 'length' 2>/dev/null || printf '0')"
+            for (( i = 0; i < count; i++ )); do
+                local rec key labels
+                rec="$(printf '%s' "$kids" | jq -c --argjson x "$i" '.[$x]')"
+                key="$(printf '%s' "$rec" | jq -r '.key // ""')"
+                [[ -n "$key" && -z "${_bd_seen[$key]:-}" ]] || continue
+                labels="$(printf '%s' "$rec" | jq -c '.fields.labels // .labels // []')"
+                if jira_sink::is_bridge_owned "$labels"; then
+                    _bd_seen["$key"]=1
+                    acc="$(jq -cn --argjson a "$acc" --argjson r "$rec" --argjson l "$labels" '
+                        $a + [{ key:    ($r.key),
+                                labels: $l,
+                                parent: ($r.fields.parent.key // $r.parent.key // null),
+                                updated:($r.fields.updated // $r.updated // null),
+                                status: ($r.fields.status.id // $r.status.id // null) }]')"
+                    next+=("$key")
+                fi
+            done
+        done
+        frontier=( ${next[@]+"${next[@]}"} )
+    done
+
+    printf '%s\n' "$acc"
+    return 0
+}
+
+# jira_sink::_strip_identity_labels <key>
+#   Remove every identity-prefix label from <key> and add a `speckit-archived`
+#   marker, so an archived orphan LEAVES the bridge-owned set (idempotent: a
+#   later re-mode no longer sees it). A PUT — honors DRY_RUN at the REST layer.
+jira_sink::_strip_identity_labels() {
+    local key="${1:-}"
+    [[ -n "$key" ]] || return 1
+    local fields
+    fields="$(query_issue_full "$key")" || return 1
+    local labels prefixes_json new
+    labels="$(printf '%s' "$fields" | jq -c '.labels // []')"
+    prefixes_json="$(jira_sink::_identity_prefixes | jq -Rcs 'split("\n") | map(select(length > 0))')"
+    new="$(printf '%s' "$labels" | jq -c --argjson ps "$prefixes_json" '
+        [ .[] | select(. as $l | (($ps | any(. as $p | ($l | startswith($p)))) | not)) ]
+        + ["speckit-archived"] | unique')"
+    jira_rest::put "issue/${key}" "$(jq -cn --argjson l "$new" '{fields:{labels:$l}}')" >/dev/null || return 1
+    return 0
+}
+
+# jira_sink::prune_artifact <key>
+#   Remove a bridge-owned orphan per the configured destruction model. Called
+#   ONLY with a key that already passed is_bridge_owned (engine invariant I-1).
+#     hard-delete (default) → DELETE /issue/<key>
+#     archive               → transition to remode.archive_status + strip identity
+#   rc 0 success; rc 1 a write failed (engine surfaces + continues, FR-009);
+#   rc 2 a config error (archive without archive_status). DRY_RUN no-ops at the
+#   REST layer (zero writes, contract I-3).
+jira_sink::prune_artifact() {
+    local key="${1:-}"
+    [[ -n "$key" ]] || return 2
+    local model
+    model="${CONFIG_VALUES[remode.destruction]:-hard-delete}"
+    case "$model" in
+        hard-delete)
+            if jira_rest::delete "issue/${key}" >/dev/null; then
+                return 0
+            fi
+            jira_sink::_log "prune_artifact: hard-delete of ${key} failed (rc $?)"
+            return 1
+            ;;
+        archive)
+            local status_id
+            status_id="${CONFIG_VALUES[remode.archive_status]:-}"
+            if [[ -z "$status_id" ]]; then
+                jira_sink::_log "prune_artifact: destruction=archive but remode.archive_status is unset. Set it to an archived-status id (Principle V), then re-run. Pruned nothing for ${key}."
+                return 2
+            fi
+            if ! transition_issue "$key" "$status_id"; then
+                jira_sink::_log "prune_artifact: archive transition of ${key} failed"
+                return 1
+            fi
+            jira_sink::_strip_identity_labels "$key" || return 1
+            return 0
+            ;;
+        *)
+            jira_sink::_log "prune_artifact: unknown remode.destruction='${model}' (expected hard-delete|archive)"
+            return 2
+            ;;
+    esac
+}
