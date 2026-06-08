@@ -30,7 +30,44 @@ full-stack idempotency proof) build on it.
 
 ## Phase 1: Setup
 
-- [ ] T001 Establish the equivalence baseline: run `bats --recursive tests/unit tests/integration` and record the green count (347, modulo the env-only `config.bats` default-path test) as the regression anchor; capture the curl-shim request log for one default run and one configured-mapping run (the byte-level equivalence reference the refactor must reproduce). No code change.
+- [x] T001 Establish the equivalence baseline: run `bats --recursive tests/unit tests/integration` and record the green count (347, modulo the env-only `config.bats` default-path test) as the regression anchor; capture the curl-shim request log for one default run and one configured-mapping run (the byte-level equivalence reference the refactor must reproduce). No code change.
+
+---
+
+## Implementation progress — RESUME HERE (US1)
+
+**Foundational COMPLETE** (T001–T006), all green + committed:
+
+- Baseline: 347 green (clean-checkout). After Foundational: **359 green** (347 + 12
+  new: compose_identity 4, compose_payload 4, sync_level_artifact_absorb 4).
+- `b66c0d5` — neutral composers in `src/reconcile.sh`
+  (`ordered_levels`/`compose_identity`/`compose_payload`/`parent_projected_id` +
+  `_RECONCILE_LEVEL_IDS` cache). Vendor-neutral (workstate + config labels only).
+- `b775c69` — `sync_level_artifact` (`src/jira_sink.sh`) absorbs, **gated-additive**
+  on the neutral input fields (002 callers pass `{summary,body}` → unchanged):
+  `.tasks`→in-body taskList, `.body`→markdown ADF, neither→**omit description**
+  (repo Epic), `.state`→lifecycle status transition on a real change only
+  (`JIRA_SINK_LEVEL_TRANSITION_FAILED` channel added).
+
+**Next: T007 — wire `process_spec` (then `process_workstate_item`) onto the loop.**
+The cleanest seam is to rewrite the WRAPPERS `reconcile::sync_spec_issue` +
+`reconcile::sync_task_phase_subissues` to drive `compose_*` + `sync_level_artifact`
+(repo→spec→phase) instead of `ensure_repo_epic`/`sync_spec_issue`/
+`sync_task_phase_subissues`, populating `_RECONCILE_LEVEL_IDS[repo|spec]` for
+`parent_projected_id`. Keep `process_spec`'s disposition-file + drift + links/
+comments + rollup wiring as-is.
+
+**⚠️ The one gotcha to solve in T007 (the reason this is a fresh focused task):**
+in **2-level mode**, today's `sync_spec_issue` composes prose+checklist in a
+**single** create. Routing the spec level through `sync_level_artifact` + a
+post-call `sync_body_checklist` would do **two** writes on a fresh create and
+break `us3_checklist_zerochurn` ("checklist in one create"). So
+`sync_level_artifact` must absorb `sync_spec_issue`'s **full 2-level path**
+(prose+checklist at create; sub-tree reconcile at update) — extend it the same
+gated-additive way (detect 2-level via the phase level resolving to `checklist`).
+Verify per-level: wire repo → run full suite green; wire spec (3-level) → green;
+add 2-level absorption → `us3*` green; wire phase → green; then delete the 001
+orchestrators (T010) and confirm the suite is still **byte-for-byte unchanged**.
 
 ---
 
