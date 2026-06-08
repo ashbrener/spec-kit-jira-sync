@@ -167,7 +167,7 @@ engine functions.
 
 **Independent test**: the new T056 integration test asserts 0/0/0 on a re-run.
 
-- [ ] T014 [P] [US3] Integration test `tests/integration/us_fullstack_nondefault_zerochurn.bats` (T056) — a configured NON-DEFAULT mapping (a custom phase/operator label set + a configured parent relationship) mirrored through the wired engine, then re-run, asserts **0 created / 0 updated / 0 parent-write (PUT)** across every parent-bearing level (the full-stack analogue of the sink-level F1/F3/F4 zero-churn assertions; SC-004).
+- [x] T014 [P] [US3] Integration test `tests/integration/us_fullstack_nondefault_zerochurn.bats` (T056) — a configured NON-DEFAULT mapping (a custom phase/operator label set + a configured parent relationship) mirrored through the wired engine, then re-run, asserts **0 created / 0 updated / 0 parent-write (PUT)** across every parent-bearing level (the full-stack analogue of the sink-level F1/F3/F4 zero-churn assertions; SC-004).
 
 **Checkpoint**: US3 closes the full-stack idempotency loop for configured shapes.
 
