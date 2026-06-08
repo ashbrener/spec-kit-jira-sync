@@ -2531,6 +2531,50 @@ reconcile::compute_orphans() {
     return 0
 }
 
+# reconcile::_remode_disk_baseline_epoch <spec_dirs...>
+#   The newest disk commit epoch across the in-scope spec dirs — the baseline a
+#   to-be-pruned artifact's tracker `updated` is compared against for the
+#   backward-drift-before-prune warning (FR-010). Falls back to the
+#   WORKSTATE_LAST_COMMIT_ISO env (fixture-driven runs) when no git commit
+#   resolves. Empty output = no baseline (the drift check then no-ops, never a
+#   false positive). PURE: reads git + env only; vendor-neutral (timestamps).
+reconcile::_remode_disk_baseline_epoch() {
+    local newest='' sd iso epoch
+    for sd in "$@"; do
+        iso="$(git_helpers::spec_dir_last_commit "$sd" 2>/dev/null || true)"
+        [[ -n "$iso" ]] || continue
+        epoch="$(git_helpers::iso_to_epoch "$iso" 2>/dev/null || true)"
+        [[ "$epoch" =~ ^[0-9]+$ ]] || continue
+        if [[ -z "$newest" ]] || (( epoch > newest )); then newest="$epoch"; fi
+    done
+    if [[ -z "$newest" && -n "${WORKSTATE_LAST_COMMIT_ISO:-}" ]]; then
+        epoch="$(git_helpers::iso_to_epoch "$WORKSTATE_LAST_COMMIT_ISO" 2>/dev/null || true)"
+        [[ "$epoch" =~ ^[0-9]+$ ]] && newest="$epoch"
+    fi
+    printf '%s' "$newest"
+}
+
+# reconcile::_remode_orphan_drifted <orphan_json> <disk_baseline_epoch>
+#   rc 0 (true) when the orphan's tracker `updated` timestamp is meaningfully
+#   newer than the disk baseline — the neutral signal that a human edited the
+#   to-be-pruned artifact since the source-of-truth was last committed (FR-010).
+#   Uses the same skew tolerance the spec-drift comparator uses so the bridge's
+#   own writes don't trip it. rc 1 when no baseline / no tracker timestamp / not
+#   ahead. PURE: timestamp arithmetic only (vendor-neutral).
+reconcile::_remode_orphan_drifted() {
+    local orphan_json="${1:-}" baseline="${2:-}"
+    [[ "$baseline" =~ ^[0-9]+$ ]] || return 1
+    local updated_iso updated_epoch skew
+    updated_iso="$(printf '%s' "$orphan_json" | jq -r '.updated // ""' 2>/dev/null || printf '')"
+    [[ -n "$updated_iso" && "$updated_iso" != "null" ]] || return 1
+    updated_epoch="$(git_helpers::iso_to_epoch "$updated_iso" 2>/dev/null || true)"
+    [[ "$updated_epoch" =~ ^[0-9]+$ ]] || return 1
+    skew="${RECONCILE_DRIFT_SKEW_TOLERANCE_SECONDS:-120}"
+    [[ "$skew" =~ ^[0-9]+$ ]] || skew=120
+    (( updated_epoch - baseline > skew )) && return 0
+    return 1
+}
+
 # reconcile::remode
 #   The opt-in re-mode orchestrator (feature 004): read-phase (build E/D/O) →
 #   report plan → --dry-run stop → prune loop → regenerate via the unchanged
@@ -2595,12 +2639,30 @@ reconcile::remode() {
         return 0
     fi
 
-    # Prune each orphan (per the configured destruction model). Failures are
-    # surfaced and the loop continues (resumable on re-run, FR-009).
-    local oi pruned=0 prune_failed=0
+    # Disk baseline for the backward-drift-before-prune warning (FR-010): the
+    # newest commit epoch across the in-scope source dirs. An orphan whose tracker
+    # `updated` is meaningfully newer than this likely carries a human edit.
+    local disk_baseline
+    disk_baseline="$(reconcile::_remode_disk_baseline_epoch "${spec_dirs[@]}")"
+
+    # Prune each orphan (per the configured destruction model). Before each prune,
+    # surface backward-drift (FR-010): a human-edited orphan is WARNED, and under
+    # --on-drift=abort it is SKIPPED (left in place, surfaced) rather than pruned.
+    # Prune failures are surfaced and the loop continues (resumable, FR-009).
+    local oi pruned=0 prune_failed=0 drift_skipped=0
     for (( oi = 0; oi < orphan_count; oi++ )); do
-        local okey
-        okey="$(printf '%s' "$orphans" | jq -r --argjson x "$oi" '.[$x].key')"
+        local okey orec
+        orec="$(printf '%s' "$orphans" | jq -c --argjson x "$oi" '.[$x]')"
+        okey="$(printf '%s' "$orec" | jq -r '.key')"
+        if reconcile::_remode_orphan_drifted "$orec" "$disk_baseline"; then
+            summary::add warned "re-mode: ${okey} appears human-edited since last commit (tracker ahead) — about to be pruned"
+            reconcile::promote_exit 1
+            if [[ "$ARG_ON_DRIFT" == "abort" ]]; then
+                drift_skipped=$(( drift_skipped + 1 ))
+                summary::add skipped "re-mode: ${okey} left in place (--on-drift=abort; human-edited orphan not pruned)"
+                continue
+            fi
+        fi
         if jira_sink::prune_artifact "$okey"; then
             pruned=$(( pruned + 1 ))
             summary::add info "re-mode pruned: ${okey}"
@@ -2610,7 +2672,7 @@ reconcile::remode() {
             reconcile::promote_exit 1
         fi
     done
-    summary::add info "re-mode pruned ${pruned} orphan(s); ${prune_failed} prune failure(s)"
+    summary::add info "re-mode pruned ${pruned} orphan(s); ${prune_failed} prune failure(s); ${drift_skipped} drift-skip(s)"
 
     # Regenerate the new shape via the unchanged projection.
     local spec_dir
