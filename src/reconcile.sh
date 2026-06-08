@@ -2543,9 +2543,13 @@ reconcile::remode() {
         [[ -n "$dir" ]] && spec_dirs+=("$dir")
     done < <(reconcile::enumerate_specs)
 
-    # Repo slug (same derivation as process_spec).
+    # Repo slug (same derivation as process_spec, with the same fallbacks so a
+    # non-git / detached checkout still resolves a stable repo identity).
     local repo_slug
     repo_slug="$(git rev-parse --show-toplevel 2>/dev/null | xargs -r basename 2>/dev/null || true)"
+    if [[ -z "$repo_slug" ]]; then
+        repo_slug="$(basename "$(pwd)" 2>/dev/null || true)"
+    fi
     declare -g _RECONCILE_REPO_SLUG="$repo_slug"
 
     # Build the desired items for every in-scope spec (read-only).
