@@ -38,6 +38,11 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **001-core-bridge** — parser→workstate→jira-sink reconcile (Layer D).
+- **002-configurable-mapping** (active) — configurable artifact mapping in the
+  sink + config layer (alias-layer default, per-level mapping + available-type
+  validation, 2-level checklist, status rollup, Initiative super-level,
+  workstate-direct input). Plan: `specs/002-configurable-mapping/plan.md`
+- **001-core-bridge** — parser→workstate→jira-sink reconcile (Layer D). Complete:
+  built, live-dogfood-proven, analyze-clean; pending merge to main.
   Plan: `specs/001-core-bridge/plan.md`
 <!-- SPECKIT END -->

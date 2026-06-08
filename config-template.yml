@@ -36,6 +36,13 @@ jira:
     epic: "10001"
     story: "10002"
     subtask: "10003"
+    # Optional, only needed when a `mapping:` level projects to these types.
+    # A Task-projected level (e.g. task -> Task instead of the default
+    # checklist) requires `task`; an enabled initiative super-level requires
+    # `initiative`. Leave commented out when using the zero-config default
+    # (repo->Epic, spec->Story, phase->Subtask, task->checklist).
+    # task: "10004"
+    # initiative: "10005"
 
   # Lifecycle phase -> target Jira status id. The sink drives a Story to the
   # mapped status via a transition POST as the disk lifecycle advances. These
@@ -71,6 +78,54 @@ jira:
     repo_prefix: "speckit-repo:"
     phase_prefix: "task-phase:"
     lifecycle_prefix: "phase:"
+    # Identity label prefix for a Task-projected level (when `task` does NOT
+    # map to the default `checklist`). Used to match/update by identity on
+    # re-run so configured Task levels stay idempotent (feature-002, Q9).
+    task_prefix: "speckit-task:"
+
+  # OPTIONAL configurable artifact mapping (feature-002). The whole `mapping:`
+  # block is optional: when ABSENT the loader synthesizes today's default
+  # (repo->Epic, spec->Story, phase->Subtask, task->checklist, initiative and
+  # status_rollup OFF) from the keys above, so a pre-feature config upgrades
+  # byte-for-byte unchanged. Spell a level out only to override it; an
+  # unspecified level inherits the default. See
+  # specs/002-configurable-mapping/contracts/mapping-config.md.
+  mapping:
+    # Optional narrative super-level above the repo Epic. OFF by default.
+    # When the instance lacks the Initiative type, `on_absent: degrade` folds
+    # the narrative onto the Epic with a repo-grouping label (never hard-fails).
+    # The narrative is read ONLY from the explicit spec.md "Input:" line
+    # (source: spec_input) — never inferred.
+    initiative:
+      enabled: false
+      artifact: "Initiative"
+      on_absent: "degrade"
+      source: "spec_input"
+
+    # Parent-linking style: team-managed uses the native `parent` field;
+    # classic projects use the Epic-link. team-managed | classic.
+    project_style: "team-managed"
+
+    # Per-level artifact + relationship to its parent. `artifact` is a Jira
+    # issue-type NAME (validated against the project's available types at
+    # config-load) or the non-issue `checklist` sentinel.
+    # `relationship_to_parent` is one of: parent | Epic-link | none |
+    # checklist. An optional per-level
+    # `on_absent: "<type>"` names a fallback issue type to use when the primary
+    # `artifact` is not available in the target project (the only escape from
+    # the fail-closed absent-type error).
+    levels:
+      repo: { artifact: "Epic", relationship_to_parent: "none" }
+      spec: { artifact: "Story", relationship_to_parent: "parent" }
+      phase: { artifact: "Subtask", relationship_to_parent: "parent" }
+      task: { artifact: "checklist", relationship_to_parent: "checklist" }
+
+    # Optional status rollup. OFF by default. When ON, a phase whose tasks are
+    # all complete transitions to done, and a repo whose specs are all done
+    # transitions its top issue to done (idempotent: transition only on a real
+    # completion-state change).
+    status_rollup:
+      enabled: false
 
 # NOTE on story points: the standard Jira Software story-points custom field is
 # `jsw-story-points`. The bridge does not require a story-points id in this

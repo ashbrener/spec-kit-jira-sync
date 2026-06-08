@@ -73,6 +73,97 @@ jira_sink::_log() {
 }
 
 # -----------------------------------------------------------------------------
+# Feature 002 — mapping-driven level projection (US1/T013).
+#
+# The 001 orchestrators hardcoded repo→Epic / spec→Story / phase→Subtask. They
+# now route their artifact (issue type) + parent relationship through the config
+# layer's mapping::resolve_level, so an operator's configured mapping (US2+)
+# drives the projection — WITHOUT changing the default. With no `mapping:` block,
+# the alias layer synthesizes today's default (repo→Epic, spec→Story,
+# phase→Subtask, task→checklist), so these helpers resolve to exactly the same
+# issue-type ids the 001 path used: byte-for-byte unchanged (FR-001, FR-018).
+#
+# Vendor-neutrality holds: the MAPPING (level→artifact name + relationship) lives
+# in config.sh; the sink only translates the resolved artifact NAME to its Jira
+# issue-type id via the existing issue_types.* bindings.
+# -----------------------------------------------------------------------------
+
+# jira_sink::_resolve_level <level>
+#   Echo `<artifact>\t<relationship_to_parent>` for a workstate level via the
+#   config layer's mapping::resolve_level. The engine runs mapping::parse at
+#   config-load (T014), so production always resolves through the loaded (or
+#   alias-synthesized) block. As a SELF-HEALING fallback, when the mapping was
+#   not synthesized (a caller that loaded config but skipped mapping::parse —
+#   e.g. a 001-era contract test), resolve the level from the synthesized DEFAULT
+#   table directly, so the projection is still today's default (repo→Epic,
+#   spec→Story, phase→Subtask, task→checklist). This keeps the sink's default
+#   projection byte-for-byte identical regardless of which load path reached it
+#   (FR-001), without coupling every caller to the mapping API.
+jira_sink::_resolve_level() {
+    local level="$1"
+    if [[ "${CONFIG_MAPPING_SYNTHESIZED:-0}" == "1" ]]; then
+        mapping::resolve_level "$level"
+        return
+    fi
+    # Fallback: emit the default level mapping (artifact<TAB>relationship).
+    printf '%s\n' "${CONFIG_MAPPING_DEFAULT[$level]:-}"
+}
+
+# jira_sink::_level_artifact <level>
+#   Echo the artifact name resolved for the given workstate level (e.g. `Epic`
+#   for repo, `checklist` for task in the default).
+jira_sink::_level_artifact() {
+    local level="$1"
+    jira_sink::_resolve_level "$level" | cut -f1
+}
+
+# jira_sink::_level_relationship <level>
+#   Echo the relationship_to_parent resolved for the level (e.g. `none` for repo,
+#   `parent` for spec/phase, `checklist` for task in the default).
+jira_sink::_level_relationship() {
+    local level="$1"
+    jira_sink::_resolve_level "$level" | cut -f2
+}
+
+# jira_sink::_artifact_issue_type_id <artifact>
+#   Translate a resolved artifact NAME to its configured Jira issue-type id via
+#   the existing issue_types.* bindings (Epic→issue_types.epic, etc.). The four
+#   built-in artifacts map to today's required ids; a configured Task projects to
+#   issue_types.task (US2). The `checklist` sentinel is NOT an issue type and has
+#   no id — callers must branch on it before reaching here. An unknown artifact
+#   is a config error (config::get halts on the missing key).
+jira_sink::_artifact_issue_type_id() {
+    local artifact="$1"
+    case "$artifact" in
+        Epic)      config::get issue_types.epic ;;
+        Story)     config::get issue_types.story ;;
+        Subtask)   config::get issue_types.subtask ;;
+        Task)      config::get issue_types.task ;;
+        checklist)
+            jira_sink::_log "internal: checklist is a render sentinel, not an issue type"
+            return 1
+            ;;
+        *)
+            # A non-default artifact name reuses the lowercased issue_types.<name>
+            # binding (US2 operator-configured types resolve their id the same
+            # way). config::get halts (config rc) if the id is absent.
+            local key
+            key="$(printf '%s' "$artifact" | tr '[:upper:]' '[:lower:]')"
+            config::get "issue_types.${key}"
+            ;;
+    esac
+}
+
+# jira_sink::_level_issue_type_id <level>
+#   Convenience: resolve a workstate level straight to its Jira issue-type id via
+#   the mapping layer. The default aliases (repo→Epic→10001, spec→Story→10002,
+#   phase→Subtask→10003) reproduce the exact ids the 001 orchestrators used.
+jira_sink::_level_issue_type_id() {
+    local level="$1"
+    jira_sink::_artifact_issue_type_id "$(jira_sink::_level_artifact "$level")"
+}
+
+# -----------------------------------------------------------------------------
 # US2 disposition channel.
 #
 # The orchestrators (sync_spec_issue / sync_task_phase_subissues) own the
@@ -586,7 +677,10 @@ ensure_repo_epic() {
     local repo_prefix project epic_type label
     repo_prefix="$(config::get labels.repo_prefix)"
     project="$(config::get project_key)"
-    epic_type="$(config::get issue_types.epic)"
+    # T013: the repo level's issue type is resolved through the mapping layer
+    # (default repo→Epic→issue_types.epic). Byte-for-byte unchanged in the
+    # default; an operator's mapping (US2+) re-targets it without touching this.
+    epic_type="$(jira_sink::_level_issue_type_id repo)"
     label="${repo_prefix}${repo_slug}"
 
     # Find-or-create: an existing Epic with the repo label is reused (idempotent).
@@ -656,7 +750,9 @@ sync_spec_issue() {
 
     local project story_type spec_prefix lifecycle_prefix
     project="$(config::get project_key)"
-    story_type="$(config::get issue_types.story)"
+    # T013: the spec level's issue type is resolved through the mapping layer
+    # (default spec→Story→issue_types.story). Unchanged in the default path.
+    story_type="$(jira_sink::_level_issue_type_id spec)"
     spec_prefix="$(config::get labels.spec_prefix)"
     lifecycle_prefix="$(config::get labels.lifecycle_prefix)"
 
@@ -682,6 +778,35 @@ sync_spec_issue() {
     # a valid single-paragraph doc).
     local description
     description="$(adf::from_markdown "$body")"
+
+    # 2-level (checklist) mode (US3): when the phase level resolves to the
+    # `checklist` sentinel, the task phases/tasks collapse into an in-body
+    # checklist carried by THIS Story — no Subtask children. Compose the keyed
+    # sub-tree once (flattening every phase's tasks, each keyed by a stable
+    # <phase>.<ordinal> workstate task id). The CREATE path embeds it under the
+    # prose; the UPDATE path reconciles ONLY the sub-tree via sync_body_checklist
+    # so a human's prose edit is preserved and re-runs stay zero-churn (FR-008).
+    # The default path (phase→Subtask) leaves two_level=0 and is byte-for-byte 001.
+    local two_level=0 checklist_subtree=""
+    local _phase_artifact
+    _phase_artifact="$(mapping::resolve_level phase 2>/dev/null | cut -f1)"
+    if [[ "$_phase_artifact" == "checklist" ]]; then
+        two_level=1
+        local _tasks_json
+        _tasks_json="$(printf '%s' "$item_json" | jq -c '
+            [ (.children // []) | to_entries[]
+              | (.key) as $i | (.value) as $c
+              | ( ($c.id // "") | ([match("[0-9]+$")?][0].string) ) as $cap
+              | ($cap // (($i + 1) | tostring)) as $p
+              | ($c.extensions.tasks // []) | to_entries[]
+              | { id: ($p + "." + (.key | tostring)),
+                  text: (.value.text // ""),
+                  done: (.value.done // false) } ]' 2>/dev/null || printf '[]')"
+        checklist_subtree="$(adf::render_checklist_subtree "$_tasks_json")"
+        # CREATE body = the prose blocks + the checklist sub-tree (one write).
+        description="$(jq -cn --argjson prose "$description" --argjson st "$checklist_subtree" \
+            '{version:1, type:"doc", content: ((($prose.content) // []) + $st)}')"
+    fi
 
     # The desired status id the lifecycle phase maps to (vendor lever). The
     # config getter may hand us `<status-id>\t<transition-id>`; the status id
@@ -771,12 +896,18 @@ sync_spec_issue() {
         diff="$(printf '%s' "$diff" | jq -c --arg s "$summary" '. + {summary: $s}')"
     fi
     # ADF descriptions are key-order-insensitive — normalize both sides before
-    # comparing so a semantically-identical body produces no diff entry.
-    local desired_desc_norm current_desc_norm
-    desired_desc_norm="$(jira_sink::_normalize_adf "$description")"
-    current_desc_norm="$(jira_sink::_normalize_adf "$cur_description")"
-    if [[ "$desired_desc_norm" != "$current_desc_norm" ]]; then
-        diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+    # comparing so a semantically-identical body produces no diff entry. In
+    # 2-level mode the description is CO-OWNED (prose preamble is human-editable);
+    # the bridge owns only the checklist sub-tree, reconciled below via
+    # sync_body_checklist — so the full-body description diff is SKIPPED here to
+    # avoid clobbering the human's prose (Q7, US3 scenario 3).
+    if (( two_level == 0 )); then
+        local desired_desc_norm current_desc_norm
+        desired_desc_norm="$(jira_sink::_normalize_adf "$description")"
+        current_desc_norm="$(jira_sink::_normalize_adf "$cur_description")"
+        if [[ "$desired_desc_norm" != "$current_desc_norm" ]]; then
+            diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+        fi
     fi
     if ! jira_sink::_labels_equal "$labels_json" "$cur_labels"; then
         diff="$(printf '%s' "$diff" | jq -c --argjson l "$labels_json" '. + {labels: $l}')"
@@ -815,6 +946,25 @@ sync_spec_issue() {
         fi
     fi
 
+    # 2-level mode: reconcile the in-body checklist sub-tree (preserving the
+    # prose preamble). A write here counts as an update; an unreadable read fails
+    # closed (rc 3); a write failure surfaces (rc 1). An unchanged sub-tree is a
+    # no-op (zero churn).
+    if (( two_level == 1 )); then
+        local _ck_rc=0
+        sync_body_checklist "$existing_key" "$checklist_subtree" || _ck_rc=$?
+        if (( _ck_rc == 3 )); then
+            jira_sink::_log "sync_spec_issue: checklist read for ${existing_key} unreadable; failing closed (rc 3)"
+            return 3
+        elif (( _ck_rc != 0 )); then
+            jira_sink::_log "sync_spec_issue: checklist write for ${existing_key} failed"
+            return 1
+        fi
+        if [[ "$JIRA_SINK_CHECKLIST_DISPOSITION" == "updated" ]]; then
+            wrote_update=1
+        fi
+    fi
+
     if (( wrote_update == 1 || wrote_transition == 1 )); then
         JIRA_SINK_SPEC_DISPOSITION="updated"
     else
@@ -839,7 +989,11 @@ sync_task_phase_subissues() {
 
     local project subtask_type phase_prefix
     project="$(config::get project_key)"
-    subtask_type="$(config::get issue_types.subtask)"
+    # T013: the phase level's issue type is resolved through the mapping layer
+    # (default phase→Subtask→issue_types.subtask). Unchanged in the default path.
+    # The task level (default task→checklist) renders in-body below — the
+    # checklist sentinel projects no standalone issue (FR-001).
+    subtask_type="$(jira_sink::_level_issue_type_id phase)"
     phase_prefix="$(config::get labels.phase_prefix)"
 
     # Build the phase→subtask map + the per-phase disposition map incrementally.
@@ -955,6 +1109,602 @@ sync_task_phase_subissues() {
 
     JIRA_SINK_SUBISSUE_DISPOSITIONS="$dispositions"
     printf '%s\n' "$map"
+}
+
+# =============================================================================
+# Feature 002 — Phase 5/US3: 2-level checklist mode (keyed sub-tree byte-diff).
+#
+# In 2-level mode the phase + task levels resolve to the `checklist` sentinel:
+# no Subtask/Task child issues are created; the tasks collapse into an in-body
+# ADF checklist carried by the SPEC issue's description. The body is CO-OWNED —
+# the prose above the marker is human-editable and PRESERVED across re-runs; the
+# bridge owns only the checklist SUB-TREE (marker paragraph + taskList). The
+# sub-tree is byte-compared in isolation so (a) an unchanged re-run writes
+# nothing (FR-008, SC-004) and (b) an unrelated prose edit does NOT trigger a
+# rewrite (Q7, US3 scenario 3). The render lives in adf.sh
+# (adf::render_checklist_subtree, keyed by workstate task id); these helpers do
+# the read/compare/write.
+# =============================================================================
+
+# Disposition channel for the 2-level checklist body write, mirroring the spec /
+# subissue channels (read by reconcile.sh for the run summary).
+JIRA_SINK_CHECKLIST_DISPOSITION=""
+
+# jira_sink::_split_body_at_marker <description_json>
+#   Split an ADF description doc at the stable checklist marker (Q9). Echoes a
+#   JSON object {preamble:[…], subtree:[…]} where `preamble` is the content
+#   nodes BEFORE the marker paragraph (the human-owned prose) and `subtree` is
+#   the marker paragraph plus everything after it (the bridge-owned checklist).
+#   When no marker is present (a fresh issue, or one mirrored before 2-level),
+#   `preamble` is the whole content and `subtree` is `[]`. A null/absent
+#   description yields empty preamble + empty subtree.
+jira_sink::_split_body_at_marker() {
+    local desc="${1:-null}"
+    local marker="${2:-$ADF_CHECKLIST_MARKER}"
+    printf '%s' "$desc" | jq -c --arg m "$marker" '
+        ((. // {}) | .content // []) as $c
+        | ( [ $c
+              | to_entries[]
+              | select(.value.type == "paragraph"
+                       and (([.value.content[]?.text] | join("")) == $m))
+              | .key ] | first ) as $idx
+        | if $idx == null
+          then { preamble: $c, subtree: [] }
+          else { preamble: $c[0:$idx], subtree: $c[$idx:] }
+          end
+    ' 2>/dev/null || printf '{"preamble":[],"subtree":[]}'
+}
+
+# jira_sink::_canonical_subtree <subtree_json_array>
+#   Canonical, comparison-stable form of a checklist sub-tree array. Wraps the
+#   array in a doc and reuses the live-proven ADF normalizer (jira_sink::_normalize_adf:
+#   recursive key sort + empty-paragraph collapse) so a round-tripped Jira body
+#   and a freshly rendered one compare EQUAL despite key-order differences. An
+#   empty/absent sub-tree canonicalizes to the empty string.
+jira_sink::_canonical_subtree() {
+    local subtree="${1:-[]}"
+    local doc
+    doc="$(printf '%s' "$subtree" | jq -c '{version:1,type:"doc",content:(. // [])}' 2>/dev/null || printf 'null')"
+    jira_sink::_normalize_adf "$doc"
+}
+
+# diff_checklist_subtree <issue_key> <rendered_subtree>
+#   Byte-compare ONLY the checklist sub-tree of <issue_key>'s description against
+#   <rendered_subtree>. Echoes `unchanged` (sub-trees canonically equal → no
+#   write needed) or `changed`. Reads via query_issue_full; an unreadable read
+#   fails closed (rc 3) so the engine never blind-writes (FR-017).
+diff_checklist_subtree() {
+    local key="${1:-}" rendered="${2:-[]}"
+
+    local fields
+    if ! fields="$(query_issue_full "$key")"; then
+        jira_sink::_log "diff_checklist_subtree: ${key} read unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    local cur_desc cur_subtree
+    cur_desc="$(printf '%s' "$fields" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+    cur_subtree="$(jira_sink::_split_body_at_marker "$cur_desc" | jq -c '.subtree' 2>/dev/null || printf '[]')"
+
+    local cur_norm desired_norm
+    cur_norm="$(jira_sink::_canonical_subtree "$cur_subtree")"
+    desired_norm="$(jira_sink::_canonical_subtree "$rendered")"
+
+    if [[ "$cur_norm" == "$desired_norm" ]]; then
+        printf 'unchanged\n'
+    else
+        printf 'changed\n'
+    fi
+    return 0
+}
+
+# sync_body_checklist <issue_key> <rendered_subtree>
+#   Reconcile the in-body checklist sub-tree of <issue_key>. Reads the current
+#   description, isolates the sub-tree, and:
+#     * sub-tree unchanged → SKIP the write (zero churn); disposition `skipped`.
+#     * sub-tree changed    → PUT a description = the PRESERVED prose preamble +
+#       the new sub-tree (so a human's prose edit survives and no duplicate
+#       checklist is appended); disposition `updated`.
+#   An unreadable read fails closed (rc 3, no write). Records the verdict on
+#   JIRA_SINK_CHECKLIST_DISPOSITION.
+sync_body_checklist() {
+    local key="${1:-}" rendered="${2:-[]}"
+    JIRA_SINK_CHECKLIST_DISPOSITION=""
+
+    local fields
+    if ! fields="$(query_issue_full "$key")"; then
+        jira_sink::_log "sync_body_checklist: ${key} read unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    local cur_desc split preamble cur_subtree
+    cur_desc="$(printf '%s' "$fields" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+    split="$(jira_sink::_split_body_at_marker "$cur_desc")"
+    preamble="$(printf '%s' "$split" | jq -c '.preamble' 2>/dev/null || printf '[]')"
+    cur_subtree="$(printf '%s' "$split" | jq -c '.subtree' 2>/dev/null || printf '[]')"
+
+    local cur_norm desired_norm
+    cur_norm="$(jira_sink::_canonical_subtree "$cur_subtree")"
+    desired_norm="$(jira_sink::_canonical_subtree "$rendered")"
+    if [[ "$cur_norm" == "$desired_norm" ]]; then
+        JIRA_SINK_CHECKLIST_DISPOSITION="skipped"
+        return 0
+    fi
+
+    # Compose the desired body: PRESERVE the prose preamble, swap in the new
+    # sub-tree. Building the doc in jq keeps text escaped + key order fixed.
+    local desired_desc payload
+    desired_desc="$(jq -cn --argjson pre "$preamble" --argjson st "$rendered" \
+        '{version:1, type:"doc", content: ($pre + $st)}')"
+    payload="$(jq -cn --argjson d "$desired_desc" '{fields: {description: $d}}')"
+
+    if ! mutate_issue_update "$key" "$payload"; then
+        jira_sink::_log "sync_body_checklist: description write for ${key} failed"
+        JIRA_SINK_CHECKLIST_DISPOSITION="failed"
+        return 1
+    fi
+    JIRA_SINK_CHECKLIST_DISPOSITION="updated"
+    return 0
+}
+
+# =============================================================================
+# Feature 002 — Phase 6/US4: status rollup (transition only on changed
+# completion). OFF by default (mapping.status_rollup.enabled). Reuses the 001
+# transition_issue / config::get_status_transition levers — NO new status
+# surface (Q11, FR-011/FR-012). The "done" status is the one the terminal
+# lifecycle phase (`merged`) maps to; a regressed (complete→partial) issue
+# transitions back to the active (`implementing`) status.
+# =============================================================================
+
+# rollup::compute_completion <kind> <items_json>
+#   kind=phase: <items_json> is the phase's tasks array [{done}], `complete`
+#     iff it is non-empty AND every task is checked.
+#   kind=repo:  <items_json> is the specs' lifecycle states ["implementing",…],
+#     `complete` iff non-empty AND every spec is in the terminal `merged` state.
+#   Anything else (or empty) is `partial` — no vacuous done. Echoes the verdict.
+rollup::compute_completion() {
+    local kind="${1:-}" items="${2:-[]}"
+    local complete=1
+    case "$kind" in
+        phase)
+            printf '%s' "$items" \
+                | jq -e '(length > 0) and (all(.[]; (.done // false) == true))' \
+                    >/dev/null 2>&1 || complete=0 ;;
+        repo)
+            printf '%s' "$items" \
+                | jq -e '(length > 0) and (all(.[]; . == "merged"))' \
+                    >/dev/null 2>&1 || complete=0 ;;
+        *)
+            complete=0 ;;
+    esac
+    if (( complete == 1 )); then printf 'complete\n'; else printf 'partial\n'; fi
+    return 0
+}
+
+# rollup::done_status_id
+#   The status id the rollup treats as "done" — the one the terminal lifecycle
+#   phase (`merged`) maps to. Echoes the status id (empty if unmapped). Used by
+#   the caller to derive an issue's PRIOR completion from its current status.
+rollup::done_status_id() {
+    local st
+    st="$(config::get_status_transition "merged" 2>/dev/null)" || { printf ''; return 0; }
+    printf '%s\n' "${st%%$'\t'*}"
+}
+
+# rollup::transition_if_changed <issue_key> <computed> <prior>
+#   Transition <issue_key> to reflect <computed> completion ONLY when it differs
+#   from <prior> (forward AND backward); equal ⇒ `noop`, no write (FR-012).
+#   complete ⇒ the done status (`merged`); partial ⇒ the active status
+#   (`implementing`). Reuses config::get_status_transition + transition_issue.
+#   Echoes `transitioned` or `noop`; a transport failure returns rc 1.
+rollup::transition_if_changed() {
+    local key="${1:-}" computed="${2:-partial}" prior="${3:-}"
+    if [[ "$computed" == "$prior" ]]; then
+        printf 'noop\n'
+        return 0
+    fi
+    local phase target
+    if [[ "$computed" == "complete" ]]; then phase="merged"; else phase="implementing"; fi
+    if ! target="$(config::get_status_transition "$phase" 2>/dev/null)"; then
+        # No status mapping for the target phase → nothing to transition to.
+        printf 'noop\n'
+        return 0
+    fi
+    if ! transition_issue "$key" "$target"; then
+        jira_sink::_log "rollup::transition_if_changed: transition for ${key} failed"
+        return 1
+    fi
+    printf 'transitioned\n'
+    return 0
+}
+
+# =============================================================================
+# Feature 002 — Phase 8/US6: Initiative super-level + graceful degradation.
+# OFF by default (mapping.initiative.enabled). Maps the narrative super-level to
+# a Jira Initiative where the instance supports it, and folds the narrative onto
+# the repo Epic (behind a stable marker, with the repo grouping label) where it
+# does not — NEVER hard-failing for lack of the Initiative type (Q5, FR-013/
+# FR-014, SC-007). The narrative is populated ONLY from the explicit spec_input
+# source (never inferred); in --workstate mode it is gracefully absent.
+# =============================================================================
+
+# query_initiative <repo_label> <project> <initiative_type_id>
+#   Find the repo's Initiative by its repo identity label AND issue type (so it
+#   never collides with the same-labelled Epic). Echoes the `.issues` array; rc 3
+#   on an unreadable read, rc 0 + `[]` when absent.
+query_initiative() {
+    local label="${1:-}" project="${2:-}" itype="${3:-}"
+    jira_sink::_search_issues \
+        "labels = \"${label}\" AND issuetype = \"${itype}\" AND project = \"${project}\" ORDER BY updated DESC"
+}
+
+# initiative::probe_available
+#   `present` when the target project lists the configured initiative artifact in
+#   its issue-type metadata, else `absent`. An unreadable probe fails closed
+#   (rc 3) — the caller then leaves the super-level untouched (no blind write).
+initiative::probe_available() {
+    local want rows
+    want="$(config::get mapping.initiative.artifact 2>/dev/null || printf 'Initiative')"
+    if ! rows="$(mapping::detect_available_types)"; then
+        return 3
+    fi
+    # detect_available_types emits `<name>\t<id>` rows — match the NAME column.
+    if printf '%s\n' "$rows" | cut -f1 | grep -qxF "$want"; then
+        printf 'present\n'
+    else
+        printf 'absent\n'
+    fi
+    return 0
+}
+
+# ensure_initiative <narrative> <repo_slug>
+#   Find-or-create the repo's Initiative (issue_types.initiative), carrying the
+#   repo identity label and the narrative as its body. Idempotent: an existing
+#   Initiative is matched (by repo label + type) and its description/labels are
+#   reconciled only on a real diff (zero churn). Echoes the Initiative key. rc 3
+#   on an unreadable lookup/read; rc 1 on a write failure.
+ensure_initiative() {
+    local narrative="${1:-}" repo_slug="${2:-}"
+    local project itype repo_prefix label
+    project="$(config::get project_key)"
+    itype="$(jira_sink::_artifact_issue_type_id "$(config::get mapping.initiative.artifact 2>/dev/null || printf 'Initiative')")"
+    repo_prefix="$(config::get labels.repo_prefix)"
+    label="${repo_prefix}${repo_slug}"
+
+    local description
+    description="$(adf::from_markdown "$narrative")"
+    local labels_json
+    labels_json="$(jq -cn --arg l "$label" '[$l]')"
+
+    local existing existing_key
+    if ! existing="$(query_initiative "$label" "$project" "$itype")"; then
+        jira_sink::_log "ensure_initiative: lookup unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    existing_key="$(printf '%s' "$existing" | jq -r '(.[0].key // "")' 2>/dev/null || printf '')"
+
+    if [[ -z "$existing_key" || "$existing_key" == "null" ]]; then
+        local fields created key
+        fields="$(jq -cn \
+            --arg project "$project" --arg itype "$itype" \
+            --arg summary "${repo_slug} — Initiative" \
+            --argjson description "$description" --argjson labels "$labels_json" \
+            '{fields:{project:{key:$project},issuetype:{id:$itype},
+              summary:$summary,description:$description,labels:$labels}}')"
+        if ! created="$(mutate_issue_create "$fields")"; then
+            jira_sink::_log "ensure_initiative: create failed"
+            return 1
+        fi
+        key="$(printf '%s' "$created" | jq -r '.key // ""' 2>/dev/null || printf '')"
+        JIRA_SINK_INITIATIVE_DISPOSITION="created"
+        printf '%s\n' "$key"
+        return 0
+    fi
+
+    # PRESENT → reconcile description + labels only on a real diff.
+    local current cur_desc cur_labels
+    if ! current="$(query_issue_full "$existing_key")"; then
+        jira_sink::_log "ensure_initiative: ${existing_key} read unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    cur_desc="$(printf '%s' "$current" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+    cur_labels="$(printf '%s' "$current" | jq -c '.labels // []' 2>/dev/null || printf '[]')"
+
+    local diff='{}'
+    if [[ "$(jira_sink::_normalize_adf "$description")" != "$(jira_sink::_normalize_adf "$cur_desc")" ]]; then
+        diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+    fi
+    if ! jira_sink::_labels_equal "$labels_json" "$cur_labels"; then
+        diff="$(printf '%s' "$diff" | jq -c --argjson l "$labels_json" '. + {labels: $l}')"
+    fi
+    if [[ "$diff" != "{}" ]]; then
+        if ! mutate_issue_update "$existing_key" "$(printf '%s' "$diff" | jq -c '{fields: .}')"; then
+            jira_sink::_log "ensure_initiative: update for ${existing_key} failed"
+            return 1
+        fi
+        JIRA_SINK_INITIATIVE_DISPOSITION="updated"
+    else
+        JIRA_SINK_INITIATIVE_DISPOSITION="skipped"
+    fi
+    printf '%s\n' "$existing_key"
+    return 0
+}
+
+# Disposition channel for the Initiative super-level (read by reconcile.sh across
+# the engine↔sink seam; -gx also silences SC2034 in the isolated file scan).
+declare -gx JIRA_SINK_INITIATIVE_DISPOSITION=""
+
+# initiative::degrade_onto_epic <epic_key> <narrative> <repo_slug>
+#   When the instance lacks the Initiative type, fold the narrative onto the repo
+#   Epic behind the stable ADF_INITIATIVE_MARKER, preserving the Epic's other
+#   body content; the repo grouping rides the existing repo_prefix label (already
+#   on the Epic). Idempotent: the marker-delimited narrative section is byte-
+#   compared in isolation, so a degraded re-run (or an unrelated Epic body edit)
+#   writes nothing. NEVER hard-fails for lack of Initiative; an unreadable Epic
+#   read still fails closed (rc 3).
+initiative::degrade_onto_epic() {
+    local epic_key="${1:-}" narrative="${2:-}" repo_slug="${3:-}"
+    : "${repo_slug:=}"
+
+    local current cur_desc
+    if ! current="$(query_issue_full "$epic_key")"; then
+        jira_sink::_log "initiative::degrade_onto_epic: ${epic_key} read unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    cur_desc="$(printf '%s' "$current" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+
+    local section split preamble cur_section
+    section="$(adf::render_initiative_section "$narrative")"
+    split="$(jira_sink::_split_body_at_marker "$cur_desc" "$ADF_INITIATIVE_MARKER")"
+    preamble="$(printf '%s' "$split" | jq -c '.preamble' 2>/dev/null || printf '[]')"
+    cur_section="$(printf '%s' "$split" | jq -c '.subtree' 2>/dev/null || printf '[]')"
+
+    if [[ "$(jira_sink::_canonical_subtree "$cur_section")" == "$(jira_sink::_canonical_subtree "$section")" ]]; then
+        JIRA_SINK_INITIATIVE_DISPOSITION="skipped"
+        return 0
+    fi
+
+    local desired_desc payload
+    desired_desc="$(jq -cn --argjson pre "$preamble" --argjson sec "$section" \
+        '{version:1, type:"doc", content: ($pre + $sec)}')"
+    payload="$(jq -cn --argjson d "$desired_desc" '{fields: {description: $d}}')"
+    if ! mutate_issue_update "$epic_key" "$payload"; then
+        jira_sink::_log "initiative::degrade_onto_epic: description write for ${epic_key} failed"
+        return 1
+    fi
+    JIRA_SINK_INITIATIVE_DISPOSITION="updated"
+    return 0
+}
+
+# =============================================================================
+# Feature 002 — Phase 4/US2: mapping-driven level projection
+# (engine-sink-interface-002 §mapping-driven projection).
+#
+# The 001 orchestrators (ensure_repo_epic / sync_spec_issue /
+# sync_task_phase_subissues) hardcode the default repo→Epic / spec→Story /
+# phase→Subtask projection. `sync_level_artifact` is the GENERIC, mapping-driven
+# create/update for ANY configured level: it resolves the level's artifact +
+# parent relationship through the config mapping layer, finds-or-creates the
+# configured issue type, and re-matches by the supplied IDENTITY LABEL so a
+# re-run UPDATES rather than re-creates (idempotent, FR-009). A `checklist`
+# sentinel level creates NO issue (it renders into the parent body, US3).
+#
+# `link_to_parent` applies the configured relationship after a create: `parent`
+# and `Epic-link` both set Jira's native `parent` field (modern Jira folds the
+# classic Epic-link onto the parent field); `none` and `checklist` are no-ops.
+#
+# Vendor-neutrality (FR-018): the level→artifact + relationship MAPPING lives in
+# config.sh (validated at config-load); this sink only translates the resolved
+# names to Jira ids/payloads. The disposition channel mirrors the 001 channel so
+# the engine's created/updated/skipped tally works for the configured path too.
+#
+# TRACKED DEFERRAL (US2 phase boundary — tasks.md T055/T056): these two
+# functions are the proven, unit+integration-tested mapping-driven projection,
+# but the engine (reconcile.sh process_spec) is NOT yet wired to call them — it
+# still drives the 001-era ensure_repo_epic / sync_spec_issue /
+# sync_task_phase_subissues orchestrators. That wiring (and a full-stack
+# live-reconcile zero-churn test of a non-default label/parent shape) is a
+# DELIBERATE later task, OUT OF US2 SCOPE — do not wire it here.
+# =============================================================================
+
+# Per-call disposition for the generic level projection (mirrors
+# JIRA_SINK_SPEC_DISPOSITION). value ∈ { created | updated | skipped }. Empty
+# when the level was a checklist sentinel (no issue). Exported so reconcile.sh
+# (across the seam) can read it and so shellcheck does not flag it unused.
+declare -gx JIRA_SINK_LEVEL_DISPOSITION=""
+
+# sync_level_artifact <level> <identity_label> <parent_id> <input_json>
+#   Mapping-driven create/update of the level's CONFIGURED issue type under
+#   <parent_id>, matched/updated by <identity_label> (idempotent, FR-009).
+#   <input_json> is `{summary, body}` (the sink-neutral level payload). Echoes
+#   `{id,key}` of the issue (empty for a checklist sentinel). Records the verdict
+#   on JIRA_SINK_LEVEL_DISPOSITION. rc 3 on an unreadable lookup (fail-closed).
+sync_level_artifact() {
+    local level="${1:-}" identity_label="${2:-}" parent_id="${3:-}" input_json="${4:-}"
+
+    JIRA_SINK_LEVEL_DISPOSITION=""
+
+    # Resolve the configured artifact + parent relationship for this level.
+    local artifact relationship
+    artifact="$(jira_sink::_level_artifact "$level")"
+    relationship="$(jira_sink::_level_relationship "$level")"
+
+    # A checklist-sentinel level projects NO standalone issue (it renders into
+    # the parent body, US3). No-op success with empty stdout.
+    if [[ "$artifact" == "checklist" ]]; then
+        JIRA_SINK_LEVEL_DISPOSITION=""
+        printf ''
+        return 0
+    fi
+
+    local project itype
+    project="$(config::get project_key)"
+    itype="$(jira_sink::_artifact_issue_type_id "$artifact")"
+
+    # Compose the desired issue from the neutral level input.
+    local summary body description
+    summary="$(printf '%s' "$input_json" | jq -r '.summary // ""' 2>/dev/null || printf '')"
+    body="$(printf '%s' "$input_json" | jq -r '.body // ""' 2>/dev/null || printf '')"
+    description="$(adf::from_markdown "$body")"
+
+    # The desired label set = the identity label (the re-match key — the
+    # task_prefix identity for a Task-projected level, FR-009; always carried so a
+    # re-run finds it) UNION the caller's desired labels (input.labels — the phase
+    # label + the workstate item's own labels). Composing the FULL set here is
+    # load-bearing for zero-churn: the PRESENT-path diff below rebuilds the desired
+    # labels from THIS value, so omitting input.labels would PUT labels:[identity]
+    # and WIPE the phase + operator labels on every update (F1). Mirrors
+    # sync_spec_issue's `([$spec,$phase] + (.labels // [])) | unique`.
+    local labels_json
+    labels_json="$(printf '%s' "$input_json" | jq -c \
+        --arg id "$identity_label" \
+        '([$id] + (.labels // [])) | unique')"
+
+    # Whether the configured relationship sets a native parent link on create.
+    local set_parent=0
+    case "$relationship" in
+        parent|Epic-link) [[ -n "$parent_id" ]] && set_parent=1 ;;
+    esac
+
+    # --- Find-or-create-or-update by identity label ----------------------
+    # query_spec_issue is a generic label+project JQL search; reuse it to match
+    # the identity. rc 3 (unreadable) fails closed — a blind create could dupe.
+    local existing existing_key
+    if ! existing="$(query_spec_issue "$identity_label" "$project")"; then
+        jira_sink::_log "sync_level_artifact: ${level} (${identity_label}) lookup unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    existing_key="$(printf '%s' "$existing" | jq -r '(.[0].key // "")' 2>/dev/null || printf '')"
+
+    if [[ -z "$existing_key" || "$existing_key" == "null" ]]; then
+        # ABSENT → create the configured issue type.
+        local fields
+        fields="$(jq -cn \
+            --arg project "$project" \
+            --arg itype "$itype" \
+            --arg parent "$parent_id" \
+            --arg summary "$summary" \
+            --argjson description "$description" \
+            --argjson labels "$labels_json" \
+            --argjson set_parent "$set_parent" \
+            '{fields:(
+                {
+                    project:     {key: $project},
+                    issuetype:   {id: $itype},
+                    summary:     $summary,
+                    description: $description,
+                    labels:      $labels
+                }
+                + (if ($set_parent == 1) then {parent: {key: $parent}} else {} end)
+            )}')"
+
+        local created key
+        if ! created="$(mutate_issue_create "$fields")"; then
+            jira_sink::_log "sync_level_artifact: failed to create ${artifact} for ${level} (${identity_label})"
+            return 1
+        fi
+        key="$(printf '%s' "$created" | jq -r '.key // ""' 2>/dev/null || printf '')"
+        if [[ -z "$key" || "$key" == "null" ]]; then
+            jira_sink::_log "sync_level_artifact: created ${artifact} has no key"
+            return 1
+        fi
+        JIRA_SINK_LEVEL_DISPOSITION="created"
+        printf '%s\n' "$created"
+        return 0
+    fi
+
+    # PRESENT → diff the desired against the current; update only the delta so an
+    # unchanged level performs ZERO writes (idempotency, FR-009/SC-017).
+    local current
+    if ! current="$(query_issue_full "$existing_key")"; then
+        jira_sink::_log "sync_level_artifact: ${level} (${existing_key}) read unreadable; failing closed (rc 3)"
+        return 3
+    fi
+    local cur_summary cur_description cur_labels cur_parent
+    cur_summary="$(printf '%s' "$current" | jq -r '.summary // ""' 2>/dev/null || printf '')"
+    cur_description="$(printf '%s' "$current" | jq -c '.description // null' 2>/dev/null || printf 'null')"
+    cur_labels="$(printf '%s' "$current" | jq -c '.labels // []' 2>/dev/null || printf '[]')"
+    cur_parent="$(printf '%s' "$current" | jq -r '.parent.key // ""' 2>/dev/null || printf '')"
+    local cur_id
+    cur_id="$(printf '%s' "$existing" | jq -r '(.[0].id // "")' 2>/dev/null || printf '')"
+
+    local diff='{}'
+    if [[ "$summary" != "$cur_summary" ]]; then
+        diff="$(printf '%s' "$diff" | jq -c --arg s "$summary" '. + {summary: $s}')"
+    fi
+    local desired_desc_norm current_desc_norm
+    desired_desc_norm="$(jira_sink::_normalize_adf "$description")"
+    current_desc_norm="$(jira_sink::_normalize_adf "$cur_description")"
+    if [[ "$desired_desc_norm" != "$current_desc_norm" ]]; then
+        diff="$(printf '%s' "$diff" | jq -c --argjson d "$description" '. + {description: $d}')"
+    fi
+    if ! jira_sink::_labels_equal "$labels_json" "$cur_labels"; then
+        diff="$(printf '%s' "$diff" | jq -c --argjson l "$labels_json" '. + {labels: $l}')"
+    fi
+    if (( set_parent == 1 )) && [[ "$parent_id" != "$cur_parent" ]]; then
+        diff="$(printf '%s' "$diff" | jq -c --arg p "$parent_id" '. + {parent: {key: $p}}')"
+    fi
+
+    if [[ "$diff" != "{}" ]]; then
+        local diff_payload
+        diff_payload="$(printf '%s' "$diff" | jq -c '{fields: .}')"
+        if ! mutate_issue_update "$existing_key" "$diff_payload"; then
+            jira_sink::_log "sync_level_artifact: update for ${existing_key} (${level}) failed"
+            return 1
+        fi
+        JIRA_SINK_LEVEL_DISPOSITION="updated"
+    else
+        JIRA_SINK_LEVEL_DISPOSITION="skipped"
+    fi
+    printf '%s\n' "$(jq -cn --arg id "$cur_id" --arg key "$existing_key" '{id: $id, key: $key}')"
+    return 0
+}
+
+# link_to_parent <child_id> <parent_id> <relationship>
+#   Apply the configured parent relationship to an already-created child. Both
+#   `parent` and `Epic-link` set Jira's native `parent` field (modern Jira folds
+#   the classic Epic-link onto the parent field — the operator's project_style
+#   declares which vocabulary they use, but the write is the same). `none` and
+#   `checklist` are NO-OPS (the top level has no parent; a checklist renders
+#   in-body). A no-op or a successful PUT returns 0.
+link_to_parent() {
+    local child_id="${1:-}" parent_id="${2:-}" relationship="${3:-}"
+
+    case "$relationship" in
+        none|checklist|"")
+            # Top level / in-body render — nothing to link.
+            return 0
+            ;;
+        parent|Epic-link)
+            [[ -n "$child_id" && -n "$parent_id" ]] || return 0
+            # Read-before-write (zero-churn, F3): an UNCONDITIONAL parent PUT
+            # churns on every reconcile. Read the child's current parent and
+            # NO-OP when it already matches (mirrors the sync_level_artifact
+            # parent-diff). An unreadable read fails closed (rc 3): we cannot
+            # prove the parent matches, so silently writing could clobber.
+            local current cur_parent
+            if ! current="$(query_issue_full "$child_id")"; then
+                jira_sink::_log "link_to_parent: ${child_id} read unreadable; failing closed (rc 3)"
+                return 3
+            fi
+            cur_parent="$(printf '%s' "$current" | jq -r '.parent.key // ""' 2>/dev/null || printf '')"
+            if [[ "$cur_parent" == "$parent_id" ]]; then
+                # Already correctly parented — zero churn.
+                return 0
+            fi
+            local payload
+            payload="$(jq -cn --arg p "$parent_id" '{fields:{parent:{key:$p}}}')"
+            if ! mutate_issue_update "$child_id" "$payload"; then
+                jira_sink::_log "link_to_parent: setting parent ${parent_id} on ${child_id} (${relationship}) failed"
+                return 1
+            fi
+            return 0
+            ;;
+        *)
+            # Dependency-style links are rejected at config-load (matrix); reaching
+            # here is a defensive no-op rather than a corrupt write.
+            jira_sink::_log "link_to_parent: '${relationship}' is not a hierarchy link; no-op (config-load should have rejected it)"
+            return 0
+            ;;
+    esac
 }
 
 # =============================================================================

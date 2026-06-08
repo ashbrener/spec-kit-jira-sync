@@ -309,3 +309,93 @@ adf::truncate() {
     end
   '
 }
+
+# ----------------------------------------------------------------------------
+# 2-level (checklist) mode — keyed sub-tree render (feature-002 US3, Q7/Q9).
+#
+# In 2-level mode the task phases/tasks collapse into a single in-body checklist
+# carried by the SPEC issue's description, instead of becoming Subtask children.
+# The bridge OWNS only this sub-tree; the prose above it is preserved across
+# re-runs (the sink diffs only the sub-tree). To make that work the render is:
+#   * KEYED by the workstate task id — each taskItem's localId derives from the
+#     task id, NOT its position, so a reorder/rename re-keys by identity with no
+#     duplication (Q7).
+#   * BYTE-STABLE — an unchanged task set re-renders byte-identically, so the
+#     sink's sub-tree compare yields `unchanged` ⇒ zero writes (FR-008, SC-004).
+#   * PROVENANCE-MARKED — a single stable marker line renders above the taskList
+#     (Q9) so the sink can locate the sub-tree inside a co-owned body without a
+#     timestamp or other churn-inducing volatile content.
+# ----------------------------------------------------------------------------
+
+# The stable provenance marker line rendered above the checklist sub-tree. It is
+# a fixed constant (NO timestamp / counter) so the round-trip stays byte-stable,
+# and it is the delimiter the sink uses to isolate the sub-tree from the prose
+# preamble. Exposed for the sink + tests; never localized or interpolated.
+ADF_CHECKLIST_MARKER="Tasks — mirrored by spec-kit-jira-sync (edits above this line are preserved; this checklist is managed by the bridge)"
+
+# ----------------------------------------------------------------------------
+# adf::render_checklist_subtree <tasks-json>
+#
+# <tasks-json> is a JSON array of flattened tasks, each {id,text,done}, where
+# `id` is the stable workstate task id (the caller composes it from the phase +
+# task ordinal). Emits the checklist SUB-TREE as a JSON array of two ADF block
+# nodes: [ <marker paragraph>, <taskList> ]. Each taskItem's localId is
+# "task-<id>" (keyed by id); `state` is DONE when done==true else TODO. Built
+# entirely in jq so text is escaped and key order is fixed (byte-stable).
+# ----------------------------------------------------------------------------
+# The stable marker line that delimits the degraded-Initiative narrative folded
+# onto the repo Epic (US6). Fixed constant (no timestamp) so the round-trip is
+# byte-stable and the sink can isolate the narrative section from the Epic's
+# other body content. Exposed for the sink + tests.
+ADF_INITIATIVE_MARKER="Initiative (mirrored by spec-kit-jira-sync — narrative folded here on a board without the Initiative type)"
+
+# ----------------------------------------------------------------------------
+# adf::render_initiative_section <narrative-markdown>
+#
+# Emit the degraded-Initiative narrative SUB-TREE as a JSON array of ADF block
+# nodes: [ <marker paragraph>, <narrative blocks…> ]. The narrative is rendered
+# via adf::from_markdown (escaped, bounded subset). An empty narrative still
+# yields the marker so the section is locatable + byte-stable.
+# ----------------------------------------------------------------------------
+adf::render_initiative_section() {
+  local narrative="${1:-}"
+  local blocks
+  blocks="$(adf::from_markdown "$narrative" | jq -c '.content // []')"
+  jq -cn --argjson blocks "$blocks" --arg marker "$ADF_INITIATIVE_MARKER" '
+    [ { type: "paragraph", content: [ { type: "text", text: $marker } ] } ]
+    + $blocks
+  '
+}
+
+adf::render_checklist_subtree() {
+  local tasks_json="${1:-[]}"
+  : "${tasks_json:=[]}"
+
+  jq -cn --argjson items "$tasks_json" --arg marker "$ADF_CHECKLIST_MARKER" '
+    [
+      { type: "paragraph",
+        content: [ { type: "text", text: $marker } ] },
+      { type: "taskList",
+        attrs: { localId: "speckit-checklist" },
+        content: (
+          $items
+          | map(
+              {
+                type: "taskItem",
+                attrs: {
+                  localId: ("task-" + ((.id // "") | tostring)),
+                  state: (if (.done == true) then "DONE" else "TODO" end)
+                },
+                content: (
+                  if (((.text // "") | tostring | length) > 0)
+                  then [ { type: "text", text: (.text | tostring) } ]
+                  else []
+                  end
+                )
+              }
+            )
+        )
+      }
+    ]
+  '
+}

@@ -43,6 +43,30 @@ All notable changes to this project are documented here. The format is based on
 - **In-session slash commands** — `/speckit-jira-push` (reconcile/write) and
   `/speckit-jira-status` (read-only dry-run preview) run the engine from inside
   the agent harness; `pull` is deferred (unidirectional, read-only mirror).
+- **Configurable artifact mapping (feature 002)** — an optional `mapping:` block
+  in `jira-config.yml` makes the spec-kit→Jira projection operator-configurable
+  while keeping today's behavior as the frozen, zero-config default (a no-config
+  upgrade is byte-for-byte identical — the regression anchor):
+  - **Alias-layer default + per-level mapping** — each `workstate` level
+    (repo/spec/phase/task) maps to a configurable Jira issue type and a
+    parent-link relationship, validated at config-load (the relationship matrix,
+    required ids, and live **available-issue-type detection** with a per-level
+    `on_absent` fallback) — all fail-closed before any write.
+  - **2-level checklist mode** — phases/tasks collapse into a keyed in-body
+    checklist on the spec issue (no Subtask children), diffed as an isolated
+    byte-stable sub-tree so re-runs stay zero-churn and human prose edits are
+    preserved.
+  - **Status rollup (off by default)** — rolls phase/spec completion up to issue
+    status (phase done when all tasks checked, repo Epic done when all specs
+    merged), transitioning only on a real completion change.
+  - **Initiative super-level (off by default)** — a narrative level above the
+    Epic mapping to a Jira Initiative where available, degrading gracefully onto
+    the Epic (behind a stable marker + repo label) where it is not — never
+    hard-failing; narrative sourced only from the explicit `spec.md` `Input:`
+    line.
+  - **`--workstate <file|->` direct input** — feeds a schema-validated
+    `workstate` document straight to the sink, skipping the parser, so any
+    producer can drive the mirror (the seam toward a standalone parser).
 
 ### Changed
 

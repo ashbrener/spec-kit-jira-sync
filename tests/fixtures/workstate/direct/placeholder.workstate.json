@@ -1,0 +1,36 @@
+{
+  "schema_version": "0.1.0",
+  "source": {
+    "system": "spec-kit",
+    "repo": "example-org/example-repo",
+    "generated_iso": "2026-05-31T00:00:00Z"
+  },
+  "items": [
+    {
+      "id": "001-example-spec",
+      "title": "Example spec",
+      "kind": "spec",
+      "state": "implementing",
+      "body": "Placeholder workstate-direct input for the US5 (--workstate) entry tests. Replace per-test as needed; no real coordinates (Privacy IX).",
+      "labels": ["speckit-spec:001"],
+      "item_source": {
+        "path": "specs/001-example-spec/",
+        "last_commit_iso": "2026-05-31T00:00:00Z"
+      },
+      "children": [
+        {
+          "id": "task-phase:1",
+          "title": "Phase 1 — Setup",
+          "kind": "task",
+          "state": "implementing",
+          "extensions": {
+            "tasks": [
+              { "text": "Write the spec", "done": true },
+              { "text": "Implement the bridge", "done": false }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

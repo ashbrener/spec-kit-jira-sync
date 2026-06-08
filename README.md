@@ -5,7 +5,7 @@
 **A real sync engine that mirrors your spec-kit specs into Jira — idempotent, drift-aware, and fail-closed.**
 
 [![status: active development](https://img.shields.io/badge/status-active%20development-blue)](#status--roadmap)
-[![tests: 175+ bats](https://img.shields.io/badge/tests-175%2B%20bats-success)](#status--roadmap)
+[![tests: 182 bats](https://img.shields.io/badge/tests-182%20bats-success)](#status--roadmap)
 [![engine: vendor-neutral](https://img.shields.io/badge/engine-vendor--neutral-1f6feb)](#how-it-works)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![privacy: no real identifiers](https://img.shields.io/badge/privacy-no%20real%20identifiers-critical)](#privacy)
@@ -51,17 +51,20 @@ The pipeline is deliberately split into a **vendor-neutral engine** and a
 **Jira-specific sink**, joined by one interface:
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph DISK["Your repo"]
+        direction LR
         SPECS["specs/NNN-feature/<br/>spec.md - plan.md - tasks.md"]
     end
     subgraph NEUTRAL["Vendor-neutral engine"]
+        direction LR
         PARSER["parser.sh<br/>infer lifecycle phase"]
         WS["workstate JSON<br/>neutral, schema-valid"]
         ENGINE["reconcile.sh<br/>drift - recency - idempotency"]
         PARSER --> WS --> ENGINE
     end
     subgraph SINK["Jira-specific sink"]
+        direction LR
         JSINK["jira_sink.sh<br/>workstate to REST"]
         REST["Jira Cloud REST v3<br/>Epic - Story - Subtask"]
         JSINK --> REST
@@ -328,9 +331,10 @@ the run (exit 2), distinct from a per-spec failure.
 ## Status & roadmap
 
 **In active development — not yet released.** This section is honest about what
-is built versus planned. The suite is **175+ bats tests**, cross-model reviewed
+is built versus planned. The suite is **182 bats tests**, cross-model reviewed
 at phase boundaries, run against a mocked Jira REST harness (a `curl`-shim that
-returns fixture JSON keyed by method + URL).
+returns fixture JSON keyed by method + URL) — **and validated end-to-end against a
+real Jira instance** (see *Live-dogfood-proven* below).
 
 ### Done — mock-validated
 
@@ -352,11 +356,28 @@ returns fixture JSON keyed by method + URL).
 - **`workstate` schema gate** — every emitted record validated against the
   published schema (under `uv`, PEP 668-safe) before any write.
 
+### Live-dogfood-proven
+
+Mirrored this repo into a real Jira project and confirmed the guarantees against a
+live instance — which surfaced **three real bugs the mock structurally could not
+catch**, each fixed and regression-guarded:
+
+- `/search/jql` returned key-less / field-less issue stubs without an explicit
+  `fields` request → every run duplicated the board.
+- Empty ADF descriptions churned every run (Jira drops empty paragraphs on store).
+- Fresh creates churned once (Jira returns a `null` description until a later write
+  settles it).
+
+**True zero-churn idempotency is now verified on real Jira** (fresh mirror →
+immediate re-run = 0 created / 0 updated). In-session slash commands
+`/speckit-jira-push` (write) and `/speckit-jira-status` (read-only `--dry-run`
+preview) drive it.
+
 ### Roadmap
 
-- A **live-instance run** beyond the mocked REST harness.
 - **Configurable artifact/relationship mapping** + a **2-level mode** (collapse
-  tasks into a Story-body checklist instead of separate Subtask issues).
+  tasks into a Story-body checklist instead of separate Subtask issues) — now in
+  active spec-kit planning (`specs/002-configurable-mapping/`: spec + plan done).
 - Exposing **`workstate` as a direct input** (run the sink from a `workstate`
   file/stdin, skipping the parser) so any producer can feed it.
 - **Carving the parser out** into a standalone `workstate` producer, leaving this

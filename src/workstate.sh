@@ -487,3 +487,117 @@ workstate::document_for_repo() {
             items: $items
         }'
 }
+
+# ---------------------------------------------------------------------------
+# workstate-direct input (feature-002 US5) — read + on-entry validation.
+#
+# The reconcile entrypoint accepts a `workstate` document directly via
+# `--workstate <PATH | ->`, skipping the spec-kit parser so any producer can
+# drive the sink (FR-015/FR-016, Principle X). The document is validated on
+# entry, before any write; a malformed / schema-invalid / unpinned document is
+# rejected fail-closed (rc 2, nothing written).
+# ---------------------------------------------------------------------------
+
+# workstate::read_document <PATH | ->
+#   Echo the raw document content from a file PATH or, when the argument is `-`,
+#   from standard input. rc 2 when a file path is missing/unreadable (input
+#   error, no write). stdin is read verbatim (the caller validates the bytes).
+workstate::read_document() {
+    local src="${1:-}"
+    if [[ "$src" == "-" ]]; then
+        cat
+        return 0
+    fi
+    if [[ -z "$src" || ! -r "$src" ]]; then
+        printf 'spec-kit-jira-sync: --workstate file not found or unreadable: %q\n' "$src" >&2
+        return 2
+    fi
+    cat -- "$src"
+}
+
+# workstate::validate_document <json>
+#   Validate a workstate document on entry. Returns 0 when acceptable, 2 when
+#   the document is malformed / schema-invalid / unpinned (fail-closed, no
+#   write). Two tiers:
+#     (1) ALWAYS-ON dependency-free floor (jq): valid JSON; `schema_version`
+#         present AND equal to the pinned WORKSTATE_SCHEMA_VERSION; `source.repo`
+#         present; `items` a non-empty array; every item carries the required
+#         floor fields (id, title, kind, state). This rejects malformed,
+#         unpinned, and structurally schema-invalid documents.
+#     (2) BEST-EFFORT full Draft-2020-12 validation: when a jsonschema runner
+#         (python3 + jsonschema) AND the published schema resolve (WORKSTATE_SCHEMA
+#         or WORKSTATE_SCHEMA_REPO/schema/workstate.schema.json), run full schema
+#         conformance and reject on failure. When unavailable, the floor stands
+#         and a note is logged (no silent skip).
+workstate::validate_document() {
+    local doc="${1:-}"
+
+    # (1) Valid JSON?
+    if ! printf '%s' "$doc" | jq -e . >/dev/null 2>&1; then
+        printf 'spec-kit-jira-sync: --workstate input is not valid JSON (rejected, no write)\n' >&2
+        return 2
+    fi
+
+    # Pinned schema_version?
+    local ver
+    ver="$(printf '%s' "$doc" | jq -r '.schema_version // ""' 2>/dev/null || printf '')"
+    if [[ "$ver" != "$WORKSTATE_SCHEMA_VERSION" ]]; then
+        printf 'spec-kit-jira-sync: --workstate schema_version %q is not the supported %q (rejected, no write)\n' \
+            "$ver" "$WORKSTATE_SCHEMA_VERSION" >&2
+        return 2
+    fi
+
+    # Structural floor: source.repo + non-empty items[] each with id/title/kind/state.
+    if ! printf '%s' "$doc" | jq -e '
+        ((.source.repo // "") | length > 0)
+        and ((.items // []) | type == "array")
+        and ((.items | length) > 0)
+        and (.items | all(.[];
+              ((.id // "") | length > 0)
+              and ((.title // "") | length > 0)
+              and ((.kind // "") | length > 0)
+              and ((.state // "") | length > 0)))
+    ' >/dev/null 2>&1; then
+        printf 'spec-kit-jira-sync: --workstate document fails the workstate structural floor (rejected, no write)\n' >&2
+        return 2
+    fi
+
+    # (2) Best-effort full Draft-2020-12 validation when a runner + schema exist.
+    local schema=""
+    if [[ -n "${WORKSTATE_SCHEMA:-}" && -f "${WORKSTATE_SCHEMA}" ]]; then
+        schema="${WORKSTATE_SCHEMA}"
+    elif [[ -n "${WORKSTATE_SCHEMA_REPO:-}" && -f "${WORKSTATE_SCHEMA_REPO}/schema/workstate.schema.json" ]]; then
+        schema="${WORKSTATE_SCHEMA_REPO}/schema/workstate.schema.json"
+    fi
+    if [[ -n "$schema" ]] && command -v python3 >/dev/null 2>&1 \
+        && python3 -c 'import jsonschema' >/dev/null 2>&1; then
+        # The validator script comes in on stdin via the heredoc, so the document
+        # must be passed as a FILE arg (NOT piped to stdin — the heredoc owns it).
+        local _docfile; _docfile="$(mktemp "${TMPDIR:-/tmp}/ws-doc.XXXXXX")"
+        printf '%s' "$doc" >"$_docfile"
+        local _vrc=0
+        python3 - "$schema" "$_docfile" >/dev/null 2>&1 <<'PY' || _vrc=$?
+import json, sys
+import jsonschema
+schema = json.load(open(sys.argv[1]))
+doc = json.load(open(sys.argv[2]))
+jsonschema.Draft202012Validator.check_schema(schema)
+jsonschema.Draft202012Validator(schema).validate(doc)
+PY
+        rm -f "$_docfile"
+        if (( _vrc != 0 )); then
+            printf 'spec-kit-jira-sync: --workstate document failed full schema validation (rejected, no write)\n' >&2
+            return 2
+        fi
+    else
+        workstate::_log_validation_degraded
+    fi
+    return 0
+}
+
+# Emit (once) a note that full schema validation was skipped — no silent cap.
+workstate::_log_validation_degraded() {
+    [[ -z "${_WORKSTATE_VALIDATION_DEGRADED_LOGGED:-}" ]] || return 0
+    _WORKSTATE_VALIDATION_DEGRADED_LOGGED=1
+    printf 'spec-kit-jira-sync: note — full workstate schema validation unavailable (no jsonschema runner / schema); applied the structural floor + version pin only\n' >&2
+}

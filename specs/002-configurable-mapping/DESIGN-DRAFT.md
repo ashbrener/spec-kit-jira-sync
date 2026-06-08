@@ -60,9 +60,9 @@ These were locked in the design session and are NOT open for re-litigation in
   operator-supplied grouping (1:many) — **NEVER inferred or fabricated**.
 
 - **(d) Relationship types are configurable** per level boundary: native
-  `parent` vs `Epic Link` vs `Relates` / `Blocks` / `Implements` / `none`.
+  `parent` vs `Epic-link` vs `Relates` / `Blocks` / `Implements` / `none`.
   A **VALIDATION matrix** MUST reject semantically nonsensical combinations
-  (e.g. `Blocks` used as the hierarchy link, or `Epic Link` declared between
+  (e.g. `Blocks` used as the hierarchy link, or `Epic-link` declared between
   two non-Epic levels) at config-load time — fail-closed, before any write.
   Arbitrary relationship wiring can produce a corrupt Jira graph; the validator
   is the guard.
@@ -138,7 +138,7 @@ jira:
         relationship_to_parent: "none"
       phase:
         artifact: "Story"
-        relationship_to_parent: "Epic Link"   # or "parent" on team-managed
+        relationship_to_parent: "Epic-link"   # or "parent" on team-managed
       task:
         artifact: "Task"
         relationship_to_parent: "parent"
@@ -161,7 +161,7 @@ parent body):
         relationship_to_parent: "checklist"
 ```
 
-Relationship vocabulary to support: `parent` (native), `Epic Link` (classic /
+Relationship vocabulary to support: `parent` (native), `Epic-link` (classic /
 company-managed), `Relates`, `Blocks`, `Implements`, `none`, plus the
 non-issue `checklist` render sentinel.
 
@@ -296,16 +296,16 @@ re-open these; the questions below are narrower.
   the allow/reject table of (level-boundary × relationship-type) combinations,
   and which combos warn vs hard-halt. (e.g. is `Blocks` ever legal as a
   hierarchy link, or only as a cross-spec dependency link?) Vocabulary to cover
-  per §3: `parent`, `Epic Link`, `Relates`, `Blocks`, `Implements`, `none`,
+  per §3: `parent`, `Epic-link`, `Relates`, `Blocks`, `Implements`, `none`,
   `checklist`. **Leaning** (per §2d, fail-closed): hierarchy links restricted to
-  `parent` / `Epic Link` / `none` / `checklist`; `Blocks` / `Relates` /
-  `Implements` rejected as hierarchy links; `Epic Link` rejected between two
+  `parent` / `Epic-link` / `none` / `checklist`; `Blocks` / `Relates` /
+  `Implements` rejected as hierarchy links; `Epic-link` rejected between two
   non-Epic levels — all rejections hard-halt at config-load, before any write.
   Blocking because the matrix is the fail-closed guard the whole feature leans
   on.
 
-- **Q3 [non-blocking] — `Epic Link` vs native `parent` detection.** How does the
-  bridge know a project is classic/company-managed (needs the `Epic Link`
+- **Q3 [non-blocking] — `Epic-link` vs native `parent` detection.** How does the
+  bridge know a project is classic/company-managed (needs the `Epic-link`
   custom field) vs team-managed (native `parent`)? Options: (a) probe project
   metadata at runtime; (b) require the operator to declare project style in
   config; (c) hybrid — declare in config, validate against a probe. **Leaning:**

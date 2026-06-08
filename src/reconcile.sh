@@ -109,6 +109,14 @@ declare -g _RECONCILE_OVERVIEW_WARNED=0
 # (newline-separated): `<lifecycle_phase>\t<last_touched_epoch>`.
 declare -g _RECONCILE_LIFECYCLE_ROWS=""
 
+# Repo slug captured once (US4 repo-level rollup runs post-loop and needs it).
+declare -g _RECONCILE_REPO_SLUG=""
+
+# Initiative narrative captured from the FIRST spec's spec.md "Input:" line (the
+# explicit spec_input source, FR-014 — never inferred). Empty in --workstate mode
+# (spec_input gracefully absent). The post-loop Initiative super-level reads it.
+declare -g _RECONCILE_INITIATIVE_NARRATIVE=""
+
 # Per-spec workstate-item cache. reconcile::sync_spec_issue builds the neutral
 # workstate item once and stashes it here so reconcile::sync_task_phase_subissues
 # reuses it without re-parsing the spec dir. Reset on each process_spec entry.
@@ -130,6 +138,8 @@ declare -g ARG_SPEC=""          # NNN or empty
 declare -g ARG_ALL=0            # 0|1
 declare -g ARG_DRY_RUN=0        # 0|1
 declare -g ARG_QUIET=0          # 0|1
+declare -g ARG_WORKSTATE=""     # PATH or "-" (stdin); empty = unset (US5)
+declare -g ARG_WORKSTATE_SET=0  # 0|1 — distinguishes "--workstate -" from unset
 declare -g ARG_RETROACTIVE=0    # 0|1 — DEPRECATED no-op alias. Writing from
                                 #       any branch is the default, so this flag
                                 #       now sets NO behavioral global; it only
@@ -156,8 +166,8 @@ declare -g DRY_RUN=0
 # -----------------------------------------------------------------------------
 reconcile::usage() {
     cat >&2 <<'EOF'
-Usage: reconcile.sh [--spec NNN | --all] [--dry-run] [--on-drift=abort|proceed]
-                    [--quiet] [--config PATH] [--help]
+Usage: reconcile.sh [--spec NNN | --all | --workstate PATH|-] [--dry-run]
+                    [--on-drift=abort|proceed] [--quiet] [--config PATH] [--help]
 
 Reconcile filesystem spec state into Jira (Layer D). Idempotent.
 
@@ -166,6 +176,11 @@ Options:
   --all            Reconcile every specs/NNN-feature/ in the repo. This is the
                    DEFAULT when neither --spec nor --all is given; the two are
                    mutually exclusive.
+  --workstate P    Read a workstate document directly from file path P (or - for
+                   stdin), skipping the spec-kit parser, and mirror its items.
+                   Validated against the pinned workstate schema on entry; a
+                   malformed/unsupported document is rejected (exit 2, no write).
+                   Mutually exclusive with --spec/--all.
   --dry-run        Log every mutation that WOULD fire; issue none.
   --on-drift=V     Disposition for backward-drift (Jira ahead of disk) on a
                    non-interactive run. V is one of:
@@ -253,6 +268,21 @@ reconcile::parse_args() {
                 ARG_ALL=1
                 shift
                 ;;
+            --workstate)
+                if (( $# < 2 )); then
+                    printf 'spec-kit-jira-sync: --workstate requires a file path or - (stdin)\n' >&2
+                    reconcile::usage
+                    exit 2
+                fi
+                ARG_WORKSTATE="$2"
+                ARG_WORKSTATE_SET=1
+                shift 2
+                ;;
+            --workstate=*)
+                ARG_WORKSTATE="${1#--workstate=}"
+                ARG_WORKSTATE_SET=1
+                shift
+                ;;
             --dry-run)
                 ARG_DRY_RUN=1
                 shift
@@ -327,16 +357,28 @@ reconcile::parse_args() {
         ARG_ALL=1
     fi
 
-    # --all is the DEFAULT when no --spec is given (CLI contract, cli.md): the
-    # simplest hook/operator invocation `reconcile.sh` reconciles every spec
-    # (codex review P2). Only --spec + --all together is contradictory.
-    if [[ -z "$ARG_SPEC" ]] && (( ARG_ALL == 0 )); then
-        ARG_ALL=1
-    fi
-    if [[ -n "$ARG_SPEC" ]] && (( ARG_ALL == 1 )); then
-        printf 'spec-kit-jira-sync: --spec and --all are mutually exclusive\n' >&2
-        reconcile::usage
-        exit 2
+    # --workstate (US5) is mutually exclusive with the specs/-tree selectors:
+    # it feeds a workstate document directly, so no specs/ tree is read.
+    # Supplying it with --spec/--all is an input error (exit 2, FR-016).
+    if (( ARG_WORKSTATE_SET == 1 )); then
+        if [[ -n "$ARG_SPEC" ]] || (( ARG_ALL == 1 )); then
+            printf 'spec-kit-jira-sync: --workstate is mutually exclusive with --spec/--all\n' >&2
+            reconcile::usage
+            exit 2
+        fi
+        # Skip the --all default below — workstate mode reads no specs/ tree.
+    else
+        # --all is the DEFAULT when no --spec is given (CLI contract, cli.md): the
+        # simplest hook/operator invocation `reconcile.sh` reconciles every spec
+        # (codex review P2). Only --spec + --all together is contradictory.
+        if [[ -z "$ARG_SPEC" ]] && (( ARG_ALL == 0 )); then
+            ARG_ALL=1
+        fi
+        if [[ -n "$ARG_SPEC" ]] && (( ARG_ALL == 1 )); then
+            printf 'spec-kit-jira-sync: --spec and --all are mutually exclusive\n' >&2
+            reconcile::usage
+            exit 2
+        fi
     fi
     if [[ -n "$ARG_SPEC" && ! "$ARG_SPEC" =~ ^[0-9]+$ ]]; then
         printf 'spec-kit-jira-sync: --spec value must be numeric (got %q)\n' "$ARG_SPEC" >&2
@@ -373,6 +415,54 @@ reconcile::load_config() {
     # project config failure).
     config::load "$path"
     config::validate
+    # Feature 002 (US1/T014): parse + alias-synthesize the optional `mapping:`
+    # block, then run the fail-closed mapping validation gate — all BEFORE the
+    # write loop. With no `mapping:` block (the pre-feature default), the alias
+    # layer reproduces today's repo→Epic / spec→Story / phase→Subtask /
+    # task→checklist projection, so the sink (which now resolves each level via
+    # mapping::resolve_level, T013) behaves byte-for-byte as 001 (FR-001, FR-002,
+    # FR-017). All mapping logic stays in config.sh; the engine half below sees
+    # none of it (FR-018) — it only ensures the block is loaded + validated.
+    mapping::parse
+    mapping::validate
+    # Feature 002 (US2/T023): the LIVE available-issue-type gate. Probe the target
+    # project's issue-type metadata ONCE, then validate every configured artifact
+    # against the detected set — BOTH BEFORE the write loop, both fail-closed
+    # (FR-005, FR-006, FR-017). This is step 4 of the §validation-order; it runs
+    # AFTER the offline gate (mapping::validate: required-id + relationship
+    # matrix) so the cheap offline rejects fire first. The detection + validation
+    # live in config.sh (FR-018 vendor-neutrality); the engine half here only
+    # orchestrates the call order and maps any failure to the project-level halt.
+    #
+    # The default-aliased path probes too — but its artifacts (Epic/Story/Subtask;
+    # task→checklist is exempt) are present on any standard project, so a
+    # default-config run validates clean. A run whose probe is UNREADABLE (rc 3)
+    # fails closed: we cannot prove the configured types exist, so we abort with
+    # the project-level config exit rather than risk writing onto a board that
+    # lacks them. mapping::validate_available `exit 2`s on an absent type (the
+    # same fail-closed contract as the offline gate), writing nothing.
+    # Capture the probe via a tempfile so the subshell's rc is observable: a
+    # `mapfile < <(...)` would mask a failing probe (process substitution rc is
+    # not propagated to mapfile). The if/else fork is the codebase's set -e-safe
+    # rc-capture idiom.
+    local -a available_types=()
+    local _probe_file detect_rc=0
+    _probe_file="$(mktemp "${TMPDIR:-/tmp}/reconcile-probe.XXXXXX")"
+    if mapping::detect_available_types >"$_probe_file"; then
+        detect_rc=0
+    else
+        detect_rc=$?
+    fi
+    if (( detect_rc == 0 )); then
+        mapfile -t available_types <"$_probe_file"
+    fi
+    rm -f "$_probe_file"
+    if (( detect_rc != 0 )); then
+        summary::add error "available issue types for project unreadable (rc ${detect_rc}); failing closed — no write (verify the project key + credentials)"
+        reconcile::promote_exit 2
+        return 2
+    fi
+    mapping::validate_available "${available_types[@]}"
     reconcile::log "config loaded from ${path}"
 }
 
@@ -867,6 +957,13 @@ reconcile::subissue_state_key() {
 #   workstate::item_for_spec (the neutral internal contract) rather than
 #   recomposing tracker-shaped state inline. The item is cached on a module
 #   global so reconcile::sync_task_phase_subissues reuses it without re-parsing.
+#
+#   TRACKED DEFERRAL (002 US2 phase boundary — tasks.md T055/T056): the engine
+#   still drives the 001-era sink orchestrators (sync_spec_issue /
+#   sync_task_phase_subissues / ensure_repo_epic). The mapping-driven generic
+#   projection (jira_sink.sh sync_level_artifact + link_to_parent) is shipped and
+#   tested for US2 but NOT yet wired here — that re-platforming of process_spec
+#   onto the per-level projection is a DELIBERATE later task, out of US2 scope.
 reconcile::sync_spec_issue() {
     local feature_number="$1"
     local short_name="$2"
@@ -947,6 +1044,193 @@ reconcile::sync_spec_issue() {
         fi
     fi
     printf '%s\n' "$spec_issue_id"
+}
+
+# reconcile::_phase_is_checklist
+#   0 (true) when the phase level resolves to the `checklist` sentinel — i.e.
+#   2-level mode (US3): the task phases/tasks collapse into the Story's in-body
+#   checklist (composed by the sink's sync_spec_issue), so NO Subtask children
+#   are created and process_spec skips the sub-issue pass. The default mapping
+#   (phase→Subtask) returns 1 (false), preserving the 001 path byte-for-byte.
+reconcile::_phase_is_checklist() {
+    local artifact
+    artifact="$(mapping::resolve_level phase 2>/dev/null | cut -f1)"
+    [[ "$artifact" == "checklist" ]]
+}
+
+# reconcile::_rollup_enabled
+#   0 (true) when the optional status rollup is on (mapping.status_rollup.enabled,
+#   US4). OFF by default — so the default path never touches rollup.
+reconcile::_rollup_enabled() {
+    [[ "${CONFIG_VALUES[mapping.status_rollup.enabled]:-false}" == "true" ]]
+}
+
+# reconcile::rollup_phases <item_json> <phase_map_json> <feature_number>
+#   US4 phase-level rollup (3-level only): transition each phase Subtask to the
+#   done status when all its tasks are checked, and back to the active status
+#   when not — firing ONLY on a real completion-state change (FR-012). `prior` is
+#   derived from the Subtask's current status. An unreadable read fails closed.
+reconcile::rollup_phases() {
+    local item_json="$1" phase_map="$2" feature_number="$3"
+    local done_status
+    done_status="$(rollup::done_status_id)"
+
+    local phase_index key
+    while IFS=$'\t' read -r phase_index key; do
+        [[ -n "$key" && "$key" != "null" ]] || continue
+        local tasks computed
+        tasks="$(printf '%s' "$item_json" | jq -c --arg p "$phase_index" '
+            [ (.children // [])[]
+              | select((((.id // "") | [match("[0-9]+$")?][0].string) // "") == $p)
+              | (.extensions.tasks // [])[] ]' 2>/dev/null || printf '[]')"
+        computed="$(rollup::compute_completion phase "$tasks")"
+
+        local cur cur_status prior
+        if ! cur="$(query_issue_full "$key")"; then
+            summary::add error "spec ${feature_number}: phase ${phase_index} rollup status read unreadable — fail-closed (Jira may be incomplete)"
+            reconcile::promote_exit 3
+            continue
+        fi
+        cur_status="$(printf '%s' "$cur" | jq -r '.status.id // ""' 2>/dev/null || printf '')"
+        if [[ -n "$done_status" && "$cur_status" == "$done_status" ]]; then
+            prior="complete"
+        else
+            prior="partial"
+        fi
+
+        local verdict rc=0
+        verdict="$(rollup::transition_if_changed "$key" "$computed" "$prior")" || rc=$?
+        if (( rc != 0 )); then
+            summary::add error "spec ${feature_number}: phase ${phase_index} rollup transition failed (transport) — board status not applied"
+            reconcile::promote_exit 1
+        elif [[ "$verdict" == "transitioned" ]]; then
+            summary::add updated "spec ${feature_number}: phase ${phase_index} Subtask rolled up (${computed})"
+        fi
+    done < <(printf '%s' "$phase_map" | jq -r 'to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null || true)
+}
+
+# reconcile::rollup_repo_epic
+#   US4 repo-level rollup (post-loop): transition the repo Epic to the done
+#   status when EVERY spec is merged, and back to active otherwise — firing ONLY
+#   on a real completion-state change. Off-path unless rollup is enabled. Reads
+#   the accumulated lifecycle states (_RECONCILE_LIFECYCLE_ROWS) + the captured
+#   repo slug; fail-closed on an unreadable Epic read.
+reconcile::rollup_repo_epic() {
+    reconcile::_rollup_enabled || return 0
+    [[ -n "${_RECONCILE_REPO_SLUG:-}" ]] || return 0
+    [[ -n "${_RECONCILE_LIFECYCLE_ROWS:-}" ]] || return 0
+
+    local states computed
+    states="$(printf '%s\n' "$_RECONCILE_LIFECYCLE_ROWS" \
+        | awk -F'\t' 'NF{print $1}' \
+        | jq -Rsc 'split("\n") | map(select(length > 0))' 2>/dev/null || printf '[]')"
+    computed="$(rollup::compute_completion repo "$states")"
+
+    local epic_key
+    if ! epic_key="$(ensure_repo_epic "$_RECONCILE_REPO_SLUG")"; then
+        summary::add error "repo Epic rollup unreadable — fail-closed, top-level status not applied"
+        reconcile::promote_exit 3
+        return 0
+    fi
+    local cur done_status cur_status prior
+    if ! cur="$(query_issue_full "$epic_key")"; then
+        summary::add error "repo Epic rollup status read unreadable — fail-closed"
+        reconcile::promote_exit 3
+        return 0
+    fi
+    done_status="$(rollup::done_status_id)"
+    cur_status="$(printf '%s' "$cur" | jq -r '.status.id // ""' 2>/dev/null || printf '')"
+    if [[ -n "$done_status" && "$cur_status" == "$done_status" ]]; then
+        prior="complete"
+    else
+        prior="partial"
+    fi
+
+    local verdict rc=0
+    verdict="$(rollup::transition_if_changed "$epic_key" "$computed" "$prior")" || rc=$?
+    if (( rc != 0 )); then
+        summary::add error "repo Epic rollup transition failed (transport) — top-level status not applied"
+        reconcile::promote_exit 1
+    elif [[ "$verdict" == "transitioned" ]]; then
+        summary::add updated "repo Epic rolled up (${computed})"
+    fi
+}
+
+# reconcile::_extract_spec_input <spec_dir>
+#   Echo the spec.md "Input:" line text — the explicit spec_input narrative
+#   source for the Initiative super-level (FR-014; never inferred). Empty when no
+#   spec.md or no Input line exists.
+reconcile::_extract_spec_input() {
+    local spec_dir="${1%/}" md="${1%/}/spec.md"
+    [[ -s "$md" ]] || { printf ''; return 0; }
+    sed -n 's/^\*\*Input\*\*:[[:space:]]*//p' "$md" | head -1
+}
+
+# reconcile::sync_initiative
+#   US6 post-loop Initiative super-level (off by default). Probes the project for
+#   the Initiative type: present ⇒ ensure the repo Initiative (narrative from the
+#   explicit spec_input source); absent ⇒ fold the narrative onto the repo Epic
+#   (graceful degradation, never hard-failing). Fail-closed on an unreadable
+#   probe / lookup. spec_input is gracefully absent in --workstate mode.
+reconcile::sync_initiative() {
+    [[ "${CONFIG_VALUES[mapping.initiative.enabled]:-false}" == "true" ]] || return 0
+    [[ -n "${_RECONCILE_REPO_SLUG:-}" ]] || return 0
+
+    local narrative="${_RECONCILE_INITIATIVE_NARRATIVE:-}"
+    local epic_key
+    if ! epic_key="$(ensure_repo_epic "$_RECONCILE_REPO_SLUG")"; then
+        summary::add error "Initiative super-level: repo Epic unreadable — fail-closed (no write)"
+        reconcile::promote_exit 3
+        return 0
+    fi
+
+    local avail prc=0
+    avail="$(initiative::probe_available)" || prc=$?
+    if (( prc != 0 )); then
+        summary::add error "Initiative super-level: issue-type probe unreadable — fail-closed (no write)"
+        reconcile::promote_exit 3
+        return 0
+    fi
+
+    JIRA_SINK_INITIATIVE_DISPOSITION=""
+    if [[ "$avail" == "present" ]]; then
+        # Call in the CURRENT shell (stdout to a tempfile) so the disposition
+        # global survives (a $(...) subshell would discard it).
+        local _out _irc init_key
+        _out="$(mktemp "${TMPDIR:-/tmp}/reconcile-init.XXXXXX")"
+        if ensure_initiative "$narrative" "$_RECONCILE_REPO_SLUG" >"$_out"; then _irc=0; else _irc=$?; fi
+        init_key="$(cat "$_out")"; rm -f "$_out"
+        if (( _irc == 3 )); then
+            summary::add error "Initiative super-level: lookup/read unreadable — fail-closed"
+            reconcile::promote_exit 3
+            return 0
+        elif (( _irc != 0 )); then
+            summary::add error "Initiative super-level: Initiative write failed (Jira may be incomplete)"
+            reconcile::promote_exit 1
+            return 0
+        fi
+        case "${JIRA_SINK_INITIATIVE_DISPOSITION:-created}" in
+            updated) summary::add updated "Initiative ${init_key}" ;;
+            skipped) summary::add skipped "Initiative ${init_key} unchanged" ;;
+            *)       summary::add created "Initiative ${init_key}" ;;
+        esac
+    else
+        local _irc=0
+        initiative::degrade_onto_epic "$epic_key" "$narrative" "$_RECONCILE_REPO_SLUG" || _irc=$?
+        if (( _irc == 3 )); then
+            summary::add error "Initiative super-level: Epic read unreadable — fail-closed"
+            reconcile::promote_exit 3
+            return 0
+        elif (( _irc != 0 )); then
+            summary::add error "Initiative super-level: degrade write failed (Jira may be incomplete)"
+            reconcile::promote_exit 1
+            return 0
+        fi
+        case "${JIRA_SINK_INITIATIVE_DISPOSITION:-updated}" in
+            updated) summary::add updated "Initiative narrative folded onto Epic ${epic_key} (degraded)" ;;
+            skipped) summary::add skipped "Initiative narrative on Epic ${epic_key} unchanged (degraded)" ;;
+        esac
+    fi
 }
 
 # reconcile::sync_task_phase_subissues <spec_issue_id> <feature_number> <spec_dir>
@@ -1496,6 +1780,20 @@ reconcile::process_spec() {
     # Feature branch is the canonical `<NNN>-<short-name>`.
     local feature_branch="${feature_number}-${short_name}"
 
+    # Capture the repo slug once (same derivation the sink uses) so the post-loop
+    # repo-level rollup (US4) can resolve the Epic without a spec_dir in hand.
+    if [[ -z "${_RECONCILE_REPO_SLUG:-}" ]]; then
+        _RECONCILE_REPO_SLUG="$(git rev-parse --show-toplevel 2>/dev/null | xargs -r basename 2>/dev/null || true)"
+        if [[ -z "$_RECONCILE_REPO_SLUG" ]]; then
+            _RECONCILE_REPO_SLUG="$(basename "$(dirname "$(dirname "${spec_dir%/}")")" 2>/dev/null || true)"
+        fi
+    fi
+    # Capture the Initiative narrative from the first spec carrying an Input line
+    # (the explicit spec_input source; US6, FR-014).
+    if [[ -z "${_RECONCILE_INITIATIVE_NARRATIVE:-}" ]]; then
+        _RECONCILE_INITIATIVE_NARRATIVE="$(reconcile::_extract_spec_input "$spec_dir")"
+    fi
+
     # --- Phase inference ----------------------------------------------
     # Hand the PR-state hint through to the parser so retroactive sync
     # lands directly on `merged` / `ready_to_merge` without simulating
@@ -1616,8 +1914,15 @@ reconcile::process_spec() {
     fi
 
     # --- Task-phase sub-issues ----------------------------------------
-    local phase_map
-    if ! phase_map="$(reconcile::sync_task_phase_subissues \
+    # 2-level (checklist) mode (US3): the phase level resolves to `checklist`, so
+    # the tasks live in the Story's in-body checklist (already reconciled inside
+    # sync_spec_issue above) and NO Subtask children are created. Skip the
+    # sub-issue pass entirely; the Story disposition already folded the checklist
+    # write/skip. The default path (phase→Subtask) runs the 001 sub-issue block.
+    local phase_map='{}'
+    if reconcile::_phase_is_checklist; then
+        summary::add skipped "spec ${feature_number}: tasks rendered in-body (2-level checklist); no Subtasks"
+    elif ! phase_map="$(reconcile::sync_task_phase_subissues \
         "$spec_issue_id" "$feature_number" "$spec_dir")"; then
         summary::add error "spec ${feature_number}: sync_task_phase_subissues failed"
         # Continue to comments — sub-issue failures don't block the rest.
@@ -1696,6 +2001,13 @@ reconcile::process_spec() {
         fi
     fi
 
+    # --- Status rollup: phase Subtasks (US4; off by default) ----------
+    # 3-level only: in 2-level mode phase_map is `{}` (no Subtasks) so this
+    # no-ops. Reuses the neutral item rebuilt for the links/comments pass.
+    if reconcile::_rollup_enabled && [[ "$phase_map" != "{}" && -n "$_us4_item" ]]; then
+        reconcile::rollup_phases "$_us4_item" "$phase_map" "$feature_number"
+    fi
+
     # --- Record lifecycle for the Project Status aggregate ------------
     # A drift `abort` returns before this point, so an operator-skipped spec
     # does not influence Project Status decisions.
@@ -1703,6 +2015,158 @@ reconcile::process_spec() {
 
     reconcile::log "spec ${feature_number}: reconcile complete"
     return 0
+}
+
+# =============================================================================
+# Feature 002 — US5: workstate-direct input projection.
+#
+# reconcile::process_workstate_item projects ONE workstate item (a spec) through
+# the sink directly — the --workstate path. It mirrors process_spec's sink-call
+# sequence but sources state/body/labels/children/links/notes from the SUPPLIED
+# item (no parser, no disk, no git, no drift read against a spec dir). The
+# projection is identical to the equivalent specs/-tree run (FR-015 equivalence):
+# same Epic/Story/Subtask|checklist artifacts, identity labels, relationships,
+# and idempotent re-run behavior. The Initiative narrative `spec_input` is
+# gracefully absent in this mode (no spec.md).
+# =============================================================================
+reconcile::process_workstate_item() {
+    local item_json="$1" repo_slug="$2"
+    local feature_number state
+    feature_number="$(printf '%s' "$item_json" | jq -r '.id | split("-")[0]' 2>/dev/null || printf '')"
+    state="$(printf '%s' "$item_json" | jq -r '.state // ""' 2>/dev/null || printf '')"
+
+    # Repo Epic (fail-closed on an unreadable lookup).
+    local epic_id
+    if ! epic_id="$(ensure_repo_epic "$repo_slug")"; then
+        summary::add error "item ${feature_number}: repo Epic unreadable — skipped, no write (fail-closed)"
+        reconcile::promote_exit 3
+        return 0
+    fi
+
+    # Spec Story — call in the CURRENT shell (stdout to a tempfile, NOT a $(...)
+    # subshell) so the sink's disposition globals survive (mirrors the
+    # specs/-tree wrapper).
+    local _out _rc spec_issue_id
+    _out="$(mktemp "${TMPDIR:-/tmp}/reconcile-ws.XXXXXX")"
+    JIRA_SINK_SPEC_DISPOSITION=""
+    JIRA_SINK_SPEC_TRANSITION_FAILED=0
+    if sync_spec_issue "$item_json" "$epic_id" >"$_out"; then _rc=0; else _rc=$?; fi
+    spec_issue_id="$(cat "$_out")"; rm -f "$_out"
+    if (( _rc != 0 )); then
+        summary::add error "item ${feature_number}: spec mirror failed (rc ${_rc}; Jira may be incomplete)"
+        reconcile::promote_exit "$(( _rc == 3 ? 3 : 1 ))"
+        return 0
+    fi
+    if [[ -z "$spec_issue_id" || "$spec_issue_id" == "null" ]]; then
+        summary::add error "item ${feature_number}: no issue id resolved"
+        return 0
+    fi
+    case "${JIRA_SINK_SPEC_DISPOSITION:-created}" in
+        updated) summary::add updated "item ${feature_number}: Story ${spec_issue_id}" ;;
+        skipped) summary::add skipped "item ${feature_number}: Story ${spec_issue_id} unchanged" ;;
+        *)       summary::add created "item ${feature_number}: Story ${spec_issue_id}" ;;
+    esac
+    if [[ "${JIRA_SINK_SPEC_TRANSITION_FAILED:-0}" == "1" ]]; then
+        summary::add warned "item ${feature_number}: Story status transition failed (transport) — status not applied"
+        reconcile::promote_exit 1
+    fi
+
+    # Task-phase Subtasks (skipped in 2-level mode — checklist lives in the body,
+    # already reconciled inside sync_spec_issue above).
+    local phase_map='{}'
+    if reconcile::_phase_is_checklist; then
+        summary::add skipped "item ${feature_number}: tasks rendered in-body (2-level checklist); no Subtasks"
+    else
+        JIRA_SINK_SUBISSUE_DISPOSITIONS='{}'
+        local _sout _src
+        _sout="$(mktemp "${TMPDIR:-/tmp}/reconcile-ws-sub.XXXXXX")"
+        if sync_task_phase_subissues "$spec_issue_id" "$item_json" >"$_sout"; then _src=0; else _src=$?; fi
+        phase_map="$(cat "$_sout")"; rm -f "$_sout"
+        if (( _src != 0 )); then
+            summary::add error "item ${feature_number}: task-phase Subtasks failed (rc ${_src}; Jira may be incomplete)"
+            reconcile::promote_exit "$(( _src == 3 ? 3 : 1 ))"
+            phase_map='{}'
+        else
+            local _p _d
+            while IFS=$'\t' read -r _p _d; do
+                [[ -n "$_p" ]] || continue
+                case "$_d" in
+                    updated) summary::add updated "item ${feature_number}: Subtask" ;;
+                    skipped) summary::add skipped "item ${feature_number}: Subtask unchanged" ;;
+                    created) summary::add created "item ${feature_number}: Subtask" ;;
+                    failed)
+                        summary::add error "item ${feature_number}: a task-phase Subtask did not mirror (write failed)"
+                        reconcile::promote_exit 1 ;;
+                esac
+            done < <(printf '%s' "$JIRA_SINK_SUBISSUE_DISPOSITIONS" | jq -r 'to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null || true)
+        fi
+    fi
+
+    # Cross-spec dependency links + clarify comments (idempotent at-most-once),
+    # driven straight off the supplied item's links[]/notes[].
+    local _lrc=0
+    reconcile::sync_inter_phase_blocks "$spec_issue_id" "$item_json" || _lrc=$?
+    if (( _lrc != 0 )); then
+        summary::add error "item ${feature_number}: cross-spec links ${_lrc} (Jira may be incomplete)"
+        reconcile::promote_exit "$(( _lrc == 3 ? 3 : 1 ))"
+    fi
+    _lrc=0
+    reconcile::sync_clarify_comments "$spec_issue_id" "$item_json" || _lrc=$?
+    if (( _lrc != 0 )); then
+        summary::add error "item ${feature_number}: clarify comments ${_lrc} (Jira may be incomplete)"
+        reconcile::promote_exit "$(( _lrc == 3 ? 3 : 1 ))"
+    fi
+
+    # Phase rollup (US4; off by default; 3-level only — phase_map is {} in 2-level).
+    if reconcile::_rollup_enabled && [[ "$phase_map" != "{}" ]]; then
+        reconcile::rollup_phases "$item_json" "$phase_map" "$feature_number"
+    fi
+
+    # Accumulate the item state for the post-loop repo rollup (no spec_dir mtime
+    # in this mode → epoch 0, treated as recent).
+    if [[ -n "$state" ]]; then
+        if [[ -z "$_RECONCILE_LIFECYCLE_ROWS" ]]; then
+            _RECONCILE_LIFECYCLE_ROWS="${state}"$'\t'"0"
+        else
+            _RECONCILE_LIFECYCLE_ROWS="${_RECONCILE_LIFECYCLE_ROWS}"$'\n'"${state}"$'\t'"0"
+        fi
+    fi
+    return 0
+}
+
+# reconcile::run_workstate
+#   The --workstate entrypoint body (US5): read the document (file or stdin),
+#   validate it on entry (fail-closed rc 2 on malformed/unsupported — nothing
+#   written), then project every item via process_workstate_item and run the
+#   post-loop repo rollup. The shared Step 5/6 in main() emits the summary +
+#   resolves the exit code.
+reconcile::run_workstate() {
+    local doc rc=0
+    doc="$(workstate::read_document "$ARG_WORKSTATE")" || rc=$?
+    if (( rc != 0 )); then
+        summary::add error "--workstate input unreadable — no write (input error)"
+        reconcile::promote_exit 2
+        return 0
+    fi
+    if ! workstate::validate_document "$doc"; then
+        summary::add error "--workstate document rejected on entry: malformed / unsupported / unpinned schema_version — no write"
+        reconcile::promote_exit 2
+        return 0
+    fi
+
+    local repo_slug
+    repo_slug="$(printf '%s' "$doc" | jq -r '.source.repo // ""' 2>/dev/null | xargs -r basename 2>/dev/null || true)"
+    _RECONCILE_REPO_SLUG="$repo_slug"
+
+    local n i item
+    n="$(printf '%s' "$doc" | jq -r '(.items // []) | length' 2>/dev/null || printf '0')"
+    for (( i = 0; i < n; i++ )); do
+        item="$(printf '%s' "$doc" | jq -c --argjson k "$i" '.items[$k]' 2>/dev/null || printf '')"
+        [[ -n "$item" && "$item" != "null" ]] || continue
+        reconcile::process_workstate_item "$item" "$repo_slug"
+    done
+
+    reconcile::rollup_repo_epic
 }
 
 # =============================================================================
@@ -1849,27 +2313,44 @@ reconcile::main() {
     # Step 2 — config load. Exits 2 via config::*'s own halt on failure.
     reconcile::load_config
 
-    # Step 3 — spec enumeration.
-    local -a spec_dirs=()
-    local dir
-    while IFS= read -r dir; do
-        [[ -n "$dir" ]] && spec_dirs+=("$dir")
-    done < <(reconcile::enumerate_specs)
+    if (( ARG_WORKSTATE_SET == 1 )); then
+        # Steps 3–4.5, workstate-direct variant (US5): read + validate a
+        # workstate document and project its items through the sink (no specs/
+        # tree). Shares the Step 5/6 summary + exit logic below.
+        reconcile::run_workstate
+    else
+        # Step 3 — spec enumeration.
+        local -a spec_dirs=()
+        local dir
+        while IFS= read -r dir; do
+            [[ -n "$dir" ]] && spec_dirs+=("$dir")
+        done < <(reconcile::enumerate_specs)
 
-    if (( ${#spec_dirs[@]} == 0 )); then
-        if [[ -n "$ARG_SPEC" ]]; then
-            summary::add warned "no spec directory matched --spec ${ARG_SPEC}"
-            reconcile::promote_exit 1
-        else
-            reconcile::log "no specs/NNN-* directories found"
+        if (( ${#spec_dirs[@]} == 0 )); then
+            if [[ -n "$ARG_SPEC" ]]; then
+                summary::add warned "no spec directory matched --spec ${ARG_SPEC}"
+                reconcile::promote_exit 1
+            else
+                reconcile::log "no specs/NNN-* directories found"
+            fi
         fi
+
+        # Step 4 — per-spec loop.
+        local spec_dir
+        for spec_dir in "${spec_dirs[@]}"; do
+            reconcile::process_spec "$spec_dir"
+        done
+
+        # Step 4.5 — repo-level status rollup (US4; off by default). Runs once
+        # after the per-spec loop so "every spec merged" is known; transitions
+        # the repo Epic to done only on a real completion-state change.
+        reconcile::rollup_repo_epic
     fi
 
-    # Step 4 — per-spec loop.
-    local spec_dir
-    for spec_dir in "${spec_dirs[@]}"; do
-        reconcile::process_spec "$spec_dir"
-    done
+    # Step 4.6 — Initiative super-level (US6; off by default). Runs once after
+    # the loop: probe-then-create-or-degrade above the repo Epic. Self-gates on
+    # mapping.initiative.enabled.
+    reconcile::sync_initiative
 
     # Step 5 — summary emission (Principle VIII).
     summary::emit
