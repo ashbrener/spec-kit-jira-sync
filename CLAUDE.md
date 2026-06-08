@@ -38,17 +38,23 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **003-engine-orchestration-unification** (active) — behavior-preserving
-  re-platforming: replace the 001-era orchestrators with one neutral
-  mapping-driven level loop, delete them, and enforce a vendor-neutral engine path
-  (the extraction prerequisite). Spec+plan done; 347-test suite is the equivalence
-  oracle. Plan: `specs/003-engine-orchestration-unification/plan.md`
+- **004-mapping-remode** (active) — guarded, opt-in re-mode / orphan pruning:
+  when the mapping shape changes, `--remode` prunes the bridge-owned orphans the
+  current mapping no longer projects (orphans = E\D over `speckit-*` identity
+  labels) and regenerates the new shape. Fail-safe scoping (never touch
+  operator issues), `--remode --dry-run` preview, fail-closed reads, default
+  hard-delete (archive optional). Introduces controlled destruction → gated on a
+  constitutional amendment (v1.0.0→v1.1.0). Built on 003's neutral level loop.
+  Spec+clarify+plan done. Plan: `specs/004-mapping-remode/plan.md`
+- **003-engine-orchestration-unification** — behavior-preserving re-platforming:
+  the 001-era orchestrators replaced by one neutral mapping-driven level loop,
+  deleted, with an enforced vendor-neutral engine path (extraction prerequisite).
+  Merged to main (PR #6); 365-test suite green.
+  Plan: `specs/003-engine-orchestration-unification/plan.md`
 - **002-configurable-mapping** — configurable artifact mapping (alias default,
   per-level mapping + available-type validation, 2-level checklist, status
   rollup, Initiative super-level, workstate-direct). Merged to main (PR #3),
   live-dogfood-proven. Plan: `specs/002-configurable-mapping/plan.md`
-- **004-mapping-remode** — guarded re-mode / orphan pruning (specced+clarified,
-  on its own branch; impl after 003). Plan: pending.
 - **001-core-bridge** — parser→workstate→jira-sink reconcile (Layer D). Merged.
   Plan: `specs/001-core-bridge/plan.md`
 <!-- SPECKIT END -->
