@@ -1005,16 +1005,23 @@ reconcile::sync_spec_issue() {
         repo_slug="$(basename "$(dirname "$(dirname "${spec_dir%/}")")" 2>/dev/null || true)"
     fi
 
-    # ensure_repo_epic + sync_spec_issue own the find-or-create + transition.
-    # A failed ensure_repo_epic is fail-closed (e.g. an unreadable Epic lookup,
-    # rc 3): surface it as an error and promote exit 3 — the per-spec loop
-    # ignores process_spec's return, so a bare `return 1` would skip the spec
-    # silently and still exit 0 (Principle VIII / FR-015: no silent skip).
-    if ! epic_id="$(ensure_repo_epic "$repo_slug")"; then
+    # Repo Epic via the neutral level loop (feature 003 T007), in find-or-create-
+    # ONLY mode (the 5th arg) to match ensure_repo_epic exactly — no present-path
+    # read/diff, no field PUT. Byte-identical: omit_description repo create;
+    # find-or-reuse with zero writes. A non-zero rc is fail-closed (unreadable
+    # lookup rc 3, or a create failure): surface + promote exit 3 (Principle VIII /
+    # FR-015: no silent skip — the per-spec loop ignores process_spec's return).
+    local _repo_out _repo_rc=0
+    _repo_out="$(sync_level_artifact repo \
+        "$(reconcile::compose_identity repo "$item_json" "$repo_slug")" "" \
+        "$(reconcile::compose_payload repo "$item_json" "$repo_slug")" 1)" || _repo_rc=$?
+    if (( _repo_rc != 0 )); then
         summary::add error "spec ${feature_number}: repo Epic unreadable/unresolved — skipped, no write (fail-closed; Jira unchanged)"
         reconcile::promote_exit 3
         return 1
     fi
+    epic_id="$(printf '%s' "$_repo_out" | jq -r '.key // ""' 2>/dev/null || printf '')"
+    _RECONCILE_LEVEL_IDS[repo]="$epic_id"
 
     # Call sync_spec_issue in the CURRENT shell (stdout captured via a tempfile,
     # NOT a `$(...)` subshell) so its JIRA_SINK_SPEC_DISPOSITION global survives.

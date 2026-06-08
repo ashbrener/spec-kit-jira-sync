@@ -1522,7 +1522,7 @@ declare -gx JIRA_SINK_LEVEL_TRANSITION_FAILED=0
 #   `{id,key}` of the issue (empty for a checklist sentinel). Records the verdict
 #   on JIRA_SINK_LEVEL_DISPOSITION. rc 3 on an unreadable lookup (fail-closed).
 sync_level_artifact() {
-    local level="${1:-}" identity_label="${2:-}" parent_id="${3:-}" input_json="${4:-}"
+    local level="${1:-}" identity_label="${2:-}" parent_id="${3:-}" input_json="${4:-}" find_only="${5:-0}"
 
     JIRA_SINK_LEVEL_DISPOSITION=""
     JIRA_SINK_LEVEL_TRANSITION_FAILED=0
@@ -1649,6 +1649,16 @@ sync_level_artifact() {
         fi
         JIRA_SINK_LEVEL_DISPOSITION="created"
         printf '%s\n' "$created"
+        return 0
+    fi
+
+    # Find-or-create-ONLY mode (feature 003): the repo Epic is never field-
+    # reconciled (ensure_repo_epic semantics) — return the found key WITHOUT the
+    # present-path read/diff, so it stays byte-identical to the 001 path (no extra
+    # GET, no field PUT).
+    if (( find_only == 1 )); then
+        JIRA_SINK_LEVEL_DISPOSITION="skipped"
+        printf '%s\n' "$(printf '%s' "$existing" | jq -c '{id:(.[0].id // ""), key:(.[0].key // "")}')"
         return 0
     fi
 
