@@ -912,17 +912,41 @@ mapping::detect_available_types() {
         return 3
     fi
 
-    # Extract the issue-type names. A 200 whose body carries no parseable
-    # `.issueTypes[].name` is ALSO unreadable — we cannot prove the available
-    # set, so fail closed rather than treat it as empty.
-    local names
-    if ! names="$(printf '%s' "${raw}" | jq -e -r '
-        (.issueTypes // []) | map(.name // empty) | .[]
+    # Extract the available types as `<name>\t<id>` rows (FR-005). The id lets
+    # mapping::validate_available match by the RESOLVED issue-type id actually
+    # POSTed (issue_types.<artifact>), not the artifact ALIAS name — so a default
+    # whose `issue_types.story` id points to a differently-NAMED live type (e.g.
+    # a Kanban board where the spec slot is a "Task") validates correctly instead
+    # of failing on the absent alias name (live-dogfood finding). A 200 whose
+    # body carries no parseable `.issueTypes[].name` is ALSO unreadable — we
+    # cannot prove the available set, so fail closed rather than treat it as empty.
+    local rows
+    if ! rows="$(printf '%s' "${raw}" | jq -e -r '
+        (.issueTypes // []) | map(select(.name)) | .[] | "\(.name)\t\(.id // "")"
     ' 2>/dev/null)"; then
         return 3
     fi
-    printf '%s\n' "${names}"
+    printf '%s\n' "${rows}"
     return 0
+}
+
+# mapping::_artifact_type_id <artifact>
+# Resolve an artifact ALIAS name to its configured issue-type id (the same
+# binding the sink projects through: Epic→issue_types.epic, Story→…story, etc.;
+# any other name → issue_types.<lowercased>). NON-halting: echoes the empty
+# string when the artifact is the `checklist` sentinel, empty, or has no
+# issue_types binding (so validate_available can fall back to the name check).
+mapping::_artifact_type_id() {
+    local artifact="${1:-}" key
+    case "${artifact}" in
+        Epic)    key="epic" ;;
+        Story)   key="story" ;;
+        Subtask) key="subtask" ;;
+        Task)    key="task" ;;
+        ""|checklist) printf ''; return 0 ;;
+        *) key="$(printf '%s' "${artifact}" | tr '[:upper:]' '[:lower:]')" ;;
+    esac
+    printf '%s' "${CONFIG_VALUES[issue_types.${key}]:-}"
 }
 
 # mapping::validate_available <available-type-name>...
@@ -946,11 +970,28 @@ mapping::validate_available() {
         config::_die "mapping not synthesized; call \`mapping::parse\` after config::load"
     fi
 
-    # Build a membership lookup over the supplied available-type set.
-    local -A available=()
-    local t
+    # Build membership lookups over the supplied available-type set. Each arg is
+    # either a real probe row `<name>\t<id>` (preferred — enables id matching) or
+    # a bare `<name>` (legacy callers / unit tests). `have_ids` is set when ANY
+    # row carried an id, switching the per-level check to id-matching (the
+    # correct comparison: the resolved issue-type id, not the alias name).
+    local -A available=()        # by NAME
+    local -A available_ids=()    # by ID
+    local have_ids=0
+    local t name id
     for t in "$@"; do
-        [[ -n "${t}" ]] && available["${t}"]=1
+        [[ -n "${t}" ]] || continue
+        if [[ "${t}" == *$'\t'* ]]; then
+            name="${t%%$'\t'*}"
+            id="${t#*$'\t'}"
+            [[ -n "${name}" ]] && available["${name}"]=1
+            if [[ -n "${id}" ]]; then
+                available_ids["${id}"]=1
+                have_ids=1
+            fi
+        else
+            available["${t}"]=1
+        fi
     done
 
     local -a problems=()
@@ -972,15 +1013,32 @@ mapping::validate_available() {
         if [[ -z "${artifact}" || "${artifact}" == "checklist" ]]; then
             continue
         fi
-        # Present in the detected set → fine.
-        if [[ -n "${available[${artifact}]:-}" ]]; then
-            continue
+        # Available? When the probe supplied ids and the artifact has an
+        # issue_types binding, match by the RESOLVED id (the type actually
+        # POSTed) — so an alias name that differs from the live display name
+        # (e.g. story→a "Task" id on Kanban) still validates. Otherwise fall back
+        # to matching the alias name (legacy callers, or a purely-named operator
+        # artifact with no issue_types binding).
+        local rid
+        rid="$(mapping::_artifact_type_id "${artifact}")"
+        if (( have_ids == 1 )) && [[ -n "${rid}" ]]; then
+            [[ -n "${available_ids[${rid}]:-}" ]] && continue
+        else
+            [[ -n "${available[${artifact}]:-}" ]] && continue
         fi
         # Absent. The ONLY escape is a per-level on_absent fallback whose value is
-        # itself available. A fallback that is also absent still hard-errors.
+        # itself available (by the same id-or-name rule). A fallback that is also
+        # absent still hard-errors.
         local fallback="${CONFIG_VALUES[mapping.levels.${lvl}.on_absent]:-}"
         if [[ -n "${fallback}" ]]; then
-            if [[ -n "${available[${fallback}]:-}" ]]; then
+            local frid fok=0
+            frid="$(mapping::_artifact_type_id "${fallback}")"
+            if (( have_ids == 1 )) && [[ -n "${frid}" ]]; then
+                [[ -n "${available_ids[${frid}]:-}" ]] && fok=1
+            else
+                [[ -n "${available[${fallback}]:-}" ]] && fok=1
+            fi
+            if (( fok == 1 )); then
                 # RESCUE — and SUBSTITUTE: the gate honors the fallback here, but
                 # the WRITE path resolves the artifact via mapping::resolve_level
                 # (which reads mapping.levels.<lvl>.artifact). Without writing the

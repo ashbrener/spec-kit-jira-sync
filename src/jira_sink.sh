@@ -1341,12 +1341,13 @@ query_initiative() {
 #   its issue-type metadata, else `absent`. An unreadable probe fails closed
 #   (rc 3) — the caller then leaves the super-level untouched (no blind write).
 initiative::probe_available() {
-    local want names
+    local want rows
     want="$(config::get mapping.initiative.artifact 2>/dev/null || printf 'Initiative')"
-    if ! names="$(mapping::detect_available_types)"; then
+    if ! rows="$(mapping::detect_available_types)"; then
         return 3
     fi
-    if printf '%s\n' "$names" | grep -qxF "$want"; then
+    # detect_available_types emits `<name>\t<id>` rows — match the NAME column.
+    if printf '%s\n' "$rows" | cut -f1 | grep -qxF "$want"; then
         printf 'present\n'
     else
         printf 'absent\n'

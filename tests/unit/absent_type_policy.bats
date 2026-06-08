@@ -72,8 +72,9 @@ YAML
 # --- a configured artifact ABSENT from the set hard-errors -------------------
 
 @test "available: spec->Story against a Kanban set (NO Story) hard-errors (exit 2)" {
-  # The Kanban template ships Epic/Task/Subtask, NO Story. The default spec→Story
-  # configured artifact is therefore absent → hard-error, no write.
+  # Name-only set (legacy caller): the Kanban template ships Epic/Task/Subtask,
+  # NO Story. With no ids supplied the validator matches by NAME, so the default
+  # spec→Story is absent → hard-error, no write.
   local tmp="${BATS_TEST_TMPDIR}/no-story.yml"
   _base > "$tmp"
   _run_config \
@@ -81,6 +82,38 @@ YAML
     "$tmp"
   [ "$status" -eq 2 ]
   [[ "$output" == *"Story"* ]]
+}
+
+# --- REGRESSION (live-dogfood): id-match where the alias NAME is absent -------
+
+@test "available: spec->Story PASSES when issue_types.story's id IS a live type (id-match)" {
+  # The live Kanban board has NO type NAMED "Story", but the operator pointed
+  # issue_types.story at an available type's id (here id 10002, surfaced live as
+  # "Task"). With `<name>\t<id>` probe rows the validator matches by the RESOLVED
+  # id (10002 ∈ the live id set) — so the no-config default PASSES instead of
+  # failing on the absent alias name. This is the byte-for-byte-001 guarantee
+  # (US1) holding on a Kanban project, the bug the live dogfood surfaced (the
+  # mock's project fixture had a literal "Story" type and hid it). FR-005/FR-006.
+  local tmp="${BATS_TEST_TMPDIR}/kanban-id.yml"
+  _base > "$tmp"
+  local r1=$'Epic\t10001' r2=$'Task\t10002' r3=$'Subtask\t10003'
+  _run_config \
+    'config::load "$1"; mapping::parse; mapping::validate_available "$2" "$3" "$4"' \
+    "$tmp" "$r1" "$r2" "$r3"
+  [ "$status" -eq 0 ] || { echo "default should pass by id-match; output: $output" >&2; false; }
+}
+
+@test "available: a configured id genuinely absent from the live id set hard-errors" {
+  # issue_types.story = 10002, but the live id set lacks 10002 (only 10001/10003)
+  # → the resolved id is genuinely absent → hard-error, no write (FR-006 intent
+  # preserved under id-matching).
+  local tmp="${BATS_TEST_TMPDIR}/id-absent.yml"
+  _base > "$tmp"
+  local r1=$'Epic\t10001' r2=$'Subtask\t10003'
+  _run_config \
+    'config::load "$1"; mapping::parse; mapping::validate_available "$2" "$3"' \
+    "$tmp" "$r1" "$r2"
+  [ "$status" -eq 2 ]
 }
 
 # --- a valid on_absent fallback is the only escape ---------------------------
