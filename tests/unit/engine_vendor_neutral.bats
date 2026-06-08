@@ -37,7 +37,10 @@ _audited_functions() {
     reconcile::_repo_epic_key \
     reconcile::rollup_phases \
     reconcile::rollup_repo_epic \
-    reconcile::sync_initiative
+    reconcile::sync_initiative \
+    reconcile::compute_orphans \
+    reconcile::remode \
+    reconcile::warn_orphans
 }
 
 # Extract a top-level function's BODY (between `name() {` and the col-0 `}`),

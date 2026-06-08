@@ -156,6 +156,12 @@ declare -g ARG_RETROACTIVE=0    # 0|1 — DEPRECATED no-op alias. Writing from
 # fires.
 declare -g ARG_ON_DRIFT=""      # "" | abort | proceed
 
+# Re-mode (feature 004): the explicit, opt-in destructive operation. 0 = the
+# ordinary non-destructive reconcile (default); 1 = prune bridge-owned orphans
+# the current mapping no longer projects, then regenerate. Reachable ONLY via
+# --remode (the v1.1.0 controlled-destruction carve-out — never hook-fired).
+declare -g ARG_REMODE=0         # 0|1
+
 # Aggregate exit-code tracker. We start at 0 and monotonically promote
 # to higher severities as failures accumulate.
 declare -g RECONCILE_EXIT_CODE=0
@@ -290,6 +296,10 @@ reconcile::parse_args() {
                 ;;
             --dry-run)
                 ARG_DRY_RUN=1
+                shift
+                ;;
+            --remode)
+                ARG_REMODE=1
                 shift
                 ;;
             --quiet)
@@ -2456,6 +2466,280 @@ reconcile::_desired_project_state() {
 # =============================================================================
 # Main.
 # =============================================================================
+# reconcile::compute_orphans <root_key> <repo_slug> <items_json_array>
+#   The NEUTRAL orphan diff (feature 004): O = E \ D keyed by identity label.
+#   D = the identity labels the CURRENT mapping projects an issue for (built from
+#   compose_identity over repo + each spec + each phase when phase is not the
+#   checklist sentinel). E = the bridge-owned set the sink enumerates beneath the
+#   root. An E-issue is an orphan iff NONE of its identity-prefix labels is in D.
+#   Operator issues carry no identity-prefix label, so they never enter the set.
+#   Echoes a JSON array `[{key, identity_label, parent, updated, status}]`.
+#   rc 3 (fail-closed) propagated from the sink enumerator on an unreadable read.
+#   Vendor-neutral: level names + label-prefix strings only (no vendor tokens).
+reconcile::compute_orphans() {
+    local root_key="$1" repo_slug="$2" items_json="$3"
+
+    # Desired identity set D.
+    local desired
+    desired="$(jq -cn --arg r "$(reconcile::compose_identity repo '{}' "$repo_slug")" '[$r]')"
+    local phase_is_issue=1
+    [[ "$(mapping::resolve_level phase 2>/dev/null | cut -f1)" == "checklist" ]] && phase_is_issue=0
+
+    local count i
+    count="$(printf '%s' "$items_json" | jq 'length' 2>/dev/null || printf '0')"
+    for (( i = 0; i < count; i++ )); do
+        local item
+        item="$(printf '%s' "$items_json" | jq -c --argjson x "$i" '.[$x]')"
+        desired="$(jq -cn --argjson d "$desired" \
+            --arg s "$(reconcile::compose_identity spec "$item" "$repo_slug")" '$d + [$s]')"
+        if (( phase_is_issue == 1 )); then
+            local pidx
+            while IFS= read -r pidx; do
+                [[ -n "$pidx" ]] || continue
+                desired="$(jq -cn --argjson d "$desired" \
+                    --arg p "$(reconcile::compose_identity phase "$item" "$repo_slug" "$pidx")" '$d + [$p]')"
+            done < <(printf '%s' "$item" | jq -r '
+                [ .children[]? | ((.id // "") | [match("[0-9]+$")?][0].string) ]
+                | map(select(. != null)) | .[]')
+        fi
+    done
+    desired="$(printf '%s' "$desired" | jq -c 'unique')"
+
+    # Existing bridge-owned set E (sink read; fail-closed).
+    local existing
+    existing="$(jira_sink::enumerate_bridge_descendants "$root_key")" || return 3
+
+    # Identity prefixes (config — neutral).
+    local prefixes_json
+    prefixes_json="$(printf '%s\n' \
+        "$(config::get labels.repo_prefix 2>/dev/null || true)" \
+        "$(config::get labels.spec_prefix 2>/dev/null || true)" \
+        "$(config::get labels.phase_prefix 2>/dev/null || true)" \
+        "$(config::get labels.task_prefix 2>/dev/null || true)" \
+        | jq -Rcs 'split("\n") | map(select(length > 0))')"
+
+    # O = E-issues whose identity labels are all absent from D.
+    printf '%s' "$existing" | jq -c --argjson d "$desired" --argjson ps "$prefixes_json" '
+        [ .[]
+          | . as $e
+          | ([ ($e.labels // [])[]
+               | select(. as $l | ($ps | any(. as $p | ($l | startswith($p))))) ]) as $ids
+          | select(($ids | length) > 0)
+          | select(($ids | any(. as $x | ($d | index($x)))) | not)
+          | { key: $e.key, identity_label: $ids[0],
+              parent: $e.parent, updated: $e.updated, status: $e.status } ]'
+    return 0
+}
+
+# reconcile::_remode_disk_baseline_epoch <spec_dirs...>
+#   The newest disk commit epoch across the in-scope spec dirs — the baseline a
+#   to-be-pruned artifact's tracker `updated` is compared against for the
+#   backward-drift-before-prune warning (FR-010). Falls back to the
+#   WORKSTATE_LAST_COMMIT_ISO env (fixture-driven runs) when no git commit
+#   resolves. Empty output = no baseline (the drift check then no-ops, never a
+#   false positive). PURE: reads git + env only; vendor-neutral (timestamps).
+reconcile::_remode_disk_baseline_epoch() {
+    local newest='' sd iso epoch
+    for sd in "$@"; do
+        iso="$(git_helpers::spec_dir_last_commit "$sd" 2>/dev/null || true)"
+        [[ -n "$iso" ]] || continue
+        epoch="$(git_helpers::iso_to_epoch "$iso" 2>/dev/null || true)"
+        [[ "$epoch" =~ ^[0-9]+$ ]] || continue
+        if [[ -z "$newest" ]] || (( epoch > newest )); then newest="$epoch"; fi
+    done
+    if [[ -z "$newest" && -n "${WORKSTATE_LAST_COMMIT_ISO:-}" ]]; then
+        epoch="$(git_helpers::iso_to_epoch "$WORKSTATE_LAST_COMMIT_ISO" 2>/dev/null || true)"
+        [[ "$epoch" =~ ^[0-9]+$ ]] && newest="$epoch"
+    fi
+    printf '%s' "$newest"
+}
+
+# reconcile::_remode_orphan_drifted <orphan_json> <disk_baseline_epoch>
+#   rc 0 (true) when the orphan's tracker `updated` timestamp is meaningfully
+#   newer than the disk baseline — the neutral signal that a human edited the
+#   to-be-pruned artifact since the source-of-truth was last committed (FR-010).
+#   Uses the same skew tolerance the spec-drift comparator uses so the bridge's
+#   own writes don't trip it. rc 1 when no baseline / no tracker timestamp / not
+#   ahead. PURE: timestamp arithmetic only (vendor-neutral).
+reconcile::_remode_orphan_drifted() {
+    local orphan_json="${1:-}" baseline="${2:-}"
+    [[ "$baseline" =~ ^[0-9]+$ ]] || return 1
+    local updated_iso updated_epoch skew
+    updated_iso="$(printf '%s' "$orphan_json" | jq -r '.updated // ""' 2>/dev/null || printf '')"
+    [[ -n "$updated_iso" && "$updated_iso" != "null" ]] || return 1
+    updated_epoch="$(git_helpers::iso_to_epoch "$updated_iso" 2>/dev/null || true)"
+    [[ "$updated_epoch" =~ ^[0-9]+$ ]] || return 1
+    skew="${RECONCILE_DRIFT_SKEW_TOLERANCE_SECONDS:-120}"
+    [[ "$skew" =~ ^[0-9]+$ ]] || skew=120
+    (( updated_epoch - baseline > skew )) && return 0
+    return 1
+}
+
+# reconcile::remode
+#   The opt-in re-mode orchestrator (feature 004): read-phase (build E/D/O) →
+#   report plan → --dry-run stop → prune loop → regenerate via the unchanged
+#   projection. Fail-closed: an unreadable read aborts before any prune. The
+#   destructive prune is gated behind --remode + the v1.1.0 carve-out.
+reconcile::remode() {
+    local -a spec_dirs=()
+    local dir
+    while IFS= read -r dir; do
+        [[ -n "$dir" ]] && spec_dirs+=("$dir")
+    done < <(reconcile::enumerate_specs)
+
+    # Repo slug (same derivation as process_spec, with the same fallbacks so a
+    # non-git / detached checkout still resolves a stable repo identity).
+    local repo_slug
+    repo_slug="$(git rev-parse --show-toplevel 2>/dev/null | xargs -r basename 2>/dev/null || true)"
+    if [[ -z "$repo_slug" ]]; then
+        repo_slug="$(basename "$(pwd)" 2>/dev/null || true)"
+    fi
+    declare -g _RECONCILE_REPO_SLUG="$repo_slug"
+
+    # Build the desired items for every in-scope spec (read-only).
+    local items='[]' sd
+    for sd in "${spec_dirs[@]}"; do
+        local it
+        if it="$(workstate::item_for_spec "$sd" 2>/dev/null)"; then
+            items="$(jq -cn --argjson a "$items" --argjson i "$it" '$a + [$i]')"
+        fi
+    done
+
+    # Resolve the root (repo issue) by a PURE find — no create in the read-phase.
+    local project root_key existing_root
+    project="$(config::get project_key)"
+    if ! existing_root="$(query_spec_issue "$(reconcile::compose_identity repo '{}' "$repo_slug")" "$project")"; then
+        summary::add warned "re-mode aborted: repo lookup unreadable (fail-closed; nothing pruned)"
+        reconcile::promote_exit 3
+        return 1
+    fi
+    root_key="$(printf '%s' "$existing_root" | jq -r '.[0].key // ""' 2>/dev/null || printf '')"
+    if [[ -z "$root_key" ]]; then
+        summary::add info "re-mode: nothing mirrored yet (no bridge-owned root); nothing to prune"
+        return 0
+    fi
+
+    # Compute O = E \ D (fail-closed).
+    local orphans
+    if ! orphans="$(reconcile::compute_orphans "$root_key" "$repo_slug" "$items")"; then
+        summary::add warned "re-mode aborted: bridge-owned enumeration unreadable (fail-closed; nothing pruned)"
+        reconcile::promote_exit 3
+        return 1
+    fi
+
+    local orphan_count
+    orphan_count="$(printf '%s' "$orphans" | jq 'length' 2>/dev/null || printf '0')"
+    summary::add info "re-mode plan: ${orphan_count} orphan(s) to prune, $(( ${#spec_dirs[@]} )) spec(s) to regenerate"
+
+    if (( ARG_DRY_RUN == 1 )); then
+        local oi
+        for (( oi = 0; oi < orphan_count; oi++ )); do
+            summary::add info "re-mode (dry-run) would prune: $(printf '%s' "$orphans" | jq -r --argjson x "$oi" '.[$x] | "\(.key) [\(.identity_label)]"')"
+        done
+        return 0
+    fi
+
+    # Disk baseline for the backward-drift-before-prune warning (FR-010): the
+    # newest commit epoch across the in-scope source dirs. An orphan whose tracker
+    # `updated` is meaningfully newer than this likely carries a human edit.
+    local disk_baseline
+    disk_baseline="$(reconcile::_remode_disk_baseline_epoch "${spec_dirs[@]}")"
+
+    # Prune each orphan (per the configured destruction model). Before each prune,
+    # surface backward-drift (FR-010): a human-edited orphan is WARNED, and under
+    # --on-drift=abort it is SKIPPED (left in place, surfaced) rather than pruned.
+    # Prune failures are surfaced and the loop continues (resumable, FR-009).
+    local oi pruned=0 prune_failed=0 drift_skipped=0
+    for (( oi = 0; oi < orphan_count; oi++ )); do
+        local okey orec
+        orec="$(printf '%s' "$orphans" | jq -c --argjson x "$oi" '.[$x]')"
+        okey="$(printf '%s' "$orec" | jq -r '.key')"
+        if reconcile::_remode_orphan_drifted "$orec" "$disk_baseline"; then
+            summary::add warned "re-mode: ${okey} appears human-edited since last commit (tracker ahead) — about to be pruned"
+            reconcile::promote_exit 1
+            if [[ "$ARG_ON_DRIFT" == "abort" ]]; then
+                drift_skipped=$(( drift_skipped + 1 ))
+                summary::add skipped "re-mode: ${okey} left in place (--on-drift=abort; human-edited orphan not pruned)"
+                continue
+            fi
+        fi
+        if jira_sink::prune_artifact "$okey"; then
+            pruned=$(( pruned + 1 ))
+            summary::add info "re-mode pruned: ${okey}"
+        else
+            prune_failed=$(( prune_failed + 1 ))
+            summary::add warned "re-mode: prune of ${okey} failed (surfaced; re-run to complete)"
+            reconcile::promote_exit 1
+        fi
+    done
+    summary::add info "re-mode pruned ${pruned} orphan(s); ${prune_failed} prune failure(s); ${drift_skipped} drift-skip(s)"
+
+    # Regenerate the new shape via the unchanged projection.
+    local spec_dir
+    for spec_dir in "${spec_dirs[@]}"; do
+        reconcile::process_spec "$spec_dir"
+    done
+    reconcile::rollup_repo_epic
+    return 0
+}
+
+# reconcile::warn_orphans
+#   FR-014 — the ordinary (non-re-mode) reconcile WARNS when it detects
+#   bridge-owned orphans left over from a prior mapping shape: it lists them and
+#   suggests --remode, but NEVER prunes. Reuses the same PURE repo-root find +
+#   read-only reconcile::compute_orphans the re-mode read-phase uses, so the
+#   warning's orphan set is the exact set --remode would prune (no divergence).
+#
+#   Zero destructive writes; fail-SOFT — any unreadable read here degrades to NO
+#   warning rather than breaking the ordinary reconcile (the ordinary path's own
+#   fail-closed reads already gate the writes; this is purely advisory). Emits at
+#   most ONE `summary::add warned` row naming the orphans + the remedy.
+#
+#   Vendor-neutral: level names + config label-prefix strings only — no vendor
+#   issue-type / artifact-name / relationship literals.
+reconcile::warn_orphans() {
+    local -a spec_dirs=("$@")
+
+    # Repo slug (same derivation as the re-mode read-phase, with the same
+    # non-git / detached-checkout fallbacks so the repo identity is stable).
+    local repo_slug
+    repo_slug="$(git rev-parse --show-toplevel 2>/dev/null | xargs -r basename 2>/dev/null || true)"
+    if [[ -z "$repo_slug" ]]; then
+        repo_slug="$(basename "$(pwd)" 2>/dev/null || true)"
+    fi
+
+    # Desired items for every in-scope spec (read-only; fail-soft per spec).
+    local items='[]' sd it
+    for sd in "${spec_dirs[@]}"; do
+        if it="$(workstate::item_for_spec "$sd" 2>/dev/null)"; then
+            items="$(jq -cn --argjson a "$items" --argjson i "$it" '$a + [$i]' 2>/dev/null || printf '%s' "$items")"
+        fi
+    done
+
+    # Resolve the root by a PURE find. Fail-SOFT: an unreadable lookup (or no
+    # root yet) degrades to no warning — the ordinary reconcile is unaffected.
+    local project existing_root root_key
+    project="$(config::get project_key 2>/dev/null || true)"
+    [[ -n "$project" ]] || return 0
+    existing_root="$(query_spec_issue "$(reconcile::compose_identity repo '{}' "$repo_slug")" "$project" 2>/dev/null)" || return 0
+    root_key="$(printf '%s' "$existing_root" | jq -r '.[0].key // ""' 2>/dev/null || printf '')"
+    [[ -n "$root_key" ]] || return 0
+
+    # Read-only orphan diff (O = E \ D). Fail-SOFT on an unreadable enumeration.
+    local orphans orphan_count
+    orphans="$(reconcile::compute_orphans "$root_key" "$repo_slug" "$items" 2>/dev/null)" || return 0
+    orphan_count="$(printf '%s' "$orphans" | jq 'length' 2>/dev/null || printf '0')"
+    [[ "$orphan_count" =~ ^[0-9]+$ ]] || return 0
+    (( orphan_count > 0 )) || return 0
+
+    # ONE warning row: list the orphans + suggest --remode. NEVER prune (FR-004).
+    local listed
+    listed="$(printf '%s' "$orphans" | jq -r 'map("\(.key) [\(.identity_label)]") | join(", ")' 2>/dev/null || printf '')"
+    summary::add warned "detected ${orphan_count} bridge-owned orphan(s) from a prior mapping shape: ${listed} — run --remode to prune them (the ordinary reconcile does not prune)"
+    reconcile::promote_exit 1
+    return 0
+}
+
 reconcile::main() {
     reconcile::parse_args "$@"
 
@@ -2482,7 +2766,12 @@ reconcile::main() {
     # Step 2 — config load. Exits 2 via config::*'s own halt on failure.
     reconcile::load_config
 
-    if (( ARG_WORKSTATE_SET == 1 )); then
+    if (( ARG_REMODE == 1 )); then
+        # Feature 004 — the explicit, opt-in destructive re-mode: prune the
+        # bridge-owned orphans the current mapping no longer projects, then
+        # regenerate. Distinct code path; the ordinary reconcile never prunes.
+        reconcile::remode
+    elif (( ARG_WORKSTATE_SET == 1 )); then
         # Steps 3–4.5, workstate-direct variant (US5): read + validate a
         # workstate document and project its items through the sink (no specs/
         # tree). Shares the Step 5/6 summary + exit logic below.
@@ -2514,6 +2803,12 @@ reconcile::main() {
         # after the per-spec loop so "every spec merged" is known; transitions
         # the repo Epic to done only on a real completion-state change.
         reconcile::rollup_repo_epic
+
+        # Step 4.7 — orphan WARNING (FR-014). The ordinary reconcile stays
+        # non-destructive: if a prior mapping shape left bridge-owned orphans,
+        # surface them + suggest --remode, but NEVER prune. Fail-soft (an
+        # unreadable advisory read here does not break the reconcile).
+        reconcile::warn_orphans "${spec_dirs[@]}"
     fi
 
     # Step 4.6 — Initiative super-level (US6; off by default). Runs once after

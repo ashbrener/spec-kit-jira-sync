@@ -12,6 +12,22 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Mapping re-mode / orphan pruning (feature 004)** — a guarded, opt-in
+  `reconcile.sh --remode` that converges a board to the shape the *current*
+  mapping projects: it prunes the bridge-owned artifacts a prior mapping shape
+  left as orphans, then regenerates the new shape in one pass. Orphans are
+  identified by a vendor-neutral diff `O = E \ D` over the `speckit-*` identity
+  labels (the engine owns the diff; the sink owns the prune mechanic), so an
+  operator-created issue — carrying no identity label — is *structurally*
+  excluded and never touched (FR-002). The destructive path is reachable **only**
+  via `--remode`; `--remode --dry-run` previews the exact prune + regenerate set
+  with zero writes (byte-faithful to the real run); reads are fail-closed (an
+  unreadable read aborts before any delete); a partial prune failure is surfaced
+  and completable by a re-run; backward-drift on a to-be-pruned issue is warned
+  first. The destruction model is operator-selectable (`remode.destruction:
+  hard-delete` default | `archive`). The ordinary reconcile stays strictly
+  non-destructive and only **warns** when it detects prior-shape orphans
+  (FR-014). Built on the feature-003 neutral level loop.
 - **Core bridge (Layer D reconcile)** — a single `src/reconcile.sh` command that
   mirrors a spec-kit project's specs into Jira through the pipeline
   **parser → schema-valid `workstate` → Jira sink**. The parser reads the
@@ -70,6 +86,11 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 
+- **Constitution v1.0.0 → v1.1.0** (MINOR) — a scoped controlled-destruction
+  carve-out added to Principle I for feature 004: the ordinary mirror stays
+  strictly non-destructive, but the explicit, opt-in re-mode MAY remove
+  bridge-owned artifacts (flag-only, bridge-owned-only, dry-run-previewable,
+  fail-closed). No principle removed, data-model mapping unchanged.
 - Schema-validation gate repointed from a pip/venv install to `uv`, removing the
   PEP 668 externally-managed-environment dependence.
 - `reconcile.sh` usage/help aligned with the documented exit codes and the
