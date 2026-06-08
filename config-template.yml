@@ -83,6 +83,23 @@ jira:
     # re-run so configured Task levels stay idempotent (feature-002, Q9).
     task_prefix: "speckit-task:"
 
+  # OPTIONAL re-mode / orphan pruning (feature-004). Governs ONLY the explicit
+  # `reconcile.sh --remode` destructive operation; the ordinary reconcile never
+  # prunes. The whole block is optional — absent => `destruction: hard-delete`.
+  # Re-mode removes bridge-owned (speckit-*-labelled) artifacts the current
+  # mapping no longer projects; it NEVER touches operator-created issues.
+  remode:
+    # destruction model for pruned orphans:
+    #   hard-delete  DELETE the issue (default — bridge content is regenerable
+    #                from the specs, so no backup is needed; comments/links lost)
+    #   archive      preserve the human layer: transition the issue to
+    #                `archive_status` AND strip its identity labels (so it leaves
+    #                the bridge-owned set). Requires `archive_status` below.
+    destruction: hard-delete
+    # Status id the `archive` model transitions orphans to (an id, never a
+    # display name — Principle V). Required ONLY when destruction == archive.
+    # archive_status: "10010"
+
   # OPTIONAL configurable artifact mapping (feature-002). The whole `mapping:`
   # block is optional: when ABSENT the loader synthesizes today's default
   # (repo->Epic, spec->Story, phase->Subtask, task->checklist, initiative and

@@ -315,6 +315,13 @@ jira_rest::put() {
   jira_rest::_request "write" "PUT" "$1" "$2"
 }
 
+# jira_rest::delete <path>
+#   A WRITE (idempotent — DELETE is in the retry-safe set). Used only by the
+#   re-mode prune path (feature 004): hard-delete of a bridge-owned orphan issue.
+jira_rest::delete() {
+  jira_rest::_request "write" "DELETE" "$1"
+}
+
 # jira_rest::search_jql <jql>
 #   Convenience over GET /search/jql?jql=<url-encoded>&fields=…&maxResults=100.
 #   A READ (fail-closed).
