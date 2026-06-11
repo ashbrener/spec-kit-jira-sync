@@ -38,10 +38,19 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **No feature currently active** — 001–004 all merged to main. The natural next
-  step is the **engine extraction** (carve the now-vendor-neutral engine into a
-  shared lib with spec-kit-linear), unblocked by 003's enforced neutrality gate;
-  or sink-side Initiative-toggle type-awareness (the 004 T017 follow-up).
+- **007-author-attribution** (active) — make the board reflect who authored each
+  spec: a two-track attribution — an account-independent `author:<handle>` LABEL
+  always (works for non-Jira-users), plus a Jira ASSIGNEE only when the author
+  maps to a real accountId (create-only, never clobbered on update — Linear FR-034
+  parity). Author = `Owner:` line else git first-add. Static gitignored
+  email→accountId map (dynamic resolution is GDPR-impossible). Opt-in, default OFF
+  = byte-identical. Additive (no amendment); Privacy IX + 003 neutrality gate are
+  the hard gates. Spec+clarify+plan done. Plan: `specs/007-author-attribution/plan.md`
+- **005-adr-mirroring / 006-consumer-privacy-guard** — ADR comment mirroring
+  (PR #12, green, pending merge) + consumer-side privacy guard (specced+clarified,
+  awaiting plan). Plans under their `specs/` dirs.
+- **Engine extraction** (next-big) — carve the now-vendor-neutral engine into a
+  shared lib with spec-kit-linear, unblocked by 003's neutrality gate.
 - **004-mapping-remode** — guarded, opt-in re-mode / orphan pruning: `--remode`
   prunes the bridge-owned orphans the current mapping no longer projects (orphans
   = E\D over `speckit-*` identity labels) and regenerates the new shape. Fail-safe
