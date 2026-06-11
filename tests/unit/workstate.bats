@@ -147,7 +147,7 @@ setup() {
       (has("id") and has("title") and has("state"))
       and ((keys - [
         "id","title","kind","state","body","coverage",
-        "children","notes","links","labels","item_source","extensions"
+        "children","notes","links","decisions","labels","item_source","extensions"
       ]) == [])
     )
   '
@@ -158,7 +158,7 @@ setup() {
       (has("id") and has("title") and has("state"))
       and ((keys - [
         "id","title","kind","state","body","coverage",
-        "children","notes","links","labels","item_source","extensions"
+        "children","notes","links","decisions","labels","item_source","extensions"
       ]) == [])
     )
   '
