@@ -38,15 +38,15 @@ byte-identical (US4 anchor). Privacy IX is a hard gate.
 
 > TDD: tests (T005–T007) first.
 
-- [ ] T005 [P] Unit `tests/unit/author_resolution.bats`: `parser::spec_author` returns an `Owner:`/`Author:` line value (case-insensitive) else empty; `git_helpers::spec_first_author` returns the first-add email (fixture git repo) else empty; `workstate::_author_json` resolves Owner-first-else-git-else-empty, emitting `{value,source}` (research R1/R2).
-- [ ] T006 [P] Unit `tests/unit/authors_map.bats`: `jira_sink::_load_authors` parses the gitignored map → `email→{accountId,handle}` + `default_assignee`; a `null` accountId is label-only; an absent file → empty map; a known author missing `handle` is flagged.
-- [ ] T007 [P] Unit `tests/unit/attribution_config.bats`: `config` accessors for `attribution.{enabled,assignee,label,author_source,authors_file}`; absent block ⇒ disabled (default OFF).
-- [ ] T008 Implement `parser::spec_author <spec_md>` in `src/parser.sh` (neutral) — makes T005(a) green.
-- [ ] T009 Implement `git_helpers::spec_first_author <spec_dir>` in `src/git_helpers.sh` (`git log --diff-filter=A --reverse --format='%ae' -- <dir>/ | head -1`; empty on no-git) — makes T005(b) green.
-- [ ] T010 Implement `workstate::_author_json <spec_dir>` in `src/workstate.sh` and wire `item.author` into `item_for_spec` (neutral floor; Owner-first-else-git). Depends on T008, T009. **(analyze M1 — the flow to the sink)** Because `sync_level_artifact` consumes the *neutral* `compose_payload` output (not the raw item), `reconcile::compose_payload spec` MUST also pass `author {value,source}` through (a neutral string + source enum — audited-gate-safe, no Jira vocab) so the sink's create branch can read `input.author`. Thread it there, not via a side-channel.
-- [ ] T011 Implement the `attribution.*` config accessors in `src/config.sh` — makes T007 green.
-- [ ] T012 Implement `jira_sink::_load_authors <path>` in `src/jira_sink.sh` (parse the gitignored map; absent → empty) — makes T006 green.
-- [ ] T013 Confirm the engine/parser path is vendor-neutral: author resolution + the `author` floor carry no Jira account/issue-type vocabulary; the gate (`engine_vendor_neutral.bats`) stays green (parser/git_helpers/workstate aren't audited engine fns; the reconcile threading is neutral).
+- [x] T005 [P] Unit `tests/unit/author_resolution.bats`: `parser::spec_author` returns an `Owner:`/`Author:` line value (case-insensitive) else empty; `git_helpers::spec_first_author` returns the first-add email (fixture git repo) else empty; `workstate::_author_json` resolves Owner-first-else-git-else-empty, emitting `{value,source}` (research R1/R2).
+- [x] T006 [P] Unit `tests/unit/authors_map.bats`: `jira_sink::_load_authors` parses the gitignored map → `email→{accountId,handle}` + `default_assignee`; a `null` accountId is label-only; an absent file → empty map; a known author missing `handle` is flagged.
+- [x] T007 [P] Unit `tests/unit/attribution_config.bats`: `config` accessors for `attribution.{enabled,assignee,label,author_source,authors_file}`; absent block ⇒ disabled (default OFF).
+- [x] T008 Implement `parser::spec_author <spec_md>` in `src/parser.sh` (neutral) — makes T005(a) green.
+- [x] T009 Implement `git_helpers::spec_first_author <spec_dir>` in `src/git_helpers.sh` (`git log --diff-filter=A --reverse --format='%ae' -- <dir>/ | head -1`; empty on no-git) — makes T005(b) green.
+- [x] T010 Implement `workstate::_author_json <spec_dir>` in `src/workstate.sh` and wire `item.author` into `item_for_spec` (neutral floor; Owner-first-else-git). Depends on T008, T009. **(analyze M1 — the flow to the sink)** Because `sync_level_artifact` consumes the *neutral* `compose_payload` output (not the raw item), `reconcile::compose_payload spec` MUST also pass `author {value,source}` through (a neutral string + source enum — audited-gate-safe, no Jira vocab) so the sink's create branch can read `input.author`. Thread it there, not via a side-channel.
+- [x] T011 Implement the `attribution.*` config accessors in `src/config.sh` — makes T007 green.
+- [x] T012 Implement `jira_sink::_load_authors <path>` in `src/jira_sink.sh` (parse the gitignored map; absent → empty) — makes T006 green.
+- [x] T013 Confirm the engine/parser path is vendor-neutral: author resolution + the `author` floor carry no Jira account/issue-type vocabulary; the gate (`engine_vendor_neutral.bats`) stays green (parser/git_helpers/workstate aren't audited engine fns; the reconcile threading is neutral).
 
 **Checkpoint**: author resolves neutrally onto the item; the sink can load the map; config gates exist.
 

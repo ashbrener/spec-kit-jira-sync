@@ -91,6 +91,137 @@ jira_sink::_error_detail() {
     fi
 }
 
+# =============================================================================
+# Feature 007 — author-based attribution (sink-side: identity map + accountId/
+# handle MECHANICS). Author RESOLUTION is vendor-neutral and already happened in
+# the engine/parser (the neutral `author {value, source}` floor on the item,
+# threaded through compose_payload). HERE the sink maps `value` (an email/owner
+# string) → a Jira `{accountId, handle}` via the gitignored operator map and
+# projects the two attribution tracks (label always; assignee on create only).
+#
+# PRIVACY (Principle IX): the map holds real emails + account ids (PII) and is
+# gitignored; only a placeholder `.sample` ships. Labels carry a non-PII handle,
+# NEVER an email. This loader reads the gitignored file; nothing here is tracked.
+# =============================================================================
+
+# jira_sink::_load_authors <path>
+#   Parse the gitignored authors map (jira-authors.local.yml) into a NEUTRAL
+#   JSON object on stdout:
+#     { "authors": { "<email>": {"accountId": <id|null>, "handle": "<h>"} ... },
+#       "default_assignee": <id|null> }
+#   An ABSENT/unreadable file → `{"authors":{},"default_assignee":null}` (rc 0 —
+#   attribution then yields no label/assignee for any author, surfaced upstream).
+#
+#   The map shape is shallow + fixed (per contracts/authors-map.md), so it is
+#   parsed with a small awk state machine emitting `email\tfield\tvalue` rows
+#   that jq folds into the object — no yq dependency (keeps the dep surface bash
+#   + jq, matching config.sh's no-yq stance). `null` (unquoted) maps to JSON
+#   null; a quoted value is a JSON string.
+jira_sink::_load_authors() {
+    local path="${1:-}"
+    if [[ -z "$path" || ! -r "$path" ]]; then
+        printf '%s' '{"authors":{},"default_assignee":null}'
+        return 0
+    fi
+
+    # Emit TAB-separated rows the jq reducer consumes:
+    #   A\t<email>\taccountId\t<raw>       (author field)
+    #   A\t<email>\thandle\t<raw>
+    #   D\t<raw>                            (default_assignee)
+    # <raw> is the YAML scalar verbatim (quotes/`null` preserved) so jq can
+    # decide string-vs-null. The awk tracks the current author key by indent.
+    local rows
+    rows="$(awk '
+        function strip(s) {
+            gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s
+        }
+        function unquote(s,   t) {
+            t = s
+            if (t ~ /^".*"$/) { sub(/^"/, "", t); sub(/"$/, "", t) }
+            else if (t ~ /^'"'"'.*'"'"'$/) { sub(/^'"'"'/, "", t); sub(/'"'"'$/, "", t) }
+            return t
+        }
+        # Strip a trailing comment (no # inside the simple values we accept).
+        { sub(/[ \t]+#.*$/, "") }
+        /^[ \t]*$/ { next }
+        {
+            # Compute indent (leading spaces).
+            line = $0
+            n = 0
+            while (substr(line, n + 1, 1) == " ") n++
+            content = strip(line)
+        }
+        # Top-level keys (indent 0): authors:, default_assignee:, schema_version:
+        n == 0 {
+            if (content ~ /^authors:/) { in_authors = 1; cur = ""; next }
+            if (content ~ /^default_assignee:/) {
+                in_authors = 0
+                v = content; sub(/^default_assignee:[ \t]*/, "", v); v = strip(v)
+                printf "D\t%s\n", v
+                next
+            }
+            in_authors = 0
+            next
+        }
+        # An author email key (indent 2): "<email>:" with no value after the colon.
+        in_authors && n <= 2 {
+            ci = index(content, ":")
+            key = strip(substr(content, 1, ci - 1))
+            cur = unquote(key)
+            next
+        }
+        # An author field (indent >= 4): accountId: / handle:
+        in_authors && cur != "" && n >= 4 {
+            ci = index(content, ":")
+            fld = strip(substr(content, 1, ci - 1))
+            val = strip(substr(content, ci + 1))
+            if (fld == "accountId" || fld == "handle") {
+                printf "A\t%s\t%s\t%s\n", cur, fld, val
+            }
+            next
+        }
+    ' "$path")"
+
+    printf '%s\n' "$rows" | jq -Rs '
+        def toval(raw): if (raw == "null" or raw == "") then null
+                        else (raw | ltrimstr("\"") | rtrimstr("\"")
+                                  | ltrimstr("'"'"'") | rtrimstr("'"'"'")) end;
+        reduce (split("\n")[] | select(length > 0) | split("\t")) as $r
+          ( {authors: {}, default_assignee: null};
+            if $r[0] == "D" then .default_assignee = toval($r[1])
+            elif $r[0] == "A" then
+              .authors[$r[1]] = ((.authors[$r[1]] // {}) + { ($r[2]): toval($r[3]) })
+            else . end )
+    '
+}
+
+# jira_sink::_author_accountId <loaded_json> <email>
+#   Echo the mapped accountId for <email>, or empty (rc 0) when the author is
+#   absent OR mapped with a null accountId (label-only, the non-Jira-user case).
+jira_sink::_author_accountId() {
+    local loaded="${1:-}" email="${2:-}"
+    printf '%s' "$loaded" | jq -r --arg e "$email" \
+        '.authors[$e].accountId // empty' 2>/dev/null || true
+}
+
+# jira_sink::_author_handle <loaded_json> <email>
+#   Echo the non-PII handle for <email> on rc 0. rc 1 (empty) when the author is
+#   UNKNOWN (not in the map) OR is mapped but missing a `handle` — a config error
+#   surfaced to the operator, NEVER a PII email fallback (FR-004).
+jira_sink::_author_handle() {
+    local loaded="${1:-}" email="${2:-}"
+    local handle
+    handle="$(printf '%s' "$loaded" | jq -r --arg e "$email" \
+        '.authors[$e].handle // empty' 2>/dev/null || true)"
+    if [[ -n "$handle" ]]; then
+        printf '%s\n' "$handle"
+        return 0
+    fi
+    # Known author with no handle → config error (caller surfaces it); unknown
+    # author → graceful no-op. Either way: no label token.
+    return 1
+}
+
 # -----------------------------------------------------------------------------
 # Feature 002 — mapping-driven level projection (US1/T013).
 #

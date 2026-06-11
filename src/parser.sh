@@ -432,3 +432,44 @@ parser::clarify_session_bullets() {
         in_section && in_session && /^- / { print }
     ' "$spec_md"
 }
+
+# ---------------------------------------------------------------------------
+# parser::spec_author <spec_md_path>          (feature-007 — FR-001, R1)
+#
+# Echoes the value of the FIRST `Owner:` or `Author:` line in the spec's top
+# matter (case-insensitive on the key), with a leading `**`/`__` bold marker
+# stripped and surrounding whitespace trimmed. Empty output (exit 0) when no
+# such line exists or the file is absent — the caller then falls back to the
+# git first-add author (workstate::_author_json).
+#
+# Vendor-neutral: this is a pure markdown read of an explicit author line; it
+# carries NO Jira account/issue-type vocabulary (the resolved value is a free
+# string — an email or an explicit owner/author name).
+# ---------------------------------------------------------------------------
+parser::spec_author() {
+    local spec_md="$1"
+    [[ -f "$spec_md" ]] || return 0
+    awk '
+        # Match a leading optional bold marker, then Owner|Author, a colon, and
+        # the value. Case-insensitive via tolower() on a normalized prefix.
+        {
+            line = $0
+            # Strip a leading bold marker (** or __) so "**Owner**:" matches.
+            sub(/^[[:space:]]*(\*\*|__)?/, "", line)
+            key = line
+            # Take the substring up to the first colon as the key candidate.
+            ci = index(line, ":")
+            if (ci == 0) next
+            key = substr(line, 1, ci - 1)
+            # Drop a trailing bold marker on the key ("Owner**").
+            sub(/(\*\*|__)$/, "", key)
+            sub(/[[:space:]]+$/, "", key)
+            if (tolower(key) == "owner" || tolower(key) == "author") {
+                value = substr(line, ci + 1)
+                sub(/^[[:space:]]+/, "", value)
+                sub(/[[:space:]]+$/, "", value)
+                if (value != "") { print value; exit }
+            }
+        }
+    ' "$spec_md"
+}

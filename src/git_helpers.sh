@@ -481,6 +481,35 @@ git_helpers::spec_dir_last_commit() {
 }
 
 # ---------------------------------------------------------------------------
+# git_helpers::spec_first_author <spec_dir>          (feature-007 — FR-001, R1)
+#
+# Echoes the author EMAIL of the FIRST commit that ADDED the spec dir — "who
+# started it", stable across later edits. Empty output (exit 0) when the dir has
+# no git history, is not under a git repo, or git is unavailable. This is the
+# git fallback for author resolution (used only when no explicit `Owner:`/
+# `Author:` line is present).
+#
+# `git log --diff-filter=A --reverse --format='%ae' -- <dir>/ | head -1` lists
+# the ADD commits oldest-first; the first line is the first-add author's email.
+#
+# Vendor-neutral: a pure git read producing a free-string email — no Jira
+# vocabulary.
+# ---------------------------------------------------------------------------
+git_helpers::spec_first_author() {
+  local spec_dir="${1:-}"
+  if [[ -z "$spec_dir" ]]; then
+    return 0
+  fi
+  local git_bin="${_GIT_HELPERS_GIT_BIN:-git}"
+  local email=''
+  email=$("$git_bin" log --diff-filter=A --reverse --format='%ae' \
+    -- "${spec_dir%/}/" 2>/dev/null | head -1 || true)
+  if [[ -n "$email" ]]; then
+    printf '%s\n' "$email"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # git_helpers::worktrees_touching_spec <feature_number>
 #                                          (spec 003 — recency-comparison §4)
 #

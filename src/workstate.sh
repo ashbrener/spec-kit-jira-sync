@@ -37,6 +37,15 @@ _WORKSTATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=src/parser.sh disable=SC1091
 . "${_WORKSTATE_DIR}/parser.sh"
 
+# The neutral author floor (feature-007) needs the git first-add author helper.
+# Source it only when not already present so the engine's own sourcing order
+# (config→git_helpers→parser→workstate) is unaffected; a standalone consumer
+# (a unit test sourcing only workstate.sh) still gets the helper.
+if ! declare -F git_helpers::spec_first_author >/dev/null 2>&1; then
+    # shellcheck source=src/git_helpers.sh disable=SC1091
+    . "${_WORKSTATE_DIR}/git_helpers.sh"
+fi
+
 # Schema version this producer targets (data-model.md §1).
 WORKSTATE_SCHEMA_VERSION="${WORKSTATE_SCHEMA_VERSION:-0.1.0}"
 
@@ -262,6 +271,46 @@ workstate::_links_json() {
 }
 
 # ---------------------------------------------------------------------------
+# workstate::_author_json <spec_dir>          (feature-007 — FR-001, R1/R2)
+#
+# Resolves ONE author for the spec and echoes a NEUTRAL `{value, source}` JSON
+# object (or `{}` when unknown). Priority order (R1):
+#   1. an explicit `Owner:`/`Author:` line in spec.md → source "owner_line";
+#   2. else the git first-add author of the spec dir   → source "git_first_add";
+#   3. else `{}` (unknown — the item omits .author; no label/assignee, graceful).
+#
+# Vendor-neutral floor field: `value` is a free string (an email or an owner
+# string), `source` a producer-owned enum — NO Jira account id / handle (the
+# sink does the email→accountId/handle mapping). Built with jq (no splicing).
+# ---------------------------------------------------------------------------
+workstate::_author_json() {
+    local spec_dir="${1%/}"
+    local spec_md="${spec_dir}/spec.md"
+
+    local value="" source=""
+    # 1. Explicit Owner:/Author: line (authoritative, account-independent).
+    if [[ -s "$spec_md" ]]; then
+        value="$(parser::spec_author "$spec_md")"
+    fi
+    if [[ -n "$value" ]]; then
+        source="owner_line"
+    else
+        # 2. git first-add author of the spec dir.
+        value="$(git_helpers::spec_first_author "$spec_dir")"
+        if [[ -n "$value" ]]; then
+            source="git_first_add"
+        fi
+    fi
+
+    # 3. Unknown → emit an empty object (the item omits .author).
+    if [[ -z "$value" ]]; then
+        printf '{}'
+        return 0
+    fi
+    jq -cn --arg v "$value" --arg s "$source" '{value: $v, source: $s}'
+}
+
+# ---------------------------------------------------------------------------
 # workstate::_phase_child <feature_number> <phase_index> <phase_name> <tasks_md>
 #
 # Emits the JSON object for one task-phase child (kind="task") on stdout:
@@ -385,6 +434,10 @@ workstate::item_for_spec() {
     [[ -n "$notes_json" ]] || notes_json='[]'
     links_json="$(workstate::_links_json "$spec_dir")"
     [[ -n "$links_json" ]] || links_json='[]'
+    # Neutral author floor (feature-007): {value, source}, or {} when unknown.
+    local author_json
+    author_json="$(workstate::_author_json "$spec_dir")"
+    [[ -n "$author_json" ]] || author_json='{}'
 
     # Build the children[] array from the task phases (may be empty).
     local children_json='[]'
@@ -414,6 +467,7 @@ workstate::item_for_spec() {
         --arg last_commit_iso "$last_commit_iso" \
         --argjson notes "$notes_json" \
         --argjson links "$links_json" \
+        --argjson author "$author_json" \
         --argjson children "$children_json" \
         '{
             id: $id,
@@ -430,7 +484,8 @@ workstate::item_for_spec() {
             notes: $notes,
             children: $children
         }
-        + (if $body == "" then {} else { body: $body } end)'
+        + (if $body == "" then {} else { body: $body } end)
+        + (if ($author | length) == 0 then {} else { author: $author } end)'
 }
 
 # ---------------------------------------------------------------------------
