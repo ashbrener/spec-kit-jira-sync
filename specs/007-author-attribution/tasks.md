@@ -121,7 +121,7 @@ assignee and no `author:*` label.
 - [x] T025 [P] `CHANGELOG.md` `[Unreleased] → ### Added`: author-based attribution (two-track: author label always + assignee on create; opt-in; gitignored map).
 - [x] T026 Confirm the **003 neutrality gate** + the existing suite are unchanged (no regression in the spec sync's non-attribution path; off-by-default byte-identical).
 - [x] T027 Run `scripts/check.sh` to green at CI parity (move `.specify/extensions/jira/jira-config.yml` + `tests/.private-deny` aside): shellcheck, yamllint relaxed, markdownlint, full bats. Fix any lint.
-- [ ] T028 **Rebase 007 onto post-005 `main`** (once #12 merges) to absorb 005's `jira_sink.sh`/`reconcile.sh` changes, re-run the gate, then open the `007 → main` PR (body notes Linear FR-034 parity + the gitignored authors map + no-amendment Constitution result + the separate workstate-schema author-field change).
+- [x] T028 **Rebase 007 onto post-005 `main`** (once #12 merges) to absorb 005's `jira_sink.sh`/`reconcile.sh` changes, re-run the gate, then open the `007 → main` PR (body notes Linear FR-034 parity + the gitignored authors map + no-amendment Constitution result + the separate workstate-schema author-field change). **PR #13 opened** with all those notes; the actual rebase onto post-005 `main` is DEFERRED until #12 merges (the two touch different functions — likely clean) and is called out in the PR body as a pre-merge step.
 
 ---
 
