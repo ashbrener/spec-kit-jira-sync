@@ -43,7 +43,7 @@ byte-identical (US4 anchor). Privacy IX is a hard gate.
 - [ ] T007 [P] Unit `tests/unit/attribution_config.bats`: `config` accessors for `attribution.{enabled,assignee,label,author_source,authors_file}`; absent block ⇒ disabled (default OFF).
 - [ ] T008 Implement `parser::spec_author <spec_md>` in `src/parser.sh` (neutral) — makes T005(a) green.
 - [ ] T009 Implement `git_helpers::spec_first_author <spec_dir>` in `src/git_helpers.sh` (`git log --diff-filter=A --reverse --format='%ae' -- <dir>/ | head -1`; empty on no-git) — makes T005(b) green.
-- [ ] T010 Implement `workstate::_author_json <spec_dir>` in `src/workstate.sh` and wire `item.author` into `item_for_spec` (neutral floor; Owner-first-else-git). Depends on T008, T009.
+- [ ] T010 Implement `workstate::_author_json <spec_dir>` in `src/workstate.sh` and wire `item.author` into `item_for_spec` (neutral floor; Owner-first-else-git). Depends on T008, T009. **(analyze M1 — the flow to the sink)** Because `sync_level_artifact` consumes the *neutral* `compose_payload` output (not the raw item), `reconcile::compose_payload spec` MUST also pass `author {value,source}` through (a neutral string + source enum — audited-gate-safe, no Jira vocab) so the sink's create branch can read `input.author`. Thread it there, not via a side-channel.
 - [ ] T011 Implement the `attribution.*` config accessors in `src/config.sh` — makes T007 green.
 - [ ] T012 Implement `jira_sink::_load_authors <path>` in `src/jira_sink.sh` (parse the gitignored map; absent → empty) — makes T006 green.
 - [ ] T013 Confirm the engine/parser path is vendor-neutral: author resolution + the `author` floor carry no Jira account/issue-type vocabulary; the gate (`engine_vendor_neutral.bats`) stays green (parser/git_helpers/workstate aren't audited engine fns; the reconcile threading is neutral).
@@ -62,7 +62,7 @@ create payload carries `fields.assignee.accountId` and the labels include
 `author:<handle>`.
 
 - [ ] T014 [P] [US1] Integration `tests/integration/attr_us1_assignee_label.bats`: attribution enabled, author mapped to an accountId+handle → on CREATE the spec issue's payload has `fields.assignee.accountId` AND `author:<handle>` in labels (AS-1, SC-001); an `Owner:` line overrides the git author (AS-2).
-- [ ] T015 [US1] Implement attribution in the spec-level sync (`src/jira_sink.sh`) + thread `item.author` through `src/reconcile.sh`: on CREATE set `fields.assignee.accountId` when resolvable; add `author:<handle>` to the desired labels; emit the author+source summary row (FR-001/FR-002/FR-004). Depends on T010–T012.
+- [ ] T015 [US1] Implement attribution in the spec-level sync (`src/jira_sink.sh`): read `input.author` (from `compose_payload`, per T010); load the authors map; on the ABSENT→**CREATE** branch inject `fields.assignee.accountId` when the author maps to a non-null accountId (the create-only gate — `JIRA_SINK_LEVEL_DISPOSITION` is the create signal); extend the composed `labels_json` with `author:<handle>` (the sink resolves value→handle from the map — the neutral payload never holds the handle); emit the author+source summary row (FR-001/FR-002/FR-004). Depends on T010–T012. **(analyze M2)** Attribution applies at the spec→Task level only; the optional epic/phase **label-inheritance toggle** (FR-005 second half) is OUT of MVP scope (default spec-level only) — note it as a future stretch, do not implement now.
 
 **Checkpoint**: US1 MVP — mapped authors are assigned + labelled on create.
 
