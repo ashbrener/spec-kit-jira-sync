@@ -1472,6 +1472,20 @@ reconcile::sync_clarify_comments() {
     sync_clarify_comments "$spec_issue_id" "$item_json"
 }
 
+# reconcile::sync_decision_records <spec_issue_id> <item_json>
+#   Mirror (idempotently, at-most-once) the spec's research.md decision records
+#   (ADRs) as comments on its spec Issue. The neutral workstate item carries the
+#   records on `extensions.decisions[]`; the sink derives a STABLE id-based hidden
+#   marker per ADR so a re-run finds the existing comment and skips it. Thin
+#   pass-through — the sink owns the at-most-once create (mirrors the clarify
+#   wrapper; vendor-neutral, no Jira literals here).
+reconcile::sync_decision_records() {
+    local spec_issue_id="$1"
+    local item_json="$2"
+
+    sync_decision_records "$spec_issue_id" "$item_json"
+}
+
 # =============================================================================
 # Drift machinery (PURE comparator + ladder).
 #
@@ -2163,6 +2177,18 @@ reconcile::process_spec() {
                 reconcile::promote_exit 1
             fi
         fi
+
+        _us4_rc=0
+        reconcile::sync_decision_records "$spec_issue_id" "$_us4_item" || _us4_rc=$?
+        if (( _us4_rc != 0 )); then
+            if (( _us4_rc == 3 )); then
+                summary::add error "spec ${feature_number}: decision records unreadable — fail-closed, ADR comments not reconciled (Jira may be incomplete)"
+                reconcile::promote_exit 3
+            else
+                summary::add error "spec ${feature_number}: decision record write failed — an ADR was not mirrored (Jira may be incomplete)"
+                reconcile::promote_exit 1
+            fi
+        fi
     fi
 
     # --- Status rollup: phase Subtasks (US4; off by default) ----------
@@ -2281,8 +2307,9 @@ reconcile::process_workstate_item() {
         done
     fi
 
-    # Cross-spec dependency links + clarify comments (idempotent at-most-once),
-    # driven straight off the supplied item's links[]/notes[].
+    # Cross-spec dependency links + clarify comments + decision records (ADRs),
+    # all idempotent at-most-once, driven straight off the supplied item's
+    # links[]/notes[]/extensions.decisions[].
     local _lrc=0
     reconcile::sync_inter_phase_blocks "$spec_issue_id" "$item_json" || _lrc=$?
     if (( _lrc != 0 )); then
@@ -2293,6 +2320,12 @@ reconcile::process_workstate_item() {
     reconcile::sync_clarify_comments "$spec_issue_id" "$item_json" || _lrc=$?
     if (( _lrc != 0 )); then
         summary::add error "item ${feature_number}: clarify comments ${_lrc} (Jira may be incomplete)"
+        reconcile::promote_exit "$(( _lrc == 3 ? 3 : 1 ))"
+    fi
+    _lrc=0
+    reconcile::sync_decision_records "$spec_issue_id" "$item_json" || _lrc=$?
+    if (( _lrc != 0 )); then
+        summary::add error "item ${feature_number}: decision records ${_lrc} (Jira may be incomplete)"
         reconcile::promote_exit "$(( _lrc == 3 ? 3 : 1 ))"
     fi
 

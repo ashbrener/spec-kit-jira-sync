@@ -10,6 +10,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **ADR / decision-record mirroring** — each spec's decision records (ADRs) in
+  its `research.md` are now mirrored as **idempotent comments on that spec's Jira
+  issue**, reusing the existing non-task-artifact → comment machinery (the same
+  path that mirrors `## Clarifications` sessions). The parser
+  (`parser::decision_records`) tolerantly extracts each decision block from the
+  stock `/speckit-plan` Phase-0 format — pulling Decision / Rationale /
+  Alternatives by case-insensitive label (`**Decision**:`, `- Decision:`,
+  `Decision —`, …) and deriving a stable id from the heading (`D1` / `R5` /
+  `ADR-3`, else a title slug). The records ride on the neutral
+  `extensions.decisions[]` floor extension (Principle X — the schema's escape
+  hatch, so the document stays Draft-2020-12 valid). The sink
+  (`sync_decision_records`) posts ONE comment per ADR carrying a stable
+  id-based hidden marker `[speckit-adr:<spec>-<id>]`, so a re-run finds the
+  marker and skips (at-most-once); an unreadable comment read fails closed
+  (rc 3) and `DRY_RUN` writes nothing.
+
 ## [0.2.0] - 2026-06-08
 
 ### Added

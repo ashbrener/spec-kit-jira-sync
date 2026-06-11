@@ -1463,6 +1463,105 @@ sync_clarify_comments() {
     return 0
 }
 
+# jira_sink::_adr_marker <spec_num> <decision_id>
+#   Echo the STABLE id-based hidden marker for one decision record (ADR). Shape:
+#   `[speckit-adr:<spec_num>-<id>]` — embedded as a trailing text run in the
+#   comment ADF so query_existing_comment_body can substring-match it on re-run.
+#   Unlike the clarify-note marker (a content hash), the ADR marker is keyed by
+#   the decision's STABLE id (e.g. D1/R5/ADR-3), so editing an ADR's body never
+#   spawns a duplicate comment — the same ADR is mirrored at most once forever.
+jira_sink::_adr_marker() {
+    local spec_num="${1:-}" decision_id="${2:-}"
+    printf '[speckit-adr:%s-%s]' "$spec_num" "$decision_id"
+}
+
+# sync_decision_records <issue_key> <item_json>
+#   Mirror each of the spec's research.md decision records (ADRs, carried on the
+#   neutral item's `extensions.decisions[]`) as ONE comment on the spec Issue,
+#   idempotently and at-most-once:
+#     1. Compute the ADR's STABLE id-based marker `[speckit-adr:<spec>-<id>]`.
+#     2. query_existing_comment_body(key, marker) — PRESENT → SKIP (already
+#        mirrored on a prior run; at-most-once).
+#     3. ABSENT → render the ADR body (title + Decision/Rationale/Alternatives),
+#        append the hidden marker as a trailing paragraph, mutate_comment_create.
+#   An unreadable comment read (rc 3) fails closed for the whole call — exactly
+#   like sync_clarify_comments (we cannot prove the ADR is absent, so a blind
+#   post could duplicate it). A decision with no `decision` text is skipped.
+#   Honors DRY_RUN via mutate_comment_create (no write). Returns 0 on success.
+#
+#   The spec number for the marker is read from the item's `speckit-spec:NNN`
+#   identity label (falling back to the bare item id when absent), so the marker
+#   is stable across runs and unique per (spec, decision).
+sync_decision_records() {
+    local issue_key="${1:-}" item_json="${2:-}"
+
+    local decisions_count i spec_num
+    decisions_count="$(printf '%s' "$item_json" \
+        | jq -r '(.extensions.decisions // []) | length' 2>/dev/null || printf '0')"
+    [[ "$decisions_count" =~ ^[0-9]+$ ]] || decisions_count=0
+    (( decisions_count > 0 )) || return 0
+
+    # Spec number from the identity label `speckit-spec:NNN` (else bare item id).
+    spec_num="$(printf '%s' "$item_json" | jq -r '
+        ((.labels // []) | map(select(startswith("speckit-spec:")))[0] // "")
+        | sub("^speckit-spec:"; "")
+    ' 2>/dev/null || printf '')"
+    if [[ -z "$spec_num" ]]; then
+        spec_num="$(printf '%s' "$item_json" | jq -r '.id // ""' 2>/dev/null || printf '')"
+    fi
+
+    for (( i = 0; i < decisions_count; i++ )); do
+        local dec dec_id dec_title dec_decision dec_rationale dec_alternatives
+        dec="$(printf '%s' "$item_json" | jq -c --argjson n "$i" '.extensions.decisions[$n]' 2>/dev/null)"
+        dec_id="$(printf '%s' "$dec" | jq -r '.id // ""' 2>/dev/null || printf '')"
+        dec_title="$(printf '%s' "$dec" | jq -r '.title // ""' 2>/dev/null || printf '')"
+        dec_decision="$(printf '%s' "$dec" | jq -r '.decision // ""' 2>/dev/null || printf '')"
+        dec_rationale="$(printf '%s' "$dec" | jq -r '.rationale // ""' 2>/dev/null || printf '')"
+        dec_alternatives="$(printf '%s' "$dec" | jq -r '(.alternatives // "") | if type == "array" then join("; ") else . end' 2>/dev/null || printf '')"
+
+        # Skip a record with no Decision text and no id (nothing stable to key on).
+        [[ -n "$dec_decision" ]] || continue
+        [[ -n "$dec_id" ]] || continue
+
+        local marker
+        marker="$(jira_sink::_adr_marker "$spec_num" "$dec_id")"
+
+        # Idempotency probe. rc 3 (unreadable) fails closed.
+        local existing
+        if ! existing="$(query_existing_comment_body "$issue_key" "$marker")"; then
+            jira_sink::_log "sync_decision_records: comment read for ${issue_key} unreadable; failing closed (rc 3)"
+            return 3
+        fi
+        if [[ -n "$existing" ]]; then
+            # Already mirrored — at-most-once: skip.
+            continue
+        fi
+
+        # Render the ADR body as Markdown, then convert to ADF and append the
+        # hidden marker as a trailing paragraph so a future run finds it.
+        local body
+        body="$(printf 'ADR %s — %s\n\n**Decision:** %s' "$dec_id" "$dec_title" "$dec_decision")"
+        [[ -n "$dec_rationale" ]] && body="$(printf '%s\n\n**Rationale:** %s' "$body" "$dec_rationale")"
+        [[ -n "$dec_alternatives" ]] && body="$(printf '%s\n\n**Alternatives:** %s' "$body" "$dec_alternatives")"
+
+        local doc marked_doc
+        doc="$(adf::from_markdown "$body")"
+        marked_doc="$(jq -cn --argjson d "$doc" --arg m "$marker" '
+            .version = $d.version
+            | .type = $d.type
+            | .content = ($d.content + [
+                {type:"paragraph", content:[{type:"text", text:$m}]}
+              ])
+        ' 2>/dev/null)" || marked_doc="$doc"
+
+        if ! mutate_comment_create "$issue_key" "$marked_doc" >/dev/null; then
+            jira_sink::_log "sync_decision_records: comment create for ${issue_key} failed"
+            return 1
+        fi
+    done
+    return 0
+}
+
 # sync_inter_phase_blocks <story_key> <item_json>
 #   For each cross-spec dependency link on the spec item (rel `depends_on` or
 #   `blocks`) whose target resolves to a mirrored spec Story, POST /issueLink —

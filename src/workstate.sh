@@ -213,6 +213,54 @@ workstate::_notes_json() {
 }
 
 # ---------------------------------------------------------------------------
+# workstate::_decisions_json <spec_dir>
+#
+# Builds the spec's decision records (ADRs) from its `research.md` via
+# parser::decision_records. One object per decision block:
+#   { id, title, decision, rationale, alternatives, source }
+# where `source` is `research.md#<id>` (the back-reference) and `alternatives`
+# is the verbatim "Alternatives rejected" text (a string; empty when absent).
+#
+# This is a vendor-NEUTRAL floor extension (Principle X): it rides on the item's
+# `extensions.decisions[]` (the schema's escape hatch for rich producers,
+# `additionalProperties:true`), so it adds NO new top-level item field and the
+# emitted document stays Draft-2020-12 schema-valid. The sink consumes it to
+# mirror each ADR as an at-most-once spec-Issue comment.
+#
+# Echoes a JSON array (possibly `[]`). Empty when there is no research.md or no
+# decision blocks. Built entirely with jq from the parser's NUL/US-framed stream
+# (no string splicing) so multi-line values are always well-formed JSON.
+# ---------------------------------------------------------------------------
+workstate::_decisions_json() {
+    local spec_dir="${1%/}"
+    local research_md="${spec_dir}/research.md"
+    [[ -s "$research_md" ]] || { printf '[]'; return 0; }
+
+    # The parser emits NUL-terminated records, fields split by the ASCII Unit
+    # Separator (U+001F): id US title US decision US rationale US alternatives.
+    # Read the raw bytes with --raw-input --slurp, split on NUL, drop the
+    # trailing empty chunk, then split each record on US into the named fields.
+    local out
+    out="$(parser::decision_records "$research_md" \
+        | jq -R -s '
+            [ split("\u0000")[]
+              | select(length > 0)
+              | split("\u001f")
+              | {
+                  id:           (.[0] // ""),
+                  title:        (.[1] // ""),
+                  decision:     (.[2] // ""),
+                  rationale:    (.[3] // ""),
+                  alternatives: (.[4] // ""),
+                  source:       ("research.md#" + (.[0] // ""))
+                }
+            ]
+        ' 2>/dev/null)" || out='[]'
+    [[ -n "$out" ]] || out='[]'
+    printf '%s' "$out"
+}
+
+# ---------------------------------------------------------------------------
 # workstate::_links_json <spec_dir>
 #
 # Builds the item's `links[]` array (typed non-containment relations) from the
@@ -364,7 +412,7 @@ workstate::item_for_spec() {
     fi
 
     local item_id="${feature_number}-${short_name}"
-    local title state body label path last_commit_iso notes_json links_json
+    local title state body label path last_commit_iso notes_json links_json decisions_json
     title="$(workstate::_spec_title "$spec_dir")"
     # Prefer the engine's pre-resolved lifecycle token (it folds in git
     # merge/PR state the filesystem ladder cannot see); otherwise infer from
@@ -385,6 +433,10 @@ workstate::item_for_spec() {
     [[ -n "$notes_json" ]] || notes_json='[]'
     links_json="$(workstate::_links_json "$spec_dir")"
     [[ -n "$links_json" ]] || links_json='[]'
+    # research.md decision records (ADRs) → extensions.decisions[] (neutral floor
+    # extension; the sink mirrors each as an at-most-once spec-Issue comment).
+    decisions_json="$(workstate::_decisions_json "$spec_dir")"
+    [[ -n "$decisions_json" ]] || decisions_json='[]'
 
     # Build the children[] array from the task phases (may be empty).
     local children_json='[]'
@@ -414,6 +466,7 @@ workstate::item_for_spec() {
         --arg last_commit_iso "$last_commit_iso" \
         --argjson notes "$notes_json" \
         --argjson links "$links_json" \
+        --argjson decisions "$decisions_json" \
         --argjson children "$children_json" \
         '{
             id: $id,
@@ -430,7 +483,9 @@ workstate::item_for_spec() {
             notes: $notes,
             children: $children
         }
-        + (if $body == "" then {} else { body: $body } end)'
+        + (if $body == "" then {} else { body: $body } end)
+        + (if ($decisions | length) == 0 then {}
+           else { extensions: { decisions: $decisions } } end)'
 }
 
 # ---------------------------------------------------------------------------

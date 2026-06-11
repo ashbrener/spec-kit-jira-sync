@@ -16,6 +16,7 @@
 #   parser::malformed_task_lines <tasks_md_path>
 #   parser::clarify_sessions <spec_md_path>
 #   parser::clarify_session_bullets <spec_md_path> <date>
+#   parser::decision_records <research_md_path>
 #
 # Implements the filesystem-side parser invariants documented in
 # specs/001-spec-kit-linear-bridge/data-model.md §2.3-2.4 and the
@@ -431,4 +432,125 @@ parser::clarify_session_bullets() {
         in_section && /^### / { in_session = 0; next }
         in_section && in_session && /^- / { print }
     ' "$spec_md"
+}
+
+# ---------------------------------------------------------------------------
+# parser::decision_records <research_md_path>
+#
+# Tolerant extraction of decision records (ADRs) from a spec-kit `research.md`
+# (the stock `/speckit-plan` Phase-0 format). A record is a heading block
+# (any `#`..`######` heading + its body up to the NEXT heading) whose body
+# contains a "Decision" statement; the document-title heading (no Decision)
+# yields nothing. The block's Decision /
+# Rationale / Alternatives values are pulled by case-insensitive label,
+# tolerating the common spec-kit spellings:
+#     **Decision**: …     - Decision: …     Decision — …     **Decision.** …
+#     **Rationale**: …     **Alternatives rejected**: …      Alternatives: …
+# A stable `id` is derived from the heading: an `ADR-\d+` / `R\d+` / `D\d+` /
+# `Decision \d+` token when present (normalised to e.g. `D1`, `R5`, `ADR-3`),
+# else a kebab slug of the heading title.
+#
+# Emits one record per block as a NUL-terminated unit, fields separated by the
+# ASCII Unit Separator (0x1F) in this fixed order:
+#     id  US  title  US  decision  US  rationale  US  alternatives  NUL
+# Decision/Rationale/Alternatives values may span multiple lines (the lines
+# following the label up to the next labelled field / blank line / block end
+# are folded in, newline-joined), so the US/NUL framing — not tabs/newlines —
+# keeps records intact. Blocks WITHOUT a Decision statement emit nothing.
+#
+# Robustness contract:
+#   * no research.md            → rc 0, empty output
+#   * research.md, no decisions → rc 0, empty output
+#   * multi-line values         → preserved (newline-joined within a field)
+# ---------------------------------------------------------------------------
+parser::decision_records() {
+    local research_md="$1"
+    [[ -f "$research_md" ]] || return 0
+    awk '
+        function trim(s) {
+            gsub(/^[[:space:]]+/, "", s)
+            gsub(/[[:space:]]+$/, "", s)
+            return s
+        }
+        # Return the value text after a "<Label><sep>" prefix (optional leading
+        # "- " bullet + "**" emphasis; <sep> = `:` `.` or a dash), else the
+        # sentinel "@@NOLABEL@@" when this line does not open <label>.
+        function strip_label(line, label,    re) {
+            re = "^[[:space:]]*[-*]*[[:space:]]*\\**" toupper(label) "\\**[[:space:]]*([:.]|[-—–])[[:space:]]*"
+            if (match(toupper(line), re)) {
+                return substr(line, RLENGTH + 1)
+            }
+            return "@@NOLABEL@@"
+        }
+        # Derive a stable id token from a heading title.
+        function derive_id(title,    t, m) {
+            t = title
+            if (match(t, /ADR-[0-9]+/))      { return substr(t, RSTART, RLENGTH) }
+            if (match(t, /^[[:space:]]*[RD][0-9]+/)) {
+                m = substr(t, RSTART, RLENGTH); gsub(/[[:space:]]/, "", m); return m
+            }
+            if (match(toupper(t), /DECISION[[:space:]]+[0-9]+/)) {
+                m = substr(t, RSTART, RLENGTH)
+                sub(/[Dd][Ee][Cc][Ii][Ss][Ii][Oo][Nn][[:space:]]+/, "D", m)
+                gsub(/[[:space:]]/, "", m)
+                return m
+            }
+            t = tolower(t)
+            gsub(/[^a-z0-9]+/, "-", t)
+            gsub(/^-+|-+$/, "", t)
+            if (t == "") t = "decision"
+            return t
+        }
+        # Strip a leading id token ("D1." / "R5 —" / "Decision 1 —" / "ADR-3:")
+        # from a heading title so the rendered "ADR <id> — <title>" is not
+        # redundant. Leaves a tokenless title untouched.
+        function clean_title(t) {
+            sub(/^[[:space:]]*(ADR-[0-9]+|[RD][0-9]+|[Dd]ecision[[:space:]]+[0-9]+)[[:space:]]*([:.]|[-—–])[[:space:]]*/, "", t)
+            return trim(t)
+        }
+        function flush(    out) {
+            if (cur_title != "" && cur_decision != "") {
+                out = derive_id(cur_id_src) "\037" clean_title(cur_title) "\037" \
+                      trim(cur_decision) "\037" trim(cur_rationale) "\037" \
+                      trim(cur_alternatives)
+                printf "%s%c", out, 0
+            }
+            cur_title = ""; cur_id_src = ""; cur_decision = ""
+            cur_rationale = ""; cur_alternatives = ""
+            field = ""
+        }
+        function append(field_name, line) {
+            if (field_name == "decision")          cur_decision     = cur_decision     (cur_decision     == "" ? "" : "\n") line
+            else if (field_name == "rationale")    cur_rationale    = cur_rationale    (cur_rationale    == "" ? "" : "\n") line
+            else if (field_name == "alternatives") cur_alternatives = cur_alternatives (cur_alternatives == "" ? "" : "\n") line
+        }
+        /^#{1,6}[[:space:]]/ {
+            # Every heading closes the current candidate block and opens a new
+            # one. A block is one heading + its body until the next heading;
+            # the document-title H1 (no Decision) simply flushes to nothing. This
+            # one-block-per-heading rule matches the stock research.md shape
+            # where each `## Dn` / `### Rn` is its own decision record.
+            title = $0
+            sub(/^#{1,6}[[:space:]]+/, "", title)
+            flush()
+            cur_title = title
+            cur_id_src = title
+            field = ""
+            next
+        }
+        {
+            if (cur_title == "") next
+            v = strip_label($0, "Decision")
+            if (v != "@@NOLABEL@@") { field = "decision"; cur_decision = trim(v); next }
+            v = strip_label($0, "Rationale")
+            if (v != "@@NOLABEL@@") { field = "rationale"; cur_rationale = trim(v); next }
+            v = strip_label($0, "Alternatives rejected")
+            if (v != "@@NOLABEL@@") { field = "alternatives"; cur_alternatives = trim(v); next }
+            v = strip_label($0, "Alternatives")
+            if (v != "@@NOLABEL@@") { field = "alternatives"; cur_alternatives = trim(v); next }
+            if ($0 ~ /^[[:space:]]*$/) { field = ""; next }
+            if (field != "") append(field, trim($0))
+        }
+        END { flush() }
+    ' "$research_md"
 }

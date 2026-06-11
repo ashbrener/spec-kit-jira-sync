@@ -76,6 +76,33 @@ setup() {
   echo "$output" | jq -e '.body | test("neutral `workstate` shape|placeholder spec")'
 }
 
+@test "item_for_spec: carries decision records on extensions.decisions[]" {
+  # A spec dir WITH a research.md (stock format) yields the ADR records on the
+  # neutral extensions.decisions[] floor extension.
+  local sd="$BATS_TEST_TMPDIR/002-with-research"
+  mkdir -p "$sd"
+  cp "$SPEC_DIR/spec.md" "$sd/spec.md"
+  cp "${REPO_ROOT}/tests/fixtures/research/research.md" "$sd/research.md"
+  # Rename the dir-derived feature number to 002 so the id is stable.
+  run workstate::item_for_spec "$sd"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.extensions.decisions | length == 3'
+  echo "$output" | jq -e '.extensions.decisions[0].id == "D1"'
+  echo "$output" | jq -e '.extensions.decisions[0].title == "Storage format for the widget cache"'
+  echo "$output" | jq -e '.extensions.decisions[0].source == "research.md#D1"'
+  echo "$output" | jq -e '.extensions.decisions[0].decision | test("flat JSON file")'
+  echo "$output" | jq -e '.extensions.decisions[1].id == "R5"'
+  echo "$output" | jq -e '.extensions.decisions[2].id == "ADR-3"'
+}
+
+@test "item_for_spec: no research.md → no extensions.decisions (empty/absent)" {
+  # The committed fixture (001-sample) has no research.md, so the item carries
+  # no decisions extension (we omit it rather than emit an empty array).
+  run workstate::item_for_spec "$SPEC_DIR"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '(.extensions.decisions // []) | length == 0'
+}
+
 @test "item_for_spec: each task phase becomes a kind=task child" {
   run workstate::item_for_spec "$SPEC_DIR"
   [ "$status" -eq 0 ]
