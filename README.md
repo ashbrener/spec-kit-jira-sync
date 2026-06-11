@@ -143,6 +143,17 @@ The ADF checklist is today's default. Configurable artifact mapping and a
 **2-level mode** (collapse tasks into a Story-body checklist instead of separate
 Subtask issues) are on the [roadmap](#status--roadmap).
 
+> **Upgrading a multi-spec board?** A bug in earlier builds matched a phase
+> Subtask by its `task-phase:N` label alone — a phase *number* that is unique
+> only within a spec — so across a repo with several specs every spec's "Phase N"
+> collided on the same Subtask. The phase find is now scoped to the parent Story,
+> so each spec mirrors to its own Subtask. A plain `reconcile.sh --all`
+> **self-heals** a mis-scoped board: the collided Subtasks belong to the
+> first-processed spec, which re-matches and corrects them, and every other spec
+> creates its own — no orphans. For a clean slate, prune the old `task-phase:*`
+> Subtasks (or run `--remode`) before re-pushing. See the
+> [CHANGELOG](CHANGELOG.md) for details.
+
 ---
 
 ## Changing the mapping: guarded re-mode (`--remode`)

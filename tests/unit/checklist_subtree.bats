@@ -78,11 +78,15 @@ _tasks() {
   [ "$a" = "$b" ]
 }
 
-@test "render_checklist_subtree: empty task set still yields marker + empty taskList" {
+@test "render_checklist_subtree: empty task set yields marker + paragraph placeholder (NOT a childless taskList — Jira 400)" {
   run adf::render_checklist_subtree '[]'
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.[0].type == "paragraph"'
-  echo "$output" | jq -e '.[1].type == "taskList" and (.[1].content | length == 0)'
+  # Bug-2 guard: an empty array must NOT emit a childless `taskList` (Jira
+  # rejects `content: []` with 400 INVALID_INPUT). The second node is a
+  # non-empty paragraph placeholder instead.
+  echo "$output" | jq -e '.[1].type == "paragraph" and (.[1].content | length > 0)'
+  echo "$output" | jq -e '[ .[] | select(.type == "taskList") ] | length == 0'
 }
 
 @test "render_checklist_subtree: a completion toggle changes only the state attr" {

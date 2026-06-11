@@ -117,10 +117,21 @@ setup() {
   echo "$output" | jq -e '[.content[].attrs.localId] | (length == 2) and (unique | length == 2)'
 }
 
-@test "task_list: empty array yields an empty taskList" {
+@test "task_list: empty array yields a paragraph placeholder (NOT a childless taskList — Jira 400)" {
   run adf::task_list '[]'
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.type == "taskList" and (.content | length == 0)'
+  # Bug-2 guard: a `taskList` with `content: []` is rejected by Jira with 400
+  # INVALID_INPUT. An empty array must render a non-empty paragraph instead.
+  echo "$output" | jq -e '.type == "paragraph" and (.content | length > 0)'
+  echo "$output" | jq -e '.type != "taskList"'
+}
+
+@test "task_list: a taskItem with empty text still has non-empty content (no Jira 400)" {
+  run adf::task_list '[{"text":"","done":false}]'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.type == "taskList"'
+  # The single taskItem must carry non-empty content (a space fallback), never []
+  echo "$output" | jq -e '.content[0].content | length > 0'
 }
 
 @test "task_list: missing 'done' defaults to TODO" {

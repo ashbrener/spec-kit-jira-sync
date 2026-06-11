@@ -261,32 +261,39 @@ adf::task_list() {
   local task_json="$1"
   : "${task_json:=[]}"
 
+  # A `taskList` with `content: []` is rejected by Jira (400 INVALID_INPUT), as
+  # is a `taskItem` whose own `content` is empty. So: when the item array is
+  # empty, emit a valid PARAGRAPH placeholder INSTEAD of a childless taskList;
+  # and give every taskItem a non-empty content (fall back to a single space).
   jq -cn --argjson items "$task_json" '
-    {
-      type: "taskList",
-      attrs: { localId: "tasklist-0" },
-      content: (
-        $items
-        | to_entries
-        | map(
-            .key as $i
-            | .value as $v
-            | {
-                type: "taskItem",
-                attrs: {
-                  localId: ("task-" + ($i | tostring)),
-                  state: (if ($v.done == true) then "DONE" else "TODO" end)
-                },
-                content: (
-                  if (($v.text // "") | length) > 0
-                  then [ { type: "text", text: ($v.text | tostring) } ]
-                  else []
-                  end
-                )
-              }
-          )
-      )
-    }
+    if (($items | length) == 0)
+    then
+      { type: "paragraph",
+        content: [ { type: "text", text: "No tasks in this phase." } ] }
+    else
+      {
+        type: "taskList",
+        attrs: { localId: "tasklist-0" },
+        content: (
+          $items
+          | to_entries
+          | map(
+              .key as $i
+              | .value as $v
+              | (($v.text // "") | tostring) as $t
+              | {
+                  type: "taskItem",
+                  attrs: {
+                    localId: ("task-" + ($i | tostring)),
+                    state: (if ($v.done == true) then "DONE" else "TODO" end)
+                  },
+                  content: [ { type: "text",
+                               text: (if ($t | length) > 0 then $t else " " end) } ]
+                }
+            )
+        )
+      }
+    end
   '
 }
 
@@ -371,31 +378,40 @@ adf::render_checklist_subtree() {
   local tasks_json="${1:-[]}"
   : "${tasks_json:=[]}"
 
+  # Always emit the marker paragraph (the sub-tree delimiter). For the SECOND
+  # node, never emit a childless `taskList` (Jira 400 INVALID_INPUT): when the
+  # task array is empty, render a paragraph placeholder instead; and give every
+  # taskItem non-empty content (fall back to a single space).
   jq -cn --argjson items "$tasks_json" --arg marker "$ADF_CHECKLIST_MARKER" '
     [
       { type: "paragraph",
-        content: [ { type: "text", text: $marker } ] },
-      { type: "taskList",
-        attrs: { localId: "speckit-checklist" },
-        content: (
-          $items
-          | map(
-              {
-                type: "taskItem",
-                attrs: {
-                  localId: ("task-" + ((.id // "") | tostring)),
-                  state: (if (.done == true) then "DONE" else "TODO" end)
-                },
-                content: (
-                  if (((.text // "") | tostring | length) > 0)
-                  then [ { type: "text", text: (.text | tostring) } ]
-                  else []
-                  end
-                )
-              }
-            )
-        )
-      }
+        content: [ { type: "text", text: $marker } ] }
     ]
+    + (
+      if (($items | length) == 0)
+      then
+        [ { type: "paragraph",
+            content: [ { type: "text", text: "No tasks in this phase." } ] } ]
+      else
+        [ { type: "taskList",
+            attrs: { localId: "speckit-checklist" },
+            content: (
+              $items
+              | map(
+                  (((.text // "") | tostring)) as $t
+                  | {
+                      type: "taskItem",
+                      attrs: {
+                        localId: ("task-" + ((.id // "") | tostring)),
+                        state: (if (.done == true) then "DONE" else "TODO" end)
+                      },
+                      content: [ { type: "text",
+                                   text: (if ($t | length) > 0 then $t else " " end) } ]
+                    }
+                )
+            )
+          } ]
+      end
+    )
   '
 }
