@@ -46,19 +46,18 @@ internally. This repo is also the independent second consumer that proves
   email→accountId map (dynamic resolution is GDPR-impossible). Opt-in, default OFF
   = byte-identical. Additive (no amendment); Privacy IX + 003 neutrality gate are
   the hard gates. Spec+clarify+plan done. Plan: `specs/007-author-attribution/plan.md`
-- **005-adr-mirroring / 006-consumer-privacy-guard** — ADR comment mirroring
-  (PR #12, green, pending merge) + consumer-side privacy guard (specced+clarified,
-  awaiting plan). Plans under their `specs/` dirs.
+- **005-adr-mirroring** — ADR comment mirroring: each spec's `research.md`
+  decision records (Decision/Rationale/Alternatives) mirrored as idempotent
+  comments on the spec's Jira issue. Merged to main (PR #12); neutral
+  `workstate.decisions[]` floor field. Plan: `specs/005-adr-mirroring/plan.md`
+- **006-consumer-privacy-guard** — consumer-side privacy guard
+  (specced+clarified, awaiting plan). Plan under its `specs/` dir.
 - **Engine extraction** (next-big) — carve the now-vendor-neutral engine into a
   shared lib with spec-kit-linear, unblocked by 003's neutrality gate.
 - **004-mapping-remode** — guarded, opt-in re-mode / orphan pruning: `--remode`
-  prunes the bridge-owned orphans the current mapping no longer projects (orphans
-  = E\D over `speckit-*` identity labels) and regenerates the new shape. Fail-safe
-  scoping (never touch operator issues), `--remode --dry-run` preview, fail-closed
-  reads, default hard-delete (archive optional). Introduced controlled destruction
-  via constitution **v1.1.0** carve-out. Merged to main (PR #7); 417-test suite
-  green. Known follow-up: sink-side Initiative-toggle type-awareness (T017).
-  Plan: `specs/004-mapping-remode/plan.md`
+  prunes the bridge-owned orphans the current mapping no longer projects and
+  regenerates. Controlled destruction via constitution v1.1.0 carve-out. Merged
+  to main (PR #7); 417-test suite green. Plan: `specs/004-mapping-remode/plan.md`
 - **003-engine-orchestration-unification** — behavior-preserving re-platforming:
   the 001-era orchestrators replaced by one neutral mapping-driven level loop,
   deleted, with an enforced vendor-neutral engine path (extraction prerequisite).

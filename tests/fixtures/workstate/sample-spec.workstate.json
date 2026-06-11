@@ -20,6 +20,7 @@
       },
       "links": [],
       "notes": [],
+      "decisions": [],
       "children": [
         {
           "id": "001-phase-1",
@@ -88,6 +89,7 @@
           "body": "### Session 2026-05-20\n\n- Q: Does the bridge mirror a clarify session as a comment? A: Yes, at most once.\n- Q: What anchors the dedup on re-run? A: A stable hidden marker on the comment."
         }
       ],
+      "decisions": [],
       "children": [
         {
           "id": "002-phase-1",
@@ -109,6 +111,117 @@
         "value": "dev-updates@example.com",
         "source": "owner_line"
       }
+    },
+    {
+      "id": "005-adr-bold",
+      "title": "Bold-lead ADR fixture",
+      "kind": "spec",
+      "state": "specifying",
+      "labels": [
+        "speckit-spec:005"
+      ],
+      "item_source": {
+        "path": "tests/fixtures/specs/005-adr-bold/",
+        "last_commit_iso": "2026-05-31T12:00:00+00:00"
+      },
+      "links": [],
+      "notes": [],
+      "decisions": [
+        {
+          "id": "R1",
+          "title": "Storage engine choice",
+          "decision": "Use the embedded store; no external service.\nA second line of decision prose to prove multi-line values are kept.",
+          "rationale": "Keeps the deploy single-binary and offline-friendly.",
+          "alternatives": "A hosted database — rejected (adds an ops surface).",
+          "source": "research.md#R1"
+        },
+        {
+          "id": "caching-layer",
+          "title": "Caching layer",
+          "decision": "Cache read paths in-process with a bounded LRU.",
+          "rationale": "The hot reads dominate; a bounded cache caps memory.",
+          "source": "research.md#caching-layer"
+        }
+      ],
+      "children": [],
+      "body": "Fixture for the ADR parser (bold-lead form)."
+    },
+    {
+      "id": "006-adr-bullet",
+      "title": "Bullet-label ADR fixture",
+      "kind": "spec",
+      "state": "specifying",
+      "labels": [
+        "speckit-spec:006"
+      ],
+      "item_source": {
+        "path": "tests/fixtures/specs/006-adr-bullet/",
+        "last_commit_iso": "2026-05-31T12:00:00+00:00"
+      },
+      "links": [],
+      "notes": [],
+      "decisions": [
+        {
+          "id": "D2",
+          "title": "Transport protocol",
+          "decision": "Speak HTTP/2 to the upstream.",
+          "rationale": "Multiplexing cuts head-of-line blocking on the fan-out.",
+          "alternatives": "HTTP/1.1 keep-alive — rejected (connection storms).",
+          "source": "research.md#D2"
+        },
+        {
+          "id": "retry-policy",
+          "title": "Retry policy",
+          "decision": "Retry idempotent reads with capped exponential backoff.",
+          "rationale": "Smooths transient upstream blips without a thundering herd.",
+          "source": "research.md#retry-policy"
+        },
+        {
+          "id": "retry-policy-2",
+          "title": "Retry policy",
+          "decision": "A second un-headed block sharing the same title slug.",
+          "rationale": "Proves positional disambiguation keeps both keys distinct.",
+          "source": "research.md#retry-policy-2"
+        }
+      ],
+      "children": [],
+      "body": "Fixture for the ADR parser (bullet/plain label form)."
+    },
+    {
+      "id": "007-adr-empty",
+      "title": "No-decisions ADR fixture",
+      "kind": "spec",
+      "state": "specifying",
+      "labels": [
+        "speckit-spec:007"
+      ],
+      "item_source": {
+        "path": "tests/fixtures/specs/007-adr-empty/",
+        "last_commit_iso": "2026-05-31T12:00:00+00:00"
+      },
+      "links": [],
+      "notes": [],
+      "decisions": [],
+      "children": [],
+      "body": "Fixture proving graceful no-op when research.md has no decisions."
+    },
+    {
+      "id": "008-adr-noresearch",
+      "title": "No-research ADR fixture",
+      "kind": "spec",
+      "state": "specifying",
+      "labels": [
+        "speckit-spec:008"
+      ],
+      "item_source": {
+        "path": "tests/fixtures/specs/008-adr-noresearch/",
+        "last_commit_iso": "2026-05-31T12:00:00+00:00"
+      },
+      "links": [],
+      "notes": [],
+      "decisions": [],
+      "children": [],
+      "body": "Fixture proving graceful no-op when research.md is absent."
     }
   ]
 }

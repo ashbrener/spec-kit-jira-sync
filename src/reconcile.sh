@@ -1505,6 +1505,29 @@ reconcile::sync_clarify_comments() {
     sync_clarify_comments "$spec_issue_id" "$item_json"
 }
 
+# reconcile::sync_decision_records <spec_issue_id> <item_json>
+#   Mirror (idempotently) one comment per recorded ADR / decision record
+#   (feature 005). The neutral workstate item carries the decisions on its
+#   `decisions[]`; the sink derives a stable hidden marker per decision so a
+#   re-run finds the existing comment and either skips it (unchanged) or updates
+#   it in place (content changed) — never a duplicate. A thin sink-delegating
+#   wrapper (like reconcile::sync_clarify_comments): the engine carries NO Jira
+#   ADR/comment vocabulary — the marker/ADF/digest mechanics live in the sink.
+reconcile::sync_decision_records() {
+    local spec_issue_id="$1"
+    local item_json="$2"
+
+    # Dry-run of a not-yet-mirrored spec: the create was synthesized to the
+    # placeholder key (DRY-0); reading comments off it would 404 → fail-closed
+    # rc 3 and spuriously escalate the dry-run exit to 3. Skip — the ADR comments
+    # would reconcile on the next real run (same guard as the clarify path).
+    if [[ "$spec_issue_id" == "DRY-0" ]]; then
+        reconcile::log "DRY-RUN: spec not yet mirrored — ADR comments would reconcile after the create"
+        return 0
+    fi
+    sync_decision_records "$spec_issue_id" "$item_json"
+}
+
 # =============================================================================
 # Drift machinery (PURE comparator + ladder).
 #
@@ -2196,6 +2219,20 @@ reconcile::process_spec() {
                 reconcile::promote_exit 1
             fi
         fi
+
+        # ADR / decision-record comments (feature 005) — at-most-once per decision,
+        # update-in-place on a content change. Disjoint marker stream from clarify.
+        _us4_rc=0
+        reconcile::sync_decision_records "$spec_issue_id" "$_us4_item" || _us4_rc=$?
+        if (( _us4_rc != 0 )); then
+            if (( _us4_rc == 3 )); then
+                summary::add error "spec ${feature_number}: ADR comments unreadable — fail-closed, decisions not reconciled (Jira may be incomplete)"
+                reconcile::promote_exit 3
+            else
+                summary::add error "spec ${feature_number}: ADR comment write failed — a decision was not mirrored (Jira may be incomplete)"
+                reconcile::promote_exit 1
+            fi
+        fi
     fi
 
     # --- Status rollup: phase Subtasks (US4; off by default) ----------
@@ -2329,6 +2366,13 @@ reconcile::process_workstate_item() {
     reconcile::sync_clarify_comments "$spec_issue_id" "$item_json" || _lrc=$?
     if (( _lrc != 0 )); then
         summary::add error "item ${feature_number}: clarify comments ${_lrc} (Jira may be incomplete)"
+        reconcile::promote_exit "$(( _lrc == 3 ? 3 : 1 ))"
+    fi
+    # ADR / decision-record comments (feature 005), driven off item.decisions[].
+    _lrc=0
+    reconcile::sync_decision_records "$spec_issue_id" "$item_json" || _lrc=$?
+    if (( _lrc != 0 )); then
+        summary::add error "item ${feature_number}: ADR comments ${_lrc} (Jira may be incomplete)"
         reconcile::promote_exit "$(( _lrc == 3 ? 3 : 1 ))"
     fi
 

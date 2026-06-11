@@ -22,6 +22,12 @@
 # (data-model.md § 2). Auto-discovery of these ids by the seed/install step is a
 # later feature; for now you fill them in by hand (or read them off the project
 # via the Atlassian MCP). See specs/001-core-bridge/dogfood.md.
+#
+# ADR / decision-record mirroring (feature 005) needs NO config: it is additive
+# and on by default. Each spec's research.md Decision/Rationale/Alternatives
+# blocks are mirrored as one idempotent comment per decision on the spec issue
+# (marker `speckit-adr:<spec>-<id>`), updated in place on a content change. A
+# spec with no research.md / no decisions is a graceful no-op.
 jira:
   # The project key (the short prefix in every issue key, e.g. PROJ-123).
   # Find it in Project settings -> Details, or in any issue key in the project.

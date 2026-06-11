@@ -222,6 +222,27 @@ workstate::_notes_json() {
 }
 
 # ---------------------------------------------------------------------------
+# workstate::_decisions_json <spec_dir>
+#
+# Builds the item's neutral `decisions[]` array (ADRs / decision records) from
+# the spec's `research.md` Decision/Rationale/Alternatives blocks via
+# parser::decision_records. One element per block:
+# `{id,title,status?,decision,rationale?,alternatives?,source}` (research R1-R3).
+# These map to at-most-once Jira comments in the sink (feature 005 / FR-011).
+# Echoes a JSON array (possibly `[]`); empty when research.md is absent or has no
+# decision blocks (FR-007). Vendor-neutral floor field (Principle X) — the parser
+# PRODUCES it, the sink CONSUMES it; carries no Jira vocabulary.
+# ---------------------------------------------------------------------------
+workstate::_decisions_json() {
+    local spec_dir="${1%/}"
+    local research_md="${spec_dir}/research.md"
+    local out
+    out="$(parser::decision_records "$research_md")"
+    [[ -n "$out" ]] || { printf '[]'; return 0; }
+    printf '%s' "$out"
+}
+
+# ---------------------------------------------------------------------------
 # workstate::_links_json <spec_dir>
 #
 # Builds the item's `links[]` array (typed non-containment relations) from the
@@ -377,6 +398,7 @@ workstate::_phase_child() {
 #   item_source   { path, last_commit_iso }
 #   links         []   (cross-spec deps; floor placeholder for now)
 #   notes         []   (clarify sessions; floor placeholder for now)
+#   decisions     []   (ADRs / decision records from research.md — feature 005)
 #   children      one per task phase (kind="task")
 #
 # The second arg is accepted for signature symmetry but unused at item level;
@@ -413,7 +435,7 @@ workstate::item_for_spec() {
     fi
 
     local item_id="${feature_number}-${short_name}"
-    local title state body label path last_commit_iso notes_json links_json
+    local title state body label path last_commit_iso notes_json links_json decisions_json
     title="$(workstate::_spec_title "$spec_dir")"
     # Prefer the engine's pre-resolved lifecycle token (it folds in git
     # merge/PR state the filesystem ladder cannot see); otherwise infer from
@@ -438,6 +460,9 @@ workstate::item_for_spec() {
     local author_json
     author_json="$(workstate::_author_json "$spec_dir")"
     [[ -n "$author_json" ]] || author_json='{}'
+    # ADRs / decision records → neutral decisions[] (feature 005, FR-011).
+    decisions_json="$(workstate::_decisions_json "$spec_dir")"
+    [[ -n "$decisions_json" ]] || decisions_json='[]'
 
     # Build the children[] array from the task phases (may be empty).
     local children_json='[]'
@@ -468,6 +493,7 @@ workstate::item_for_spec() {
         --argjson notes "$notes_json" \
         --argjson links "$links_json" \
         --argjson author "$author_json" \
+        --argjson decisions "$decisions_json" \
         --argjson children "$children_json" \
         '{
             id: $id,
@@ -482,6 +508,7 @@ workstate::item_for_spec() {
             ),
             links: $links,
             notes: $notes,
+            decisions: $decisions,
             children: $children
         }
         + (if $body == "" then {} else { body: $body } end)

@@ -856,6 +856,38 @@ mutate_comment_create() {
     }
 }
 
+# mutate_comment_update <issue_key> <comment_id> <body_adf>
+#   PUT /issue/<key>/comment/<id> with `{body: <ADF doc>}` to UPDATE an existing
+#   comment IN PLACE (feature 005, FR-005 — never a second comment). Mirrors
+#   mutate_comment_create: honours DRY_RUN (log + no-op), guards a malformed ADF
+#   body, and logs a failed write with the transport's error detail. Echoes the
+#   updated comment's `{id}` on success. The caller (sync_decision_records) has
+#   already located the comment by its stable marker, so <comment_id> is known.
+mutate_comment_update() {
+    local key="${1:-}" comment_id="${2:-}" body_adf="${3:-}"
+    if jira_sink::_dry_run; then
+        jira_sink::_log "DRY-RUN mutate_comment_update ${key}/${comment_id} (no-op)"
+        printf '{"id":"%s"}\n' "$comment_id"
+        return 0
+    fi
+    # Wrap the ADF body in the comment payload `{body: <doc>}` (Jira REST v3).
+    local payload
+    payload="$(jq -cn --argjson b "$body_adf" '{body: $b}' 2>/dev/null)" || {
+        jira_sink::_log "mutate_comment_update: malformed ADF body for ${key}/${comment_id}"
+        return 1
+    }
+    local resp _rc=0
+    resp="$(jira_rest::put "issue/${key}/comment/${comment_id}" "$payload")" || _rc=$?
+    if (( _rc != 0 )); then
+        jira_sink::_log "mutate_comment_update: PUT /issue/${key}/comment/${comment_id} failed (rc ${_rc})$(jira_sink::_error_detail)"
+        return 1
+    fi
+    printf '%s' "$resp" | jq -c '{id: .id}' 2>/dev/null || {
+        jira_sink::_log "mutate_comment_update: malformed comment response"
+        return 1
+    }
+}
+
 # transition_issue <key> <target_status_id>
 #   Set <key>'s status by POSTing a transition. GET /issue/<key>/transitions,
 #   select the transition whose `to.id` == target (or honour a configured
@@ -1928,6 +1960,179 @@ sync_inter_phase_blocks() {
         existing_targets="$(printf '%s' "$existing_targets" | jq -c \
             --arg t "$link_type" --arg k "$target_key" \
             '. + [{type:$t, dir:"outward", key:$k}] | unique')"
+    done
+    return 0
+}
+
+# =============================================================================
+# Feature 005 — ADR / decision-record mirroring.
+#
+# A PARALLEL, ISOLATED clone of the clarify-comment path: one Jira comment per
+# decision on the spec issue, carrying a stable hidden marker
+# `[speckit-adr:<spec>-<id>]` (DISJOINT from the clarify `[speckit-note:…]`
+# namespace — FR-008). Unlike the clarify path (create-or-skip on a content
+# marker), ADRs are keyed by IDENTITY (spec+decision id) and UPDATED IN PLACE
+# when the rendered body changes (FR-005): query_existing_comment_body locates
+# the one comment + its id; a normalized-body comparison decides skip vs update.
+# The body shape is parity-locked to Linear 008 (contracts/adr-comment-layout.md).
+# =============================================================================
+
+# jira_sink::_adr_marker <spec_num> <decision_id>
+#   Echo the stable hidden ADR marker `[speckit-adr:<spec>-<id>]`. Keyed by
+#   identity (NOT content) so the comment is located stably across edits +
+#   reordering (FR-003) — which is what enables update-in-place. Embedded as a
+#   trailing text run so query_existing_comment_body can substring-match it.
+jira_sink::_adr_marker() {
+    local spec_num="${1:-}" decision_id="${2:-}"
+    printf '[speckit-adr:%s-%s]' "$spec_num" "$decision_id"
+}
+
+# jira_sink::_render_adr_body <decision_json> <spec_num>
+#   Render ONE decision to an ADF comment body in the parity layout
+#   (contracts/adr-comment-layout.md): a title line `ADR <id> — <title>`, then
+#   Status (default "Accepted"), Decision, Rationale, Alternatives (each OMITTED
+#   when absent), Source `research.md#<id>`, and the hidden marker LAST. Built as
+#   Markdown then converted via adf::from_markdown (reusing the comment builders).
+jira_sink::_render_adr_body() {
+    local decision="${1:-}" spec_num="${2:-}"
+
+    local id title status decision_t rationale alternatives source marker
+    id="$(printf '%s' "$decision" | jq -r '.id // ""' 2>/dev/null || printf '')"
+    title="$(printf '%s' "$decision" | jq -r '.title // ""' 2>/dev/null || printf '')"
+    status="$(printf '%s' "$decision" | jq -r '.status // ""' 2>/dev/null || printf '')"
+    decision_t="$(printf '%s' "$decision" | jq -r '.decision // ""' 2>/dev/null || printf '')"
+    rationale="$(printf '%s' "$decision" | jq -r '.rationale // ""' 2>/dev/null || printf '')"
+    alternatives="$(printf '%s' "$decision" | jq -r '.alternatives // ""' 2>/dev/null || printf '')"
+    source="$(printf '%s' "$decision" | jq -r '.source // ""' 2>/dev/null || printf '')"
+    [[ -n "$status" ]] || status="Accepted"
+    [[ -n "$source" ]] || source="research.md#${id}"
+    marker="$(jira_sink::_adr_marker "$spec_num" "$id")"
+
+    # Compose the Markdown body in the fixed parity order. Each field is its own
+    # paragraph; absent sub-parts are omitted entirely (omit-don't-blank).
+    local md
+    md="ADR ${id} — ${title}"$'\n\n'
+    md+="Status: ${status}"$'\n\n'
+    md+="Decision: ${decision_t}"
+    if [[ -n "$rationale" ]]; then
+        md+=$'\n\n'"Rationale: ${rationale}"
+    fi
+    if [[ -n "$alternatives" ]]; then
+        md+=$'\n\n'"Alternatives: ${alternatives}"
+    fi
+    md+=$'\n\n'"Source: ${source}"
+
+    local doc marked_doc
+    doc="$(adf::from_markdown "$md")"
+    # Append the hidden marker as a trailing paragraph text run (locatable by the
+    # comment probe; excluded from the content digest below).
+    marked_doc="$(jq -cn --argjson d "$doc" --arg m "$marker" '
+        .version = $d.version
+        | .type = $d.type
+        | .content = ($d.content + [
+            {type:"paragraph", content:[{type:"text", text:$m}]}
+          ])
+    ' 2>/dev/null)" || marked_doc="$doc"
+    printf '%s' "$marked_doc"
+}
+
+# jira_sink::_adr_body_digest <body_adf>
+#   Echo a stable, normalized content digest of an ADR comment body (M2). The
+#   digest flattens the body to its text runs, EXCLUDES any `[speckit-adr:…]`
+#   marker run (the identity anchor is stable in both the desired + fetched body,
+#   so it must not affect the compare), and collapses cosmetic whitespace before
+#   hashing — so re-serialization / trailing-space noise does not churn, while a
+#   genuine content change flips the digest. Same discipline as the clarify-note
+#   marker hash (cksum, dependency-free).
+jira_sink::_adr_body_digest() {
+    local body_adf="${1:-}"
+    local normalized
+    normalized="$(printf '%s' "$body_adf" | jq -r '
+        [ .. | .text? // empty ]
+        | map(select(test("^\\[speckit-adr:") | not))
+        | join("\n")
+    ' 2>/dev/null || printf '')"
+    # Collapse all runs of whitespace to single spaces and trim.
+    normalized="$(printf '%s' "$normalized" | tr '\n\t' '  ' | tr -s ' ')"
+    normalized="${normalized#"${normalized%%[![:space:]]*}"}"
+    normalized="${normalized%"${normalized##*[![:space:]]}"}"
+    printf '%s' "$normalized" | cksum | awk '{ printf "%08x%04x", $1, ($2 % 65536) }'
+}
+
+# sync_decision_records <issue_key> <item_json>
+#   For each workstate decision on the spec item, mirror ONE comment idempotently
+#   (FR-002/004/005/010):
+#     1. Compute the marker `[speckit-adr:<spec>-<id>]` (spec num from item.id)
+#        and render the desired ADR body.
+#     2. query_existing_comment_body(key, marker) → rc 3 fails CLOSED for the
+#        whole call (we cannot prove absence, so a blind post could duplicate).
+#     3. ABSENT  → mutate_comment_create (one new comment).
+#        PRESENT → compare the normalized body digest of the FETCHED comment to
+#                  the desired body; MISMATCH → mutate_comment_update IN PLACE
+#                  using the returned comment id (never a second comment);
+#                  MATCH → skip (zero churn).
+#   A decision with an empty id or empty decision text is skipped. Returns 0 on
+#   success; rc 3 fails closed. The clarify (`speckit-note:`) stream is untouched
+#   — disjoint marker namespaces (FR-008).
+sync_decision_records() {
+    local issue_key="${1:-}" item_json="${2:-}"
+
+    # Derive the spec number from the item id (`NNN-<short>` → `NNN`). The marker
+    # is spec-scoped so two specs' same-id decisions never collide.
+    local spec_num
+    spec_num="$(printf '%s' "$item_json" | jq -r '(.id // "") | split("-")[0]' 2>/dev/null || printf '')"
+
+    local count i
+    count="$(printf '%s' "$item_json" | jq -r '(.decisions // []) | length' 2>/dev/null || printf '0')"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+
+    for (( i = 0; i < count; i++ )); do
+        local decision id decision_t marker
+        decision="$(printf '%s' "$item_json" | jq -c --argjson n "$i" '.decisions[$n]' 2>/dev/null)"
+        id="$(printf '%s' "$decision" | jq -r '.id // ""' 2>/dev/null || printf '')"
+        decision_t="$(printf '%s' "$decision" | jq -r '.decision // ""' 2>/dev/null || printf '')"
+        # A decision needs an id (the marker anchor) and a Decision statement.
+        [[ -n "$id" && -n "$decision_t" ]] || continue
+
+        marker="$(jira_sink::_adr_marker "$spec_num" "$id")"
+
+        # Idempotency probe (returns {id,body} when present). rc 3 fails closed.
+        local existing
+        if ! existing="$(query_existing_comment_body "$issue_key" "$marker")"; then
+            jira_sink::_log "sync_decision_records: comment read for ${issue_key} unreadable; failing closed (rc 3)"
+            return 3
+        fi
+
+        local desired_body
+        desired_body="$(jira_sink::_render_adr_body "$decision" "$spec_num")"
+
+        if [[ -z "$existing" ]]; then
+            # ABSENT → create one comment.
+            if ! mutate_comment_create "$issue_key" "$desired_body" >/dev/null; then
+                jira_sink::_log "sync_decision_records: comment create for ${issue_key} failed"
+                return 1
+            fi
+            continue
+        fi
+
+        # PRESENT → compare the normalized body digests (marker excluded).
+        local existing_id existing_body desired_digest existing_digest
+        existing_id="$(printf '%s' "$existing" | jq -r '.id // ""' 2>/dev/null || printf '')"
+        existing_body="$(printf '%s' "$existing" | jq -c '.body // {}' 2>/dev/null || printf '{}')"
+        desired_digest="$(jira_sink::_adr_body_digest "$desired_body")"
+        existing_digest="$(jira_sink::_adr_body_digest "$existing_body")"
+
+        if [[ "$desired_digest" == "$existing_digest" ]]; then
+            # Unchanged → zero churn (FR-004).
+            continue
+        fi
+        # Changed → update the ONE existing comment in place (FR-005). No id →
+        # cannot update safely; skip rather than risk a duplicate.
+        [[ -n "$existing_id" ]] || continue
+        if ! mutate_comment_update "$issue_key" "$existing_id" "$desired_body" >/dev/null; then
+            jira_sink::_log "sync_decision_records: comment update for ${issue_key}/${existing_id} failed"
+            return 1
+        fi
     done
     return 0
 }
