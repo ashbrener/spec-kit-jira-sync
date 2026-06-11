@@ -1398,7 +1398,10 @@ reconcile::sync_task_phase_subissues() {
     # and a per-phase write failure recorded `failed` while the others continue
     # (FR-014). reconcile_parent=0 because a Subtask's parent is immutable and the
     # 001 sink never re-parented on update (no spurious zero-churn PUT). Phase
-    # identity/payload don't need the repo slug.
+    # identity/payload don't need the repo slug. parent_scoped_find=1 (the 7th
+    # arg) because the phase identity is unique only WITHIN a spec — scope the
+    # idempotency match to this spec's parent so two specs' "Phase N" don't
+    # collide on the same sub-issue (restores 001's parent-scoped find).
     local children_count i
     children_count="$(printf '%s' "$item_json" | jq -r '(.children // []) | length' 2>/dev/null || printf '0')"
     local phase_map='{}' dispositions='{}'
@@ -1418,7 +1421,7 @@ reconcile::sync_task_phase_subissues() {
         local _pout _prc=0 _pf
         _pf="$(mktemp "${TMPDIR:-/tmp}/reconcile-ph.XXXXXX")"
         JIRA_SINK_LEVEL_DISPOSITION=""
-        if sync_level_artifact phase "$identity" "$spec_issue_id" "$payload" 0 0 >"$_pf"; then _prc=0; else _prc=$?; fi
+        if sync_level_artifact phase "$identity" "$spec_issue_id" "$payload" 0 0 1 >"$_pf"; then _prc=0; else _prc=$?; fi
         _pout="$(cat "$_pf")"; rm -f "$_pf"
         if (( _prc == 3 )); then
             return 3   # unreadable read → fail closed (matches the 001 sink)
@@ -2248,8 +2251,11 @@ reconcile::process_workstate_item() {
         summary::add skipped "item ${feature_number}: tasks rendered in-body (2-level checklist); no Subtasks"
     else
         # Phase Subtasks via the neutral level loop (feature 003 T009), one
-        # sync_level_artifact(phase,…,find_only=0,reconcile_parent=0) per child —
-        # identical to reconcile::sync_task_phase_subissues.
+        # sync_level_artifact(phase,…,find_only=0,reconcile_parent=0,
+        # parent_scoped_find=1) per child — identical to
+        # reconcile::sync_task_phase_subissues. parent_scoped_find=1 (the 7th arg)
+        # scopes the idempotency match to this spec's parent so the phase identity
+        # (unique only within a spec) can't collide across specs.
         local _wchildren _wi
         _wchildren="$(printf '%s' "$item_json" | jq -r '(.children // []) | length' 2>/dev/null || printf '0')"
         for (( _wi = 0; _wi < _wchildren; _wi++ )); do
@@ -2261,7 +2267,7 @@ reconcile::process_workstate_item() {
             _wpayload="$(reconcile::compose_payload phase "$item_json" "" "$_wpx")"
             _wpf="$(mktemp "${TMPDIR:-/tmp}/reconcile-ws-ph.XXXXXX")"
             JIRA_SINK_LEVEL_DISPOSITION=""; _wprc=0
-            if sync_level_artifact phase "$_wident" "$spec_issue_id" "$_wpayload" 0 0 >"$_wpf"; then :; else _wprc=$?; fi
+            if sync_level_artifact phase "$_wident" "$spec_issue_id" "$_wpayload" 0 0 1 >"$_wpf"; then :; else _wprc=$?; fi
             _wpkey="$(jq -r '.key // ""' <"$_wpf" 2>/dev/null || printf '')"; rm -f "$_wpf"
             if (( _wprc == 3 )); then
                 summary::add error "item ${feature_number}: task-phase Subtasks unreadable (fail-closed; Jira may be incomplete)"

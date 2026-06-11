@@ -54,6 +54,11 @@
     // MD001: heading-increment. research.md jumps H1 -> H3 once.
     // Disabling is the zero-churn path; can be re-enabled once the
     // heading hierarchy is normalised.
-    "MD001": false
+    "MD001": false,
+    // MD024: no-duplicate-heading. The CHANGELOG repeats section
+    // headings (### Added / ### Fixed) under each release per Keep a
+    // Changelog. Scope the rule to SIBLINGS so repeats across
+    // releases are allowed while a true in-section dup is still caught.
+    "MD024": { "siblings_only": true }
   }
 }

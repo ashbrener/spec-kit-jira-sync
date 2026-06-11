@@ -132,6 +132,12 @@ jira_rest::_backoff_sleep() {
 jira_rest::_request() {
   local op_class="$1" method="$2" path="$3" body="${4:-}"
 
+  # Reset the last-error capture each request. On a non-2xx response this is
+  # populated with the Jira response BODY (errorMessages/errors), so the caller
+  # (e.g. mutate_issue_update) can surface a field-level error like
+  # INVALID_INPUT in its failure line without re-deriving it.
+  JIRA_REST_LAST_ERROR_BODY=""
+
   jira_rest::_require_env || return $?
 
   # Normalise to a single well-formed URL. Only $JIRA_BASE_URL — never a
@@ -256,6 +262,7 @@ jira_rest::_request() {
       401|403|404)
         # Auth / permission / not-found. For a READ this is the engine's
         # "unreadable" signal -> rc 3 (fail closed). Not retried.
+        JIRA_REST_LAST_ERROR_BODY="$(cat -- "${body_file}")"
         jira_rest::_log "HTTP ${http_code} on ${method} ${url}"
         if [[ "${op_class}" == "read" ]]; then
           jira_rest::_log "read unreadable -> fail closed (rc ${JIRA_REST_RC_UNREADABLE})"
@@ -265,9 +272,11 @@ jira_rest::_request() {
         ;;
       *)
         # Other 4xx (400/409/422 …): a definite, non-retryable error. Surface
-        # the response body to stderr to aid the operator (Principle VIII).
+        # the response body to stderr to aid the operator (Principle VIII), and
+        # capture it so the caller can quote the field-level error (INVALID_INPUT).
+        JIRA_REST_LAST_ERROR_BODY="$(cat -- "${body_file}")"
         jira_rest::_log "HTTP ${http_code} on ${method} ${url}"
-        jira_rest::_log "response: $(cat -- "${body_file}")"
+        jira_rest::_log "response: ${JIRA_REST_LAST_ERROR_BODY}"
         return "${JIRA_REST_RC_HTTP_ERROR}"
         ;;
     esac

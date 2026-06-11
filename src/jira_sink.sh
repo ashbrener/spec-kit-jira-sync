@@ -72,6 +72,25 @@ jira_sink::_log() {
     printf 'spec-kit-jira-sync: sink: %s\n' "$*" >&2
 }
 
+# jira_sink::_error_detail
+#   Echo a compact " — <errorMessages/errors>" suffix derived from the Jira
+#   response body the transport captured on the last non-2xx write
+#   (JIRA_REST_LAST_ERROR_BODY), or empty when there is none. Lets a write-failure
+#   line quote a field-level error (e.g. INVALID_INPUT on an empty taskList)
+#   without the operator re-deriving it. Never leaks the token; only the JSON
+#   `errorMessages` / `errors` are surfaced.
+jira_sink::_error_detail() {
+    local body="${JIRA_REST_LAST_ERROR_BODY:-}"
+    [[ -n "$body" ]] || return 0
+    local detail
+    detail="$(printf '%s' "$body" | jq -c \
+        '{errorMessages: (.errorMessages // []), errors: (.errors // {})}' \
+        2>/dev/null)" || detail=""
+    if [[ -n "$detail" && "$detail" != '{"errorMessages":[],"errors":{}}' ]]; then
+        printf ' — %s' "$detail"
+    fi
+}
+
 # -----------------------------------------------------------------------------
 # Feature 002 — mapping-driven level projection (US1/T013).
 #
@@ -548,9 +567,10 @@ mutate_issue_create() {
         printf '{"id":"dry-run-issue-id","key":"DRY-0"}\n'
         return 0
     fi
-    local resp
+    local resp _rc
     if ! resp="$(jira_rest::post "issue" "$fields_json")"; then
-        jira_sink::_log "mutate_issue_create: POST /issue failed (rc $?)"
+        _rc=$?
+        jira_sink::_log "mutate_issue_create: POST /issue failed (rc ${_rc})$(jira_sink::_error_detail)"
         return 1
     fi
     # Echo just {id,key} for a clean engine boundary.
@@ -576,7 +596,8 @@ mutate_issue_update() {
         return 0
     fi
     if ! jira_rest::put "issue/${key}" "$fields_json" >/dev/null; then
-        jira_sink::_log "mutate_issue_update: PUT /issue/${key} failed (rc $?)"
+        local _rc=$?
+        jira_sink::_log "mutate_issue_update: PUT /issue/${key} failed (rc ${_rc})$(jira_sink::_error_detail)"
         return 1
     fi
     return 0
@@ -1075,13 +1096,24 @@ declare -gx JIRA_SINK_LEVEL_DISPOSITION=""
 declare -gx JIRA_SINK_LEVEL_TRANSITION_FAILED=0
 
 # sync_level_artifact <level> <identity_label> <parent_id> <input_json>
+#                      [find_only] [reconcile_parent] [parent_scoped_find]
 #   Mapping-driven create/update of the level's CONFIGURED issue type under
 #   <parent_id>, matched/updated by <identity_label> (idempotent, FR-009).
 #   <input_json> is `{summary, body}` (the sink-neutral level payload). Echoes
 #   `{id,key}` of the issue (empty for a checklist sentinel). Records the verdict
 #   on JIRA_SINK_LEVEL_DISPOSITION. rc 3 on an unreadable lookup (fail-closed).
+#
+#   <parent_scoped_find> (default 0) scopes the idempotency find. A level whose
+#   identity label is unique only WITHIN its parent (a phase: `task-phase:N` is a
+#   phase NUMBER, unique per spec, not per repo) must be matched scoped to its
+#   parent or every spec's "Phase N" collides on the SAME issue. When this is 1
+#   AND <parent_id> is non-empty, the find is `parent = <parent_id> AND labels =
+#   <identity_label>`; otherwise the find is the globally-unique label+project
+#   search (repo/spec, whose identity is unique across the board). This is a
+#   STRUCTURAL property (identity-uniqueness scope), set by the engine — NOT Jira
+#   vocabulary — so the engine stays vendor-neutral.
 sync_level_artifact() {
-    local level="${1:-}" identity_label="${2:-}" parent_id="${3:-}" input_json="${4:-}" find_only="${5:-0}" reconcile_parent="${6:-1}"
+    local level="${1:-}" identity_label="${2:-}" parent_id="${3:-}" input_json="${4:-}" find_only="${5:-0}" reconcile_parent="${6:-1}" parent_scoped_find="${7:-0}"
 
     JIRA_SINK_LEVEL_DISPOSITION=""
     JIRA_SINK_LEVEL_TRANSITION_FAILED=0
@@ -1169,10 +1201,19 @@ sync_level_artifact() {
     fi
 
     # --- Find-or-create-or-update by identity label ----------------------
-    # query_spec_issue is a generic label+project JQL search; reuse it to match
-    # the identity. rc 3 (unreadable) fails closed — a blind create could dupe.
+    # Match the existing artifact by identity. For a PARENT-LOCAL identity (a
+    # phase: `task-phase:N` is unique only within its spec) scope the find to the
+    # parent — `parent = <parent_id> AND labels = <identity_label>` — so two
+    # specs' "Phase N" do NOT collide on the same Subtask. For a globally-unique
+    # identity (repo/spec) use the label+project search. rc 3 (unreadable) fails
+    # closed — a blind create could dupe.
     local existing existing_key
-    if ! existing="$(query_spec_issue "$identity_label" "$project")"; then
+    if (( parent_scoped_find == 1 )) && [[ -n "$parent_id" ]]; then
+        if ! existing="$(query_subissue_for_phase "$parent_id" "$identity_label")"; then
+            jira_sink::_log "sync_level_artifact: ${level} (${identity_label}) parent-scoped lookup unreadable; failing closed (rc 3)"
+            return 3
+        fi
+    elif ! existing="$(query_spec_issue "$identity_label" "$project")"; then
         jira_sink::_log "sync_level_artifact: ${level} (${identity_label}) lookup unreadable; failing closed (rc 3)"
         return 3
     fi

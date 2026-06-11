@@ -130,6 +130,65 @@ _task_input() {
   }
 }
 
+# --- parent-scoped find (multi-spec phase collision guard) -------------------
+
+@test "sync_level_artifact: parent_scoped_find=1 issues a parent-scoped JQL, not label+project" {
+  # Absent under the parent → CREATE. The find MUST be scoped to the parent so a
+  # phase label (unique only within a spec) can't collide across specs.
+  jira_shim::set_response GET "*/search/jql*" search_absent.json 200
+  jira_shim::set_response POST "*/rest/api/3/issue" issue_create_ok.json 201
+
+  # 7th positional arg = parent_scoped_find=1; parent is PROJ-200.
+  run sync_level_artifact phase "task-phase:1" "PROJ-200" "$(_task_input)" 0 0 1
+  [ "$status" -eq 0 ]
+
+  local reqs
+  reqs="$(jira_shim::requests)"
+  # The find JQL carries `parent = "PROJ-200"` (url-encoded parent%20%3D%20%22…).
+  printf '%s\n' "$reqs" | grep -q 'parent%20%3D%20%22PROJ-200%22' || {
+    echo "parent-scoped find did not scope to the parent" >&2
+    printf '%s\n' "$reqs" >&2; false; }
+  # It must NOT fall back to the label+project search for this find.
+  printf '%s\n' "$reqs" | grep -q 'project%20%3D%20%22PROJ%22%20ORDER' && {
+    echo "parent-scoped find leaked a label+project search" >&2
+    printf '%s\n' "$reqs" >&2; false; } || true
+}
+
+@test "sync_level_artifact: parent_scoped_find=0 (default) keeps the label+project find" {
+  jira_shim::set_response GET "*/search/jql*" search_absent.json 200
+  jira_shim::set_response POST "*/rest/api/3/issue" issue_create_ok.json 201
+
+  run sync_level_artifact spec "speckit-spec:001" "PROJ-100" "$(_task_input)"
+  [ "$status" -eq 0 ]
+
+  local reqs
+  reqs="$(jira_shim::requests)"
+  # The globally-unique spec identity uses the label+project search (no parent=).
+  printf '%s\n' "$reqs" | grep -q 'labels%20%3D%20%22speckit-spec%3A001%22%20AND%20project'
+  printf '%s\n' "$reqs" | grep -q 'parent%20%3D%20%22' && {
+    echo "default find must NOT be parent-scoped" >&2
+    printf '%s\n' "$reqs" >&2; false; } || true
+}
+
+# --- a write failure surfaces the Jira error body (diagnosability) ------------
+
+@test "mutate_issue_update: a 400 surfaces errorMessages/errors in the failure line" {
+  # The transport captures the response body on a non-2xx write; the sink quotes
+  # the errorMessages/errors so a field-level error (INVALID_INPUT) is visible.
+  local errbody="${BATS_TEST_TMPDIR}/err400.json"
+  cat > "$errbody" <<'JSON'
+{"errorMessages":[],"errors":{"description":"INVALID_INPUT"}}
+JSON
+  jira_shim::set_response PUT "*/issue/*" "$errbody" 400
+
+  run mutate_issue_update "PROJ-101" '{"fields":{"summary":"x"}}'
+  [ "$status" -ne 0 ]
+  # The failure diagnostic (stderr, captured by `run`) quotes the field error.
+  printf '%s\n' "$output" | grep -q 'INVALID_INPUT' || {
+    echo "failure line did not surface the Jira error body" >&2
+    printf '%s\n' "$output" >&2; false; }
+}
+
 # --- the checklist sentinel creates NO issue ---------------------------------
 
 @test "sync_level_artifact: a checklist-sentinel level creates no issue (empty result)" {

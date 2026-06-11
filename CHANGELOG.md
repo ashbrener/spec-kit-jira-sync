@@ -10,6 +10,35 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **Multi-spec phase Subtask collision** — the feature-003 unified level loop
+  matched a phase Subtask by its identity label alone (`labels = task-phase:N AND
+  project = …`). Because `task-phase:N` is a phase *number* (unique only within a
+  spec), every spec's "Phase N" matched the **same** Subtask across a multi-spec
+  repo: specs 2..N updated spec 1's Subtask instead of creating their own
+  (spurious "Updated", a parent frozen to the first creator, one Subtask per
+  phase-number instead of per (spec, phase)). The phase find is now **parent-
+  scoped** (`parent = "<story>" AND labels = "task-phase:N"`), restoring the 001
+  behaviour, so each spec mirrors to its own Subtask. No label-scheme change —
+  single-spec boards are unaffected. **Self-healing:** a plain `reconcile.sh
+  --all` repairs a previously mis-scoped board (see the migration note below).
+- **Empty `taskList` → HTTP 400 INVALID_INPUT** — a `## Phase` with zero task
+  lines rendered a childless ADF `taskList` (`content: []`), which Jira rejects.
+  An empty phase now renders a paragraph placeholder instead, and every
+  `taskItem` is guaranteed non-empty content. Write failures now also surface the
+  Jira response body (`errorMessages` / `errors`) in the failure line, so a
+  field-level error like `INVALID_INPUT` is visible without re-deriving it.
+
+#### Migration — repairing a mis-scoped board
+
+After upgrading, a plain `reconcile.sh --all` **self-heals** a board that the
+pre-fix engine mis-scoped: the existing (collided) Subtasks are parented to the
+first-processed spec, so that spec's parent-scoped find re-matches and corrects
+them, and every *other* spec creates its own — no orphans result. For a pristine
+slate instead, an operator may prune the old `task-phase:*` Subtasks (or run
+`reconcile.sh --remode`) before re-pushing.
+
 ## [0.2.0] - 2026-06-08
 
 ### Added
