@@ -38,9 +38,22 @@ assignee is the nicety.
 
 ### Session 2026-06-11
 
-No clarification session has run yet. Three design forks are recorded under
-**Open Questions** with leading leans (carried from the operator's brief); they
-are resolved in `/speckit-clarify` before `/speckit-plan`.
+All three design forks resolved by their leans (strong, low-risk):
+
+- Q: (a) Handle scheme for `author:<handle>` — email local-part vs an explicit map
+  handle? → A: **An explicit `handle:` field per entry in the gitignored authors
+  map** (required, non-PII). An email local-part can itself be a real name (PII)
+  and is ambiguous; an explicit handle is operator-chosen and safe. (Reflected in
+  FR-004.)
+- Q: (b) Multi-author specs — first-add vs last vs most-commits? → A: **An explicit
+  `Owner:`/`Author:` line is the override; the default is git first-add** (the
+  first commit that adds the spec dir = "who started it", stable across later
+  edits). Last/most-commits rejected (churn-sensitive, less meaningful). (Reflected
+  in FR-001.)
+- Q: (c) Also write the author into the issue's human-visible description? → A:
+  **Label-only for the MVP.** The `author:<handle>` label is the machine-readable
+  attribution and the summary surfaces the author; a human-visible description
+  author-line is a deferred nicety, **out of MVP scope** (revisit later).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -182,10 +195,14 @@ confirm the issue payloads are byte-for-byte identical to today (no assignee, no
   operator escape hatch, matching Linear FR-034). An unresolved/null accountId →
   omit assignee.
 - **FR-004** (authorship label — always, account-independent): The system MUST
-  stamp an `author:<handle>` label on the spec-level issue, where `<handle>` is a
-  stable **non-PII** token (NEVER a raw email — an email is PII on a shareable
-  issue). The label MUST be idempotent: stale `author:*` labels are stripped and
-  the current one set (the same hygiene as `phase:*` labels).
+  stamp an `author:<handle>` label on the spec-level issue, where `<handle>` is the
+  **explicit `handle:` field** of the author's entry in the gitignored authors map
+  (a required, operator-chosen, **non-PII** token — NEVER a raw email or email
+  local-part, which can be PII on a shareable issue) (clarified 2026-06-11). The
+  label MUST be idempotent: stale `author:*` labels are stripped and the current
+  one set (the same hygiene as `phase:*` labels). A known author with no `handle`
+  in the map is a config error surfaced to the operator (no label rather than a
+  PII fallback).
 - **FR-005** (level scoping): Attribution applies at the **spec → Task** level
   (one author per spec). The repo Epic and phase Subtasks are left unassigned;
   they MAY inherit the spec author's **label** (not assignee) behind a config
@@ -243,24 +260,18 @@ confirm the issue payloads are byte-for-byte identical to today (no assignee, no
 - **SC-005**: **Zero** PII (email/accountId) appears in any tracked file or in any
   Jira label; the privacy guard stays green.
 
-## Open Questions (to resolve in /speckit-clarify)
+## Open Questions — RESOLVED (Clarifications, Session 2026-06-11)
 
-Three design forks, each with a leading lean from the operator's brief:
+All three forks are pinned in the Clarifications section above:
 
-- **(a) Handle scheme for `author:<handle>`** — derive the handle from the
-  **local-part of the email**, or require an explicit `handle:` in the map? *Lean*:
-  an **explicit `handle:` in the map** — avoids putting PII (email local-part can
-  be a real name) in a label and removes ambiguity. [NEEDS CLARIFICATION:
-  email-local-part vs explicit map handle for the label token.]
-- **(b) Multi-author specs** — when several committers touched the spec dir, pick
-  **first-add**, **last**, or **most-commits**? *Lean*: an explicit `Owner:` line
-  is the override; **git first-add** is the default. [NEEDS CLARIFICATION:
-  first-add vs last vs most-commits as the git-fallback author.]
-- **(c) Description memory block** — in addition to the label, also write the
-  author into the spec issue's **human-visible description** (a memory block)?
-  *Lean*: optional/deferred — the label is the machine-readable attribution; a
-  description line is a nicety. [NEEDS CLARIFICATION: also write a human-visible
-  author line in the description, or label-only.]
+1. **Handle scheme** → an explicit, required `handle:` field per authors-map entry
+   (non-PII; never an email/local-part) — FR-004.
+2. **Multi-author** → explicit `Owner:` override, **git first-add** default —
+   FR-001.
+3. **Description memory block** → **label-only MVP**; a human-visible description
+   author-line is deferred (out of scope).
+
+No open clarification markers remain.
 
 ## Assumptions
 
@@ -274,7 +285,8 @@ Three design forks, each with a leading lean from the operator's brief:
 - **Out of scope**: auto-provisioning Jira accounts for non-members (operators
   invite manually); reporter manipulation (the reporter is inherently the API-token
   owner, not changeable without per-developer tokens); dynamic email→account
-  resolution (impossible per the GDPR finding).
+  resolution (impossible per the GDPR finding); a **human-visible author line in
+  the issue description** (label-only MVP — clarified (c); a deferred nicety).
 - **Dependencies**: builds on the 001 core bridge (spec-level issue create/update +
   labels), the 002 configurable mapping (the spec issue may be an Epic/Story/Task),
   the 003 neutral engine (the neutrality gate), and the gitignored credential /
