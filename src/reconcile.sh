@@ -1069,6 +1069,12 @@ reconcile::sync_spec_issue() {
             printf 'spec-transition\tfailed\n' >>"$RECONCILE_DISPOSITION_FILE"
         fi
     fi
+    # Attribution fail-soft (feature-007 FR-008): a rejected assignee write was
+    # surfaced + retried without the assignee (the author label still landed).
+    # Name it in the run summary — observable, non-fatal (the spec completed).
+    if [[ "${JIRA_SINK_LEVEL_ASSIGNEE_FAILED:-0}" == "1" ]]; then
+        summary::add updated "spec ${feature_number}: author assignee not applied (stale/deactivated account) — author label applied; manual assignment unaffected"
+    fi
     printf '%s\n' "$spec_issue_id"
 }
 

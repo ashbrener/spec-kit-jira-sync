@@ -115,8 +115,8 @@ assignee and no `author:*` label.
 
 ## Phase 7: Cross-cutting + Polish
 
-- [ ] T022 [US1] FR-008 fail-soft: a rejected assignee write (bad/stale accountId) is **surfaced** (warned, with `_error_detail`) and the spec still completes with its `author:<handle>` label — NOT a full-run abort. Integration `tests/integration/attr_bad_assignee_failsoft.bats`. Depends on T015.
-- [ ] T023 [P] Privacy guard: extend/confirm `tests/unit/no-real-identifiers.bats` covers the new `.sample` + every attribution fixture (no real email/accountId; labels carry a non-PII handle, never an email) — Privacy IX / FR-010.
+- [x] T022 [US1] FR-008 fail-soft: a rejected assignee write (bad/stale accountId) is **surfaced** (warned, with `_error_detail`) and the spec still completes with its `author:<handle>` label — NOT a full-run abort. Integration `tests/integration/attr_bad_assignee_failsoft.bats`. Depends on T015.
+- [x] T023 [P] Privacy guard: extend/confirm `tests/unit/no-real-identifiers.bats` covers the new `.sample` + every attribution fixture (no real email/accountId; labels carry a non-PII handle, never an email) — Privacy IX / FR-010.
 - [ ] T024 [P] Docs: `README.md` (attribution section — enable + the two tracks + the project-default-assignee `PROJECT_LEAD` caveat, FR-007) and `config-template.yml` cross-ref; markdownlint clean.
 - [ ] T025 [P] `CHANGELOG.md` `[Unreleased] → ### Added`: author-based attribution (two-track: author label always + assignee on create; opt-in; gitignored map).
 - [ ] T026 Confirm the **003 neutrality gate** + the existing suite are unchanged (no regression in the spec sync's non-attribution path; off-by-default byte-identical).
