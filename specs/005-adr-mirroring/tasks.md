@@ -103,11 +103,11 @@ update, 0 creates; add one → 1 create.
 
 ## Phase 6: Polish & cross-cutting
 
-- [ ] T023 [P] Document the ADR mirror in `README.md` ("What lands in Jira" — add the ADR-comment row) and note in `config-template.yml` that it needs no config (additive, on by default). markdownlint clean.
-- [ ] T024 [P] `CHANGELOG.md` `[Unreleased] → ### Added`: ADR / decision-record mirroring (research.md decisions → idempotent spec-issue comments; linear-parity; neutral `decisions[]` floor).
-- [ ] T025 [P] Privacy guard: confirm every new fixture/test uses placeholder coordinates; `tests/unit/no-real-identifiers.bats` green (Privacy IX / FR-013).
-- [ ] T026 Run `scripts/check.sh` to green at CI parity (move `.specify/extensions/jira/jira-config.yml` + `tests/.private-deny` aside): shellcheck, yamllint relaxed, markdownlint, full bats. Fix any lint.
-- [ ] T027 Confirm the **003 neutrality gate** + the existing suite are unchanged — NO regression in the clarify-comment path (the ADR stream is isolated; clarify-comment counts must be identical to pre-005). **(analyze L1)** Also assert FR-012: no new command / no `extension.id` change / no new CLI surface was added (ADR mirroring is additive on the existing reconcile path).
+- [x] T023 [P] Document the ADR mirror in `README.md` ("What lands in Jira" — add the ADR-comment row) and note in `config-template.yml` that it needs no config (additive, on by default). markdownlint clean.
+- [x] T024 [P] `CHANGELOG.md` `[Unreleased] → ### Added`: ADR / decision-record mirroring (research.md decisions → idempotent spec-issue comments; linear-parity; neutral `decisions[]` floor).
+- [x] T025 [P] Privacy guard: confirm every new fixture/test uses placeholder coordinates; `tests/unit/no-real-identifiers.bats` green (Privacy IX / FR-013).
+- [x] T026 Run `scripts/check.sh` to green at CI parity (move `.specify/extensions/jira/jira-config.yml` + `tests/.private-deny` aside): shellcheck, yamllint relaxed, markdownlint, full bats. Fix any lint.
+- [x] T027 Confirm the **003 neutrality gate** + the existing suite are unchanged — NO regression in the clarify-comment path (the ADR stream is isolated; clarify-comment counts must be identical to pre-005). **(analyze L1)** Also assert FR-012: no new command / no `extension.id` change / no new CLI surface was added (ADR mirroring is additive on the existing reconcile path).
 - [ ] T028 Open the `005 → main` PR after green; PR body notes the linear-008 parity + the neutral `decisions[]` floor + no-amendment Constitution result.
 
 ---

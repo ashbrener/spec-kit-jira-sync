@@ -10,6 +10,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **ADR / decision-record mirroring** (feature 005) — each spec's `research.md`
+  decision records (the `Decision / Rationale / Alternatives` blocks, in both the
+  bold-lead and stock-bullet grammars) are mirrored as one idempotent comment per
+  decision on the spec's Jira issue. Re-runs are zero-churn; a changed decision
+  updates its single comment **in place** (never a duplicate). The comment stream
+  is disjoint from the clarify-session comments (`speckit-adr:` vs `speckit-note:`
+  markers) and parity-locked to the Linear sibling's ADR layout. Carried through
+  the neutral `workstate` `decisions[]` floor field (the parser produces it, the
+  Jira sink consumes it); the reconcile engine stays vendor-neutral. Additive and
+  on by default — no config, no new command.
+
 ### Fixed
 
 - **Multi-spec phase Subtask collision** — the feature-003 unified level loop
