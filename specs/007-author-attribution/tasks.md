@@ -92,8 +92,8 @@ stable (stripped-then-set).
 → no assignee field in the update payload, the manual assignee survives; one
 stable `author:*` label.
 
-- [ ] T018 [P] [US3] Integration `tests/integration/attr_us3_idempotent.bats`: an existing (already-created) spec issue → the UPDATE payload contains **no** assignee field (FR-003/SC-003, Linear FR-034); re-run leaves exactly one `author:<handle>` label (stale `author:*` stripped, not stacked) (FR-004); a changed author replaces the label.
-- [ ] T019 [US3] Implement the **create-only assignee gate** (assignee only in the CREATE payload, never UPDATE) and the **strip-stale-then-set** `author:*` label hygiene in `src/jira_sink.sh`. Depends on T015.
+- [x] T018 [P] [US3] Integration `tests/integration/attr_us3_idempotent.bats`: an existing (already-created) spec issue → the UPDATE payload contains **no** assignee field (FR-003/SC-003, Linear FR-034); re-run leaves exactly one `author:<handle>` label (stale `author:*` stripped, not stacked) (FR-004); a changed author replaces the label.
+- [x] T019 [US3] Implement the **create-only assignee gate** (assignee only in the CREATE payload, never UPDATE) and the **strip-stale-then-set** `author:*` label hygiene in `src/jira_sink.sh`. Depends on T015.
 
 **Checkpoint**: idempotent + manual-reassignment-safe.
 
