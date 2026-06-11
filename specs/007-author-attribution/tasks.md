@@ -117,8 +117,8 @@ assignee and no `author:*` label.
 
 - [x] T022 [US1] FR-008 fail-soft: a rejected assignee write (bad/stale accountId) is **surfaced** (warned, with `_error_detail`) and the spec still completes with its `author:<handle>` label — NOT a full-run abort. Integration `tests/integration/attr_bad_assignee_failsoft.bats`. Depends on T015.
 - [x] T023 [P] Privacy guard: extend/confirm `tests/unit/no-real-identifiers.bats` covers the new `.sample` + every attribution fixture (no real email/accountId; labels carry a non-PII handle, never an email) — Privacy IX / FR-010.
-- [ ] T024 [P] Docs: `README.md` (attribution section — enable + the two tracks + the project-default-assignee `PROJECT_LEAD` caveat, FR-007) and `config-template.yml` cross-ref; markdownlint clean.
-- [ ] T025 [P] `CHANGELOG.md` `[Unreleased] → ### Added`: author-based attribution (two-track: author label always + assignee on create; opt-in; gitignored map).
+- [x] T024 [P] Docs: `README.md` (attribution section — enable + the two tracks + the project-default-assignee `PROJECT_LEAD` caveat, FR-007) and `config-template.yml` cross-ref; markdownlint clean.
+- [x] T025 [P] `CHANGELOG.md` `[Unreleased] → ### Added`: author-based attribution (two-track: author label always + assignee on create; opt-in; gitignored map).
 - [ ] T026 Confirm the **003 neutrality gate** + the existing suite are unchanged (no regression in the spec sync's non-attribution path; off-by-default byte-identical).
 - [ ] T027 Run `scripts/check.sh` to green at CI parity (move `.specify/extensions/jira/jira-config.yml` + `tests/.private-deny` aside): shellcheck, yamllint relaxed, markdownlint, full bats. Fix any lint.
 - [ ] T028 **Rebase 007 onto post-005 `main`** (once #12 merges) to absorb 005's `jira_sink.sh`/`reconcile.sh` changes, re-run the gate, then open the `007 → main` PR (body notes Linear FR-034 parity + the gitignored authors map + no-amendment Constitution result + the separate workstate-schema author-field change).

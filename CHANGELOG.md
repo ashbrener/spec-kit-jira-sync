@@ -10,6 +10,26 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Author-based attribution (label-first, optional assignee)** — opt-in
+  `attribution:` config block makes the board reflect *who* authored each spec,
+  as two tracks: an account-independent **`author:<handle>` label** stamped on
+  the spec issue **always** (works for authors with no Jira account), plus a Jira
+  **assignee** set on **create only** when the author maps to a real `accountId`
+  (never re-sent on update, so a manual reassignment survives — the Linear bridge
+  FR-034 semantics). Author **resolution** is vendor-neutral: an explicit
+  `Owner:`/`Author:` line in `spec.md` wins, else the first git author to add the
+  spec dir, else *unknown* (a graceful no-op, not an error) — carried on the
+  workstate item as a neutral `author {value, source}` floor field; the
+  email→`accountId`/`handle` mapping is the sink's job, via a **gitignored**
+  operator map (`jira-authors.local.yml`; only a placeholder `.sample` ships, as
+  the map holds real emails + account ids = PII). A `null` `accountId` is
+  label-only; a stale/deactivated account is **fail-soft** (surfaced, the label
+  still lands). **Off by default** — absent/`enabled: false` is byte-identical to
+  prior behavior (no assignee, no `author:*` label). Labels carry a non-PII
+  handle, never an email (Privacy IX).
+
 ## [0.2.1] - 2026-06-11
 
 ### Fixed
