@@ -10,8 +10,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-11
+
 ### Fixed
 
+- **Dry-run of an unmirrored spec no longer spuriously exits 3** — a `--dry-run`
+  create synthesizes the placeholder key `DRY-0`; the post-create reconciles
+  (`sync_clarify_comments` / `sync_inter_phase_blocks`) then read against `DRY-0`,
+  which 404s on a live Jira and tripped the fail-closed `rc 3` — so an entirely
+  readable board's dry-run exited 3 (surfaced by a live dogfood; the mocked suite
+  masked it because the shim answered `DRY-0` reads `200`). Both wrappers now skip
+  the existence-check read when the key is the `DRY-0` placeholder (the issue would
+  be newly created — nothing to read; it reconciles on the next real run). The skip
+  is scoped to `DRY-0`, so a real key still fails closed.
 - **Multi-spec phase Subtask collision** — the feature-003 unified level loop
   matched a phase Subtask by its identity label alone (`labels = task-phase:N AND
   project = …`). Because `task-phase:N` is a phase *number* (unique only within a
@@ -148,5 +159,6 @@ slate instead, an operator may prune the old `task-phase:*` Subtasks (or run
 - Parser phase normalization corrected in the producer half.
 - POST idempotency and feature-pin handling hardened in the foundational sink.
 
-[Unreleased]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ashbrener/spec-kit-jira-sync/releases/tag/v0.2.0

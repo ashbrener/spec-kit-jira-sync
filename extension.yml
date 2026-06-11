@@ -50,10 +50,10 @@ extension:
   # PEP 440 version. Adds feature 003 (engine orchestration unification) and
   # feature 004 (guarded re-mode / orphan pruning, constitution v1.1.0) on top
   # of the 001 core bridge + 002 configurable mapping baseline.
-  version: "0.2.0"
+  version: "0.2.1"
 
   # One-line description — matches the catalog entry + README cover.
-  description: "A real reconcile engine — idempotent, drift-aware, fail-closed — that mirrors spec-kit specs into Jira (Epic per repo, Story per spec, Subtask per phase) and never corrupts your board."
+  description: "An idempotent, drift-aware, fail-closed reconcile engine that mirrors spec-kit specs into Jira (Epic per repo, Story per spec, Subtask per phase)."
 
   # Optional fields — author + repo make the manifest self-describing.
   author: "Ash Brener"
