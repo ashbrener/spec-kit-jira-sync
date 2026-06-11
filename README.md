@@ -137,6 +137,7 @@ flowchart LR
 | Task phase (`## Phase N`) | **Subtask** of the Story | parent + `task-phase:N` label |
 | Tasks within a phase | **ADF checklist** in the Subtask body | content diff |
 | Clarification / decision sessions | **comments** | marker prefix → at-most-once |
+| ADRs / decision records (`research.md`) | **comments** (one per decision) | marker `speckit-adr:<spec>-<id>` → at-most-once, updated in place on a content change |
 | Cross-spec dependencies | **issue links** | `(rel, target)` → at-most-once |
 
 The ADF checklist is today's default. Configurable artifact mapping and a

@@ -16,6 +16,7 @@
 #   parser::malformed_task_lines <tasks_md_path>
 #   parser::clarify_sessions <spec_md_path>
 #   parser::clarify_session_bullets <spec_md_path> <date>
+#   parser::decision_records <research_md_path>
 #
 # Implements the filesystem-side parser invariants documented in
 # specs/001-spec-kit-linear-bridge/data-model.md §2.3-2.4 and the
@@ -431,4 +432,164 @@ parser::clarify_session_bullets() {
         in_section && /^### / { in_session = 0; next }
         in_section && in_session && /^- / { print }
     ' "$spec_md"
+}
+
+# ---------------------------------------------------------------------------
+# parser::decision_records <research_md_path>
+#
+# Tolerant extractor for a spec's decision records (ADRs) from its research.md
+# (feature 005, FR-001/003/007 / research R1-R2). A decision block is a `##`/`###`
+# heading whose body (until the next heading of equal/higher level) carries a
+# Decision statement. Decision / Rationale / Alternatives are read by
+# CASE-INSENSITIVE label in BOTH grammars:
+#   * bold lead   — `**Decision.**` / `**Decision:**` (this repo's research.md)
+#   * bullet/plain — `- Decision:` / `Decision:`       (spec-kit's stock template)
+# Values are multi-line (everything up to the next label or the block end).
+#
+# Emits a JSON ARRAY (one object per block) on stdout, each
+# `{id, title, status?, decision, rationale?, alternatives?, source}`:
+#   id     — explicit heading id (`R<N>`/`D<N>`/`ADR-<N>`, case-insensitive)
+#            else a stable slug of the title (lowercase, non-alnum->`-`, trimmed),
+#            positionally disambiguated (`-2`,`-3`) on a duplicate slug.
+#   title  — the heading text after the id token.
+#   source — repo-relative back-reference `research.md#<id>` (no host/URL, R7).
+# Absent sub-parts are OMITTED (not blanked). NEVER fails: an absent/malformed
+# file or a file with no decision blocks yields `[]` (FR-007). Vendor-neutral —
+# pure filesystem read, no Jira vocabulary.
+# ---------------------------------------------------------------------------
+parser::decision_records() {
+    local research_md="$1"
+    [[ -f "$research_md" ]] || { printf '[]'; return 0; }
+
+    local objs
+    objs="$(awk '
+        function jesc(s,   r) {
+            r = s
+            gsub(/\\/, "\\\\", r)
+            gsub(/"/, "\\\"", r)
+            gsub(/\n/, "\\n", r)
+            gsub(/\t/, "\\t", r)
+            gsub(/\r/, "", r)
+            return r
+        }
+        function rtrim(s) { sub(/[[:space:]]+$/, "", s); return s }
+        function ltrim(s) { sub(/^[[:space:]]+/, "", s); return s }
+        function trim(s) { return ltrim(rtrim(s)) }
+        function add_val(line) {
+            if (cur_label == "") return
+            if (vals[cur_label] == "") vals[cur_label] = line
+            else vals[cur_label] = vals[cur_label] "\n" line
+        }
+        # Try to read a Decision/Rationale/Alternatives label off a body line.
+        # Returns the canonical label or ""; sets G_VALUE to the inline remainder.
+        function read_label(line,   t, low, lab, rest) {
+            t = line
+            sub(/^[[:space:]]+/, "", t)
+            # Optional list bullet — a real bullet is "-"/"+"/"*" followed by
+            # whitespace; `**Bold**` has no space after the first `*`, so anchor
+            # the space to avoid eating one `*` off a bold lead.
+            sub(/^[-*+][[:space:]]+/, "", t)
+            sub(/^[[:space:]]+/, "", t)
+            sub(/^\*\*/, "", t)                            # bold lead open
+            low = tolower(t)
+            lab = ""
+            if (low ~ /^decision[.:*]/)       lab = "decision"
+            else if (low ~ /^rationale[.:*]/) lab = "rationale"
+            else if (low ~ /^alternatives/)   lab = "alternatives"
+            if (lab == "") return ""
+            rest = t
+            sub(/^[A-Za-z]+/, "", rest)        # drop the label word
+            sub(/^[A-Za-z[:space:]]*/, "", rest) # drop trailing label words (e.g. " considered")
+            sub(/^\*\*/, "", rest)             # bold close before terminator
+            sub(/^[.:]/, "", rest)             # the . or : terminator
+            sub(/^\*\*/, "", rest)             # bold close after terminator
+            G_VALUE = trim(rest)
+            return lab
+        }
+        function flush(   out) {
+            if (in_block && ("decision" in vals) && trim(vals["decision"]) != "") {
+                out = "{\"id\":\"" jesc(cur_id) "\""
+                out = out ",\"title\":\"" jesc(cur_title) "\""
+                if ("status" in vals && trim(vals["status"]) != "")
+                    out = out ",\"status\":\"" jesc(trim(vals["status"])) "\""
+                out = out ",\"decision\":\"" jesc(trim(vals["decision"])) "\""
+                if ("rationale" in vals && trim(vals["rationale"]) != "")
+                    out = out ",\"rationale\":\"" jesc(trim(vals["rationale"])) "\""
+                if ("alternatives" in vals && trim(vals["alternatives"]) != "")
+                    out = out ",\"alternatives\":\"" jesc(trim(vals["alternatives"])) "\""
+                out = out ",\"__title_slug\":\"" jesc(cur_slug) "\""
+                out = out ",\"__has_id\":" (cur_has_id ? "true" : "false")
+                out = out "}"
+                print out
+            }
+            in_block = 0
+            delete vals
+            cur_label = ""
+        }
+        # A heading at level 2 or 3 opens a new candidate block.
+        /^###?[[:space:]]/ {
+            flush()
+            heading = $0
+            sub(/^#+[[:space:]]*/, "", heading)
+            heading = trim(heading)
+            cur_has_id = 0
+            cur_id = ""
+            cur_title = heading
+            if (match(heading, /^([Rr]|[Dd])[0-9]+/) \
+                || match(heading, /^[Aa][Dd][Rr]-[0-9]+/)) {
+                cur_id = substr(heading, 1, RLENGTH)
+                cur_has_id = 1
+                rest = substr(heading, RLENGTH + 1)
+                sub(/^[[:space:]]*[-—–:][[:space:]]*/, "", rest)
+                cur_title = trim(rest)
+                if (cur_title == "") cur_title = cur_id
+            }
+            s = tolower(cur_title)
+            gsub(/[^a-z0-9]+/, "-", s)
+            sub(/^-+/, "", s); sub(/-+$/, "", s)
+            cur_slug = s
+            in_block = 1
+            cur_label = ""
+            next
+        }
+        # Any other heading (level 1, or 4+) closes the current block.
+        /^#+[[:space:]]/ { flush(); next }
+        in_block {
+            lab = read_label($0)
+            if (lab != "") {
+                cur_label = lab
+                vals[lab] = G_VALUE
+                next
+            }
+            if ($0 ~ /^[[:space:]]*$/) { cur_label = ""; next }
+            add_val($0)
+            next
+        }
+        END { flush() }
+    ' "$research_md")"
+
+    [[ -n "$objs" ]] || { printf '[]'; return 0; }
+
+    # Resolve id (explicit else slug), positionally disambiguate duplicate slugs
+    # in document order, compose the source ref, drop the private __* helpers.
+    printf '%s\n' "$objs" | jq -s '
+        [ . as $all
+          | range(0; length) as $i
+          | $all[$i] as $rec
+          | (if $rec.__has_id then $rec.id
+             else
+               ([ $all[0:$i][]
+                  | select(.__has_id | not)
+                  | select(.__title_slug == $rec.__title_slug) ] | length) as $prior
+               | if $prior == 0 then $rec.__title_slug
+                 else "\($rec.__title_slug)-\($prior + 1)" end
+             end) as $id
+          | { id: $id, title: $rec.title }
+            + (if $rec.status then { status: $rec.status } else {} end)
+            + { decision: $rec.decision }
+            + (if $rec.rationale then { rationale: $rec.rationale } else {} end)
+            + (if $rec.alternatives then { alternatives: $rec.alternatives } else {} end)
+            + { source: "research.md#\($id)" }
+        ]
+    '
 }
