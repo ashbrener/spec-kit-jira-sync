@@ -62,10 +62,10 @@ onto `main` (#9/#10 merged) — the `DRY-0` guard + parent-scoped find exist.
 **Independent test**: reconcile a 2-ADR spec → the issue gains exactly two ADR
 comments with the decision/rationale/alternatives/source; coexist with clarify.
 
-- [ ] T012 [P] [US1] Integration `tests/integration/adr_us1_mirror.bats`: a spec whose `research.md` has 2 decisions → exactly 2 ADR comments created (absent → create), each carrying id/title/status/decision/rationale/alternatives + `research.md#<id>` source + the `[speckit-adr:…]` marker (AS-1, SC-001).
-- [ ] T013 [P] [US1] Integration: a spec already mirrored with clarify-session comments → ADR comments are ADDED without touching the clarify (`speckit-note:`) comments — disjoint marker streams coexist (AS-3, FR-008).
-- [ ] T014 [P] [US1] Integration: a spec with no `research.md` (and one with a `research.md` that has no decision blocks) → ZERO ADR comments, ZERO errors, run completes (AS-2, FR-007, SC-004).
-- [ ] T015 [US1] Wire US1 green + FR-008 observability: the run summary tallies ADR comments created (no silent posting). Depends on T010.
+- [x] T012 [P] [US1] Integration `tests/integration/adr_us1_mirror.bats`: a spec whose `research.md` has 2 decisions → exactly 2 ADR comments created (absent → create), each carrying id/title/status/decision/rationale/alternatives + `research.md#<id>` source + the `[speckit-adr:…]` marker (AS-1, SC-001).
+- [x] T013 [P] [US1] Integration: a spec already mirrored with clarify-session comments → ADR comments are ADDED without touching the clarify (`speckit-note:`) comments — disjoint marker streams coexist (AS-3, FR-008).
+- [x] T014 [P] [US1] Integration: a spec with no `research.md` (and one with a `research.md` that has no decision blocks) → ZERO ADR comments, ZERO errors, run completes (AS-2, FR-007, SC-004).
+- [x] T015 [US1] Wire US1 green + FR-008 observability: the run summary tallies ADR comments created (no silent posting). Depends on T010.
 
 **Checkpoint**: US1 is the MVP — ADRs mirror to the issue, coexisting with clarify, graceful when absent.
 
