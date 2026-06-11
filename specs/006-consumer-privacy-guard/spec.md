@@ -44,11 +44,38 @@ the equivalent guard being added to the spec-kit-linear sibling.
 
 ### Session 2026-06-11
 
-No clarification session has been run yet. Three genuinely-open design forks are
-recorded under **Open Questions (to resolve in /speckit-clarify)** with leading
-leans, rather than guessed in `specify`. The leans carry the operator's stated
-intent ("after install/reconcile … scan … fail closed") and stay symmetric with
-the spec-kit-linear sibling guard.
+The three design forks are resolved per the operator's stated intent ("after
+install/reconcile … scan the consumer's tracked tree … fail closed"), plus a
+fourth decision on build-vs-off-the-shelf scanners:
+
+- Q: (a) Lifecycle point — install, every reconcile, or a dedicated check? → A:
+  **A blocking pre-write gate on every reconcile, AND at install.** No Jira write
+  proceeds from a leaking tree (reconcile is the only write path — Principles
+  I/II), and a leak is caught the moment the bridge first touches the consumer
+  repo. A dedicated on-demand check may additionally expose it (Principle VII),
+  but is not the only trigger.
+- Q: (b) Scan scope — whole tracked tree or `.specify/` only? → A: **The whole
+  tracked tree** (`git ls-files` content) — a leaked value in a README or a debug
+  paste is exactly the case to catch; narrowing to `.specify/` would miss it.
+- Q: (c) Fail-closed semantics — abort or warn? → A: **Hard abort: exit non-zero,
+  zero Jira writes, no MVP override.** A real credential/PII shape in a tracked
+  file is a security incident, not a soft warning.
+- Q: (d) Build a bespoke guard, or use gitleaks/trufflehog? → A: **Build the
+  bespoke, dependency-free known-value + shape guard as the core; recommend (do
+  NOT bundle) gitleaks/trufflehog as a complementary, broader net.** The guard's
+  forbidden set is mostly **low-entropy PII** (the operator's Jira email, the
+  `*.atlassian.net` site, the accountId, the cloudId/UUID) that generic secret
+  scanners **miss** (not "secrets") or **false-positive** on (every UUID looks
+  like a cloudId). Only the bridge knows its **own exact resolved coordinates**
+  (it just read them from the gitignored `.env`/`jira-config.yml` to reach Jira),
+  so it can assert "these specific values never appear in the tracked tree" with
+  **zero false positives** — something no generic scanner can do. A dep-free
+  `grep` over `git ls-files` also keeps the bash/`jq`/`curl` minimal footprint and
+  integrates cleanly into the fail-closed pre-write gate. gitleaks/trufflehog are
+  **recommended in the install docs** for broader generic-secret hygiene and MAY
+  be invoked best-effort if already on `PATH`, but are NEVER a dependency and
+  NEVER the core guarantee. (trufflehog live-verification is explicitly out — it
+  would hit Jira's API.)
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -185,22 +212,27 @@ remediation, without printing the entire matched value verbatim.
 - **FR-001**: The bridge MUST provide a consumer-side privacy guard that scans
   the **consumer repo's** tracked tree (the repo the extension is installed into),
   not merely this bridge-development repo.
-- **FR-002**: The guard MUST detect, at minimum, these Jira/Atlassian
-  real-identifier **shapes** in tracked files: (a) a Jira login **email**
-  address, (b) an Atlassian **API-token** prefix shape, (c) a **cloudId / UUID**
-  shape, (d) an Atlassian **accountId** shape, and (e) a **site** host of the
-  form `<name>.atlassian.net`.
-- **FR-003**: On detecting any forbidden shape in a tracked file, the guard MUST
-  **fail closed** — the bridge refuses to proceed and exits non-zero — rather than
-  warn-and-continue. [Lean carried; see Open Question (c).]
+- **FR-002**: The guard MUST detect two complementary classes of leak in tracked
+  files: (1) **KNOWN values** — the operator's *own resolved* Jira coordinates,
+  read from the gitignored `.env` / `jira-config.yml` the bridge just used to reach
+  Jira (the exact email, site, token, cloudId, accountId): these are matched
+  **exactly**, giving a zero-false-positive guarantee that the bridge's own
+  coordinates never appear tracked; and (2) **shapes** — generic Jira/Atlassian
+  patterns even when the specific value is unknown: a Jira login **email**, an
+  Atlassian **API-token** prefix, a **cloudId/UUID**, an Atlassian **accountId**,
+  and a **site** host `<name>.atlassian.net`. The known-value pass is the primary,
+  precise guarantee; the shape pass is the defensive net.
+- **FR-003**: On detecting any forbidden value/shape in a tracked file, the guard
+  MUST **fail closed** — the bridge refuses to proceed and exits non-zero — rather
+  than warn-and-continue (clarified 2026-06-11). There is no MVP override.
 - **FR-004**: The guard MUST assert that, in the consumer repo, the resolved
   `jira-config.yml` (`.specify/extensions/jira/jira-config.yml`) and `.env` are
   **gitignored** and not tracked; if either is tracked or not ignored, the guard
   MUST fail closed and name it.
-- **FR-005**: The guard MUST run at the correct lifecycle point so that real
-  identifiers cannot be written to Jira from a leaking consumer tree. [Lean:
-  on every reconcile (the write path), as a pre-write gate; see Open Question
-  (a).]
+- **FR-005**: The guard MUST run as a **blocking pre-write gate on every
+  reconcile** (so no Jira write proceeds from a leaking tree) **and at install**
+  (so a leak is caught the moment the bridge first touches the consumer repo); it
+  MAY additionally be exposed as an on-demand check (clarified 2026-06-11).
 - **FR-006**: When the guard fails, the bridge MUST report which file(s) tripped
   it and which forbidden-shape class matched, with copy-paste remediation
   (move the real value to the gitignored `.env`/`jira-config.yml`; replace the
@@ -216,8 +248,7 @@ remediation, without printing the entire matched value verbatim.
   not self-match a forbidden pattern (Principle IX); real coordinates stay only in
   the gitignored `.env`, `jira-config.yml`, and `tests/.private-deny`.
 - **FR-010**: When the consumer target is not a usable git repo (no enumerable
-  tracked tree), the guard MUST fail closed rather than silently skip. [Lean
-  carried; revisit under Open Question (b).]
+  tracked tree), the guard MUST fail closed rather than silently skip.
 - **FR-011**: The guard MUST be idempotent and side-effect-free on the consumer
   tree — it only reads and reports; it MUST NOT edit, stage, or commit any
   consumer file (Principle I: the bridge never writes back to the filesystem).
@@ -230,7 +261,18 @@ remediation, without printing the entire matched value verbatim.
   with the spec-kit-linear consumer-side guard (same lifecycle point, same
   fail-closed posture, same gitignore assertion), differing only in the
   vendor-specific shapes (Atlassian token/site/accountId/cloudId vs Linear
-  workspace/team/UUID).
+  workspace/team/UUID). *(Note: as of 2026-06-11 the Linear sibling guard is not
+  yet landed — this repo may lead; symmetry is reconciled when both exist.)*
+- **FR-014**: The core guard MUST be **dependency-free** — implemented as a scan
+  (`git ls-files` + the known-value/shape match) using only the bridge's existing
+  toolchain (bash/`jq`/`grep`), NOT a required third-party binary. Off-the-shelf
+  secret scanners (gitleaks, trufflehog) are **recommended in the install docs**
+  as a complementary, broader net for *generic* secrets the bridge does not know
+  about, and MAY be invoked best-effort **if already present on `PATH`**, but MUST
+  NOT be a dependency and MUST NOT be the core guarantee (clarified 2026-06-11).
+  Rationale: the forbidden set is mostly low-entropy PII (email/site/accountId/
+  cloudId) that generic scanners miss or false-positive on, and only the bridge
+  knows its own exact resolved coordinates (FR-002 known-value pass).
 
 ### Key Entities *(include if feature involves data)*
 
@@ -238,10 +280,14 @@ remediation, without printing the entire matched value verbatim.
   the subject of the scan. Distinct from this bridge-development repo.
 - **Tracked tree**: the set of files git tracks in the consumer repo (what
   `git ls-files` enumerates) — the only files that can leak into history, and thus
-  the scan scope. [Whole tree vs `.specify/` only is Open Question (b).]
+  the scan scope (the **whole** tracked tree, clarified).
+- **Known-value set**: the operator's own resolved Jira coordinates (email, site,
+  token, cloudId, accountId) read from the gitignored `.env`/`jira-config.yml` —
+  matched exactly for a zero-false-positive guarantee (FR-002 pass 1). Never
+  written anywhere; held in memory for the scan only.
 - **Forbidden shape**: a pattern class describing a real Jira/Atlassian
   identifier without naming any real value — email, API-token prefix, cloudId/UUID,
-  accountId, `.atlassian.net` site host.
+  accountId, `.atlassian.net` site host (FR-002 pass 2, the defensive net).
 - **Resolved config + `.env`**: the two consumer-repo files that legitimately
   hold real values; both MUST be gitignored (the assertion in FR-004).
 
@@ -291,29 +337,17 @@ remediation, without printing the entire matched value verbatim.
   two guards share a contract shape, but the Jira guard ships independently with
   Jira-specific shapes.
 
-## Open Questions (to resolve in /speckit-clarify)
+## Open Questions — RESOLVED (Clarifications, Session 2026-06-11)
 
-These are the genuinely-open design forks. Each carries a leading lean from the
-operator's brief / the spec-kit-linear sibling; clarify pins the final answer.
+All four forks are pinned in the Clarifications section above:
 
-- **(a) Lifecycle point** — does the guard run at **install** time, on **every
-  reconcile** (the write path), or as a **dedicated `speckit.jira.check` command /
-  hook**? *Lean*: run on **every reconcile** as a pre-write gate (so no Jira write
-  ever proceeds from a leaking tree), and *also* at install (so a leak is caught
-  the moment the bridge first touches the consumer repo). A dedicated
-  `speckit.jira.check` could additionally expose it as an on-demand escape hatch
-  (Principle VII). [NEEDS CLARIFICATION: install-only vs every-reconcile vs
-  dedicated check command vs a combination — and whether it is a blocking
-  pre-write gate.]
-- **(b) Scan scope** — does the guard scan the consumer repo's **whole tracked
-  tree** or only its **`.specify/` subtree** (where the bridge writes)? *Lean*:
-  **whole tracked tree** — a leaked token in a README or a debug paste is exactly
-  the case the existing guard catches, and narrowing to `.specify/` would miss it.
-  [NEEDS CLARIFICATION: whole tracked tree vs `.specify/`-only — trade-off is
-  coverage vs scan cost / false-positive surface on large consumer repos.]
-- **(c) Fail-closed semantics** — on a finding, does the guard **abort the
-  reconcile write** (hard stop, exit non-zero) or **warn-and-continue**? *Lean*:
-  **abort / fail closed** — a real credential or PII shape in a tracked file is a
-  security incident, not a soft warning; the operator's brief says "fail closed."
-  [NEEDS CLARIFICATION: hard-abort-the-write vs warn-and-continue — and whether
-  any escape-hatch override exists, noting the MVP intends none.]
+1. **Lifecycle** → a blocking pre-write gate on **every reconcile**, AND at
+   install (optionally also an on-demand check).
+2. **Scan scope** → the **whole tracked tree** (`git ls-files`).
+3. **Fail-closed** → **hard abort**, exit non-zero, zero Jira writes, no MVP
+   override.
+4. **Build vs scanners** → build the **bespoke dep-free known-value + shape**
+   guard as the core; **recommend (not bundle)** gitleaks/trufflehog as a
+   complementary broader net, optionally invoked if on `PATH`, never a dependency.
+
+No open `[NEEDS CLARIFICATION]` markers remain.
