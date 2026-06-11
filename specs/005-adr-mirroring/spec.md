@@ -37,6 +37,25 @@ for cross-sink parity:
   place).** Survives content edits and reordering; un-headed blocks are still
   mirrored via their title slug.
 
+Three Jira-sink-specific forks were resolved by default (clear, low-risk defaults;
+recorded for traceability rather than asked):
+
+- Q: Which `research.md` decision-block grammar must the parser tolerate? → A:
+  **Both forms — tolerant, label-based.** A decision block is a `##`/`###`
+  heading whose body carries a Decision statement; Decision / Rationale /
+  Alternatives are extracted by case-insensitive label whether written as a
+  **bold lead** (`**Decision.**` / `**Decision:**`, the form this repo's own
+  `research.md` uses) or a **bullet/plain label** (`- Decision:` / `Decision:`,
+  spec-kit's stock template). Multi-line values are supported. (Shapes FR-001 +
+  the parser fixtures.)
+- Q: How is an ADR content change detected for update-in-place (FR-005)? → A:
+  **Compare a normalized digest of the rendered ADR body against the mirrored
+  comment.** The hidden marker locates the one comment by key (FR-003); a digest
+  mismatch triggers an in-place edit, a match is a no-op (zero churn).
+- Q: What format is the "source location" back-reference? → A: A **repo-relative
+  path + anchor**, `research.md#<decision-id>` — no host/URL (matches the Linear
+  sibling and stays Privacy-IX-clean).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Decisions show up on the spec's Jira issue (Priority: P1)
@@ -156,12 +175,17 @@ one-comment-per-decision placement) matches.
 
 - **FR-001**: The system MUST read each spec's architecture/decision records from
   that spec's `research.md` ONLY — specifically its structured
-  `Decision / Rationale / Alternatives` blocks — and treat each block as one ADR.
-  A `docs/adr/` corpus is NOT a source in this feature (clarified 2026-06-11).
+  `Decision / Rationale / Alternatives` blocks — and treat each block (a
+  `##`/`###` heading whose body carries a Decision statement) as one ADR. The
+  parser MUST tolerate BOTH the bold-lead label form (`**Decision.**`) and the
+  bullet/plain label form (`- Decision:` / `Decision:`), case-insensitively, with
+  multi-line values (clarified 2026-06-11). A `docs/adr/` corpus is NOT a source
+  in this feature.
 - **FR-002**: For each ADR, the system MUST mirror it as a single comment on that
   spec's Jira issue, rendered in an ADR layout that includes the decision id,
   title, status, decision, rationale, alternatives, and a back-reference to the
-  source location in the repo.
+  source location — a repo-relative path + anchor, `research.md#<decision-id>`
+  (no host/URL; clarified 2026-06-11).
 - **FR-003**: Each ADR comment MUST carry a stable, hidden idempotency marker
   derived from the spec and decision identity, where the decision key is the ADR's
   explicit heading id (`D<N>`/`R<N>`) when present, else a stable slug derived from
@@ -174,7 +198,9 @@ one-comment-per-decision placement) matches.
   guarantee the clarify-session comments provide).
 - **FR-005**: When an ADR's content changes on disk, the system MUST update that
   ADR's single existing comment in place; it MUST NOT create a second comment for
-  the same decision.
+  the same decision. Change is detected by comparing a normalized digest of the
+  rendered ADR body against the mirrored comment (a digest match is a no-op; a
+  mismatch is an in-place edit — clarified 2026-06-11).
 - **FR-006**: When a new ADR is added on disk, the system MUST create exactly one
   new comment for it and leave existing ADR comments unchanged.
 - **FR-007**: A spec with no `research.md`, or whose `research.md` contains no
