@@ -78,11 +78,11 @@ comments with the decision/rationale/alternatives/source; coexist with clarify.
 **Independent test**: reconcile twice unchanged → 0 writes; edit one ADR → 1
 update, 0 creates; add one → 1 create.
 
-- [ ] T016 [P] [US2] Integration `tests/integration/adr_us2_idempotent.bats`: re-run against an already-mirrored, unchanged corpus → 0 ADR creates, 0 edits (digest match → skip) (AS-1, FR-004, SC-002).
-- [ ] T017 [P] [US2] Integration: change one ADR's decision/rationale text on disk → exactly 1 comment UPDATED in place, 0 new comments (find-by-marker + digest mismatch) (AS-2, FR-005, SC-003).
-- [ ] T018 [P] [US2] Integration: add a new ADR to `research.md` → exactly 1 new comment, existing ADR comments untouched (AS-3, FR-006).
-- [ ] T019 [P] [US2] Integration: an unreadable comment probe → rc 3 fail-closed (no blind duplicate); a `DRY-0` placeholder issue (dry-run of an unmirrored spec) → the probe is skipped, no 404 (FR-010, edge case).
-- [ ] T020 [US2] Harden `sync_decision_records` digest/update path if any of T016–T019 fail. Depends on T016–T019.
+- [x] T016 [P] [US2] Integration `tests/integration/adr_us2_idempotent.bats`: re-run against an already-mirrored, unchanged corpus → 0 ADR creates, 0 edits (digest match → skip) (AS-1, FR-004, SC-002).
+- [x] T017 [P] [US2] Integration: change one ADR's decision/rationale text on disk → exactly 1 comment UPDATED in place, 0 new comments (find-by-marker + digest mismatch) (AS-2, FR-005, SC-003).
+- [x] T018 [P] [US2] Integration: add a new ADR to `research.md` → exactly 1 new comment, existing ADR comments untouched (AS-3, FR-006).
+- [x] T019 [P] [US2] Integration: an unreadable comment probe → rc 3 fail-closed (no blind duplicate); a `DRY-0` placeholder issue (dry-run of an unmirrored spec) → the probe is skipped, no 404 (FR-010, edge case).
+- [x] T020 [US2] Harden `sync_decision_records` digest/update path if any of T016–T019 fail. Depends on T016–T019.
 
 **Checkpoint**: idempotent + update-in-place + fail-closed proven.
 
@@ -94,8 +94,8 @@ update, 0 creates; add one → 1 create.
 
 **Independent test**: the rendered ADR body matches the golden contract layout.
 
-- [ ] T021 [P] [US3] Integration `tests/integration/adr_parity.bats`: render an ADR from a fixed `research.md` fixture and assert the body matches `contracts/adr-comment-layout.md` exactly — title line, Status, Decision/Rationale/Alternatives (absent omitted), Source `research.md#<id>`, marker last (FR-009, SC-005). This is the same golden shape the Linear sibling asserts.
-- [ ] T022 [US3] Reconcile any layout drift to the golden contract (and update the contract + the Linear sibling's expectation if a deliberate shape change is agreed). Depends on T021.
+- [x] T021 [P] [US3] Integration `tests/integration/adr_parity.bats`: render an ADR from a fixed `research.md` fixture and assert the body matches `contracts/adr-comment-layout.md` exactly — title line, Status, Decision/Rationale/Alternatives (absent omitted), Source `research.md#<id>`, marker last (FR-009, SC-005). This is the same golden shape the Linear sibling asserts.
+- [x] T022 [US3] Reconcile any layout drift to the golden contract (and update the contract + the Linear sibling's expectation if a deliberate shape change is agreed). Depends on T021.
 
 **Checkpoint**: cross-sink parity locked by a golden test.
 
