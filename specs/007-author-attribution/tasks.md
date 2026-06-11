@@ -76,8 +76,8 @@ unresolvable author → graceful no-op.
 **Independent test**: a `null`-accountId author → the issue is unassigned but
 carries `author:<handle>`; an unknown author → no label, no assignee, no error.
 
-- [ ] T016 [P] [US2] Integration `tests/integration/attr_us2_nonuser_label.bats`: a known author whose map entry has `accountId: null` → CREATE omits assignee but labels `author:<handle>` (AS-1, SC-002); a spec with no `Owner:` line and no git history → no author label, no assignee, run completes (AS-2, FR-007 graceful).
-- [ ] T017 [US2] Harden the sink path for `null` accountId (label-only) and unknown author (skip both) in `src/jira_sink.sh`. Depends on T015.
+- [x] T016 [P] [US2] Integration `tests/integration/attr_us2_nonuser_label.bats`: a known author whose map entry has `accountId: null` → CREATE omits assignee but labels `author:<handle>` (AS-1, SC-002); a spec with no `Owner:` line and no git history → no author label, no assignee, run completes (AS-2, FR-007 graceful).
+- [x] T017 [US2] Harden the sink path for `null` accountId (label-only) and unknown author (skip both) in `src/jira_sink.sh`. Depends on T015.
 
 **Checkpoint**: the universal label track works for everyone, including non-members.
 
