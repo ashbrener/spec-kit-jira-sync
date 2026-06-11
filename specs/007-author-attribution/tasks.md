@@ -25,10 +25,10 @@ byte-identical (US4 anchor). Privacy IX is a hard gate.
 
 ## Phase 1: Setup
 
-- [ ] T001 Add `.specify/extensions/jira/jira-authors.local.yml` to `.gitignore` (the operator map holds real emails/accountIds = PII; mirror the existing `.env`/`jira-config.yml` ignores). Confirm `git check-ignore` matches.
-- [ ] T002 [P] Commit `.specify/extensions/jira/jira-authors.local.yml.sample` — the map shape with **placeholder** ids only (per `contracts/authors-map.md`), shaped not to self-match the privacy guard (Principle IX).
-- [ ] T003 [P] Add the opt-in `attribution:` block to `config-template.yml` (`enabled`/`assignee`/`label`/`author_source`/`authors_file`), documented as default-OFF = today's behavior.
-- [ ] T004 Add a neutral, additive `author` floor field (`{value, source}`) to the workstate schema (`~/Code/AI/workstate-schema/schema/workstate.schema.json`). **(cross-repo, like 005's `decisions[]`)** Additive-safe (items without it still validate); CANNOT ride the 007 PR; the bridge CI gate doesn't require it (validation conditional). Merge to the schema repo's local main.
+- [x] T001 Add `.specify/extensions/jira/jira-authors.local.yml` to `.gitignore` (the operator map holds real emails/accountIds = PII; mirror the existing `.env`/`jira-config.yml` ignores). Confirm `git check-ignore` matches.
+- [x] T002 [P] Commit `.specify/extensions/jira/jira-authors.local.yml.sample` — the map shape with **placeholder** ids only (per `contracts/authors-map.md`), shaped not to self-match the privacy guard (Principle IX).
+- [x] T003 [P] Add the opt-in `attribution:` block to `config-template.yml` (`enabled`/`assignee`/`label`/`author_source`/`authors_file`), documented as default-OFF = today's behavior.
+- [x] T004 Add a neutral, additive `author` floor field (`{value, source}`) to the workstate schema (`~/Code/AI/workstate-schema/schema/workstate.schema.json`). **(cross-repo, like 005's `decisions[]`)** Additive-safe (items without it still validate); CANNOT ride the 007 PR; the bridge CI gate doesn't require it (validation conditional). Merge to the schema repo's local main.
 
 **Checkpoint**: gitignore + sample + config block + schema field in place.
 
