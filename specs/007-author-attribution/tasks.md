@@ -106,8 +106,8 @@ stable `author:*` label.
 **Independent test**: with the block absent, the create/update payloads have no
 assignee and no `author:*` label.
 
-- [ ] T020 [P] [US4] Integration `tests/integration/attr_us4_off_byte_identical.bats`: `attribution.enabled` absent AND false → zero assignee fields, zero `author:*` labels in every payload; identical to pre-007 (AS-1, FR-006, SC-004).
-- [ ] T021 [US4] Confirm the default-OFF short-circuit (no map load, no resolution side-effects, no payload change) in `src/reconcile.sh`/`src/jira_sink.sh`. Depends on T015.
+- [x] T020 [P] [US4] Integration `tests/integration/attr_us4_off_byte_identical.bats`: `attribution.enabled` absent AND false → zero assignee fields, zero `author:*` labels in every payload; identical to pre-007 (AS-1, FR-006, SC-004).
+- [x] T021 [US4] Confirm the default-OFF short-circuit (no map load, no resolution side-effects, no payload change) in `src/reconcile.sh`/`src/jira_sink.sh`. Depends on T015.
 
 **Checkpoint**: backward-compat regression anchor holds.
 
