@@ -38,14 +38,18 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **004-mapping-remode** (active) — guarded, opt-in re-mode / orphan pruning:
-  when the mapping shape changes, `--remode` prunes the bridge-owned orphans the
-  current mapping no longer projects (orphans = E\D over `speckit-*` identity
-  labels) and regenerates the new shape. Fail-safe scoping (never touch
-  operator issues), `--remode --dry-run` preview, fail-closed reads, default
-  hard-delete (archive optional). Introduces controlled destruction → gated on a
-  constitutional amendment (v1.0.0→v1.1.0). Built on 003's neutral level loop.
-  Spec+clarify+plan done. Plan: `specs/004-mapping-remode/plan.md`
+- **No feature currently active** — 001–004 all merged to main. The natural next
+  step is the **engine extraction** (carve the now-vendor-neutral engine into a
+  shared lib with spec-kit-linear), unblocked by 003's enforced neutrality gate;
+  or sink-side Initiative-toggle type-awareness (the 004 T017 follow-up).
+- **004-mapping-remode** — guarded, opt-in re-mode / orphan pruning: `--remode`
+  prunes the bridge-owned orphans the current mapping no longer projects (orphans
+  = E\D over `speckit-*` identity labels) and regenerates the new shape. Fail-safe
+  scoping (never touch operator issues), `--remode --dry-run` preview, fail-closed
+  reads, default hard-delete (archive optional). Introduced controlled destruction
+  via constitution **v1.1.0** carve-out. Merged to main (PR #7); 417-test suite
+  green. Known follow-up: sink-side Initiative-toggle type-awareness (T017).
+  Plan: `specs/004-mapping-remode/plan.md`
 - **003-engine-orchestration-unification** — behavior-preserving re-platforming:
   the 001-era orchestrators replaced by one neutral mapping-driven level loop,
   deleted, with an enforced vendor-neutral engine path (extraction prerequisite).

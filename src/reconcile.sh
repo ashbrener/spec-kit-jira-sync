@@ -1459,6 +1459,15 @@ reconcile::sync_inter_phase_blocks() {
     local spec_issue_id="$1"
     local item_json="$2"
 
+    # Dry-run of a not-yet-mirrored spec: the create was synthesized to the
+    # placeholder key (DRY-0), so there is no real issue to read existing links
+    # from. Skip the existence-check read — it would 404 → fail-closed rc 3 and
+    # spuriously escalate the dry-run exit to 3. The dry-run already logged the
+    # intended create; the links would reconcile on the next real run.
+    if [[ "$spec_issue_id" == "DRY-0" ]]; then
+        reconcile::log "DRY-RUN: spec not yet mirrored — cross-spec links would reconcile after the create"
+        return 0
+    fi
     sync_inter_phase_blocks "$spec_issue_id" "$item_json"
 }
 
@@ -1472,6 +1481,14 @@ reconcile::sync_clarify_comments() {
     local spec_issue_id="$1"
     local item_json="$2"
 
+    # Dry-run of a not-yet-mirrored spec: the create was synthesized to the
+    # placeholder key (DRY-0); reading comments off it would 404 → fail-closed
+    # rc 3 and spuriously escalate the dry-run exit to 3 (the issue does not
+    # exist yet). Skip — the comments would reconcile on the next real run.
+    if [[ "$spec_issue_id" == "DRY-0" ]]; then
+        reconcile::log "DRY-RUN: spec not yet mirrored — clarify comments would reconcile after the create"
+        return 0
+    fi
     sync_clarify_comments "$spec_issue_id" "$item_json"
 }
 
