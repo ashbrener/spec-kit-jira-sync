@@ -2,6 +2,7 @@
 
 **Branch**: `001-sample`
 **Status**: Draft
+**Owner**: dev-sample@example.com
 
 ## Summary
 

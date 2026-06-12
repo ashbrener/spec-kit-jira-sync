@@ -92,6 +92,37 @@ _private_patterns() {
     tests/fixtures/workstate/direct/placeholder.workstate.json
 }
 
+@test "feature-007 author map sample is tracked + placeholder-only (Privacy IX / FR-010)" {
+  # The committed authors-map sample must be UNDER the git-ls-files scan (so the
+  # privacy guard actually covers it) and carry only neutral placeholders — no
+  # real email/account id, and a non-PII handle (never an email/local-part).
+  cd "$REPO_ROOT"
+  local sample=".specify/extensions/jira/jira-authors.local.yml.sample"
+  git ls-files --error-unmatch -- "$sample" >/dev/null 2>&1 || {
+    echo "untracked (the privacy guard would not scan it): $sample" >&2
+    return 1
+  }
+  # The example emails are example.com (reserved, never real).
+  grep -q 'dev-one@example.com' "$sample"
+  grep -q 'handle: "dev-one"' "$sample"
+  # A null-accountId placeholder demonstrates the label-only (non-Jira-user) case.
+  grep -q 'accountId: null' "$sample"
+  # The RESOLVED map (real PII) must be gitignored — never tracked.
+  if git ls-files --error-unmatch -- \
+      ".specify/extensions/jira/jira-authors.local.yml" >/dev/null 2>&1; then
+    echo "the resolved authors map (real PII) is TRACKED — it must be gitignored" >&2
+    return 1
+  fi
+}
+
+@test "feature-007 attribution config block is committed placeholder-only" {
+  cd "$REPO_ROOT"
+  # The opt-in attribution: block ships in the committed template with the
+  # gitignored authors_file path only — no real coordinate.
+  grep -q 'attribution:' config-template.yml
+  grep -q 'jira-authors.local.yml' config-template.yml
+}
+
 @test "private deny-list, when present, actually contributes patterns" {
   # Guards against a silently-empty deny-list giving false confidence. Skips
   # cleanly in CI where the gitignored file is absent.

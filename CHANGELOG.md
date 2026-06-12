@@ -12,6 +12,23 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Author-based attribution (label-first, optional assignee)** — opt-in
+  `attribution:` config block makes the board reflect *who* authored each spec,
+  as two tracks: an account-independent **`author:<handle>` label** stamped on
+  the spec issue **always** (works for authors with no Jira account), plus a Jira
+  **assignee** set on **create only** when the author maps to a real `accountId`
+  (never re-sent on update, so a manual reassignment survives — the Linear bridge
+  FR-034 semantics). Author **resolution** is vendor-neutral: an explicit
+  `Owner:`/`Author:` line in `spec.md` wins, else the first git author to add the
+  spec dir, else *unknown* (a graceful no-op, not an error) — carried on the
+  workstate item as a neutral `author {value, source}` floor field; the
+  email→`accountId`/`handle` mapping is the sink's job, via a **gitignored**
+  operator map (`jira-authors.local.yml`; only a placeholder `.sample` ships, as
+  the map holds real emails + account ids = PII). A `null` `accountId` is
+  label-only; a stale/deactivated account is **fail-soft** (surfaced, the label
+  still lands). **Off by default** — absent/`enabled: false` is byte-identical to
+  prior behavior (no assignee, no `author:*` label). Labels carry a non-PII
+  handle, never an email (Privacy IX).
 - **ADR / decision-record mirroring** (feature 005) — each spec's `research.md`
   decision records (the `Decision / Rationale / Alternatives` blocks, in both the
   bold-lead and stock-bullet grammars) are mirrored as one idempotent comment per

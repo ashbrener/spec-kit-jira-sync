@@ -89,6 +89,46 @@ jira:
     # re-run so configured Task levels stay idempotent (feature-002, Q9).
     task_prefix: "speckit-task:"
 
+  # OPTIONAL author-based attribution (feature-007). The whole `attribution:`
+  # block is opt-in: when ABSENT or `enabled: false` the bridge behaves exactly
+  # as today — issues are created with NO assignee and NO author label, so an
+  # existing config upgrades byte-for-byte unchanged (US4 / SC-004). Turn it on
+  # to make the board reflect WHO authored each spec, as two tracks:
+  #   1. an account-independent `author:<handle>` LABEL stamped on the spec
+  #      issue ALWAYS (works for authors with no Jira account);
+  #   2. a Jira ASSIGNEE set on CREATE only, when the author maps to a real
+  #      account id (never re-sent on update — a manual reassignment survives,
+  #      mirroring the Linear bridge's FR-034 assignee semantics).
+  #
+  # Author RESOLUTION (per spec, in priority order): an explicit `Owner:` /
+  # `Author:` line in spec.md, else the first git author to ADD the spec dir,
+  # else unknown (no label, no assignee, not an error). The email -> Jira
+  # accountId + handle mapping comes from the GITIGNORED operator file
+  # `authors_file` (it holds real emails + account ids = PII; never
+  # committed — only `jira-authors.local.yml.sample` ships). A map entry
+  # with `accountId: null` is label-only; an unmapped/unresolved author is a
+  # graceful no-op.
+  #
+  # CAVEAT (FR-007): the bridge does NOT change the project's assignee policy.
+  # If `assignee: true` and the project default is `PROJECT_LEAD`, an UNMAPPED
+  # author's issue still lands on the lead. For a neutral mirror, set the
+  # project's default assignee to `Unassigned`.
+  attribution:
+    # Master switch. false / absent => zero assignee, zero author label
+    # (byte-identical to today). Default OFF.
+    enabled: false
+    # Set the spec issue's assignee on CREATE when the author maps to a non-null
+    # accountId (never on update). Independent of `label`.
+    assignee: true
+    # Stamp the always-on, account-independent `author:<handle>` label.
+    label: true
+    # Author resolution order. The default tries the explicit Owner:/Author:
+    # line first, then the git first-add author of the spec dir.
+    author_source: [spec_owner_line, git_first_add]
+    # Path to the GITIGNORED operator identity map (email -> accountId+handle).
+    # Copy jira-authors.local.yml.sample to this path and fill with real ids.
+    authors_file: ".specify/extensions/jira/jira-authors.local.yml"
+
   # OPTIONAL re-mode / orphan pruning (feature-004). Governs ONLY the explicit
   # `reconcile.sh --remode` destructive operation; the ordinary reconcile never
   # prunes. The whole block is optional — absent => `destruction: hard-delete`.

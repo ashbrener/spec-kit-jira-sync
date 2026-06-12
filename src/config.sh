@@ -494,6 +494,50 @@ config::validate() {
 }
 
 # ===========================================================================
+# Feature 007 — author-based attribution config accessors.
+#
+# The opt-in `attribution:` block governs the feature: {enabled, assignee,
+# label, author_source, authors_file}. The whole block is OPTIONAL and additive;
+# absent OR `enabled: false` ⇒ the feature is OFF (default), which the engine
+# short-circuits to byte-identical-to-today behavior (US4/SC-004). These are
+# pure boolean/string accessors over CONFIG_VALUES — no Jira knowledge, no
+# network. The assignee/accountId/handle MECHANICS live in the sink, never here.
+# ===========================================================================
+
+# config::attribution_enabled
+#   rc 0 (true) iff `attribution.enabled` is exactly "true"; rc 1 otherwise
+#   (absent / false / any other value). The master gate.
+config::attribution_enabled() {
+    config::_require_loaded
+    [[ "${CONFIG_VALUES[attribution.enabled]:-false}" == "true" ]]
+}
+
+# config::attribution_assignee
+#   rc 0 (true) when the assignee track is on. Defaults to ON when the block is
+#   enabled but `assignee` is unspecified (assignee:true is the documented
+#   default). Independent of the label track.
+config::attribution_assignee() {
+    config::_require_loaded
+    [[ "${CONFIG_VALUES[attribution.assignee]:-true}" == "true" ]]
+}
+
+# config::attribution_label
+#   rc 0 (true) when the always-on author:<handle> label track is on. Defaults
+#   to ON when enabled but unspecified.
+config::attribution_label() {
+    config::_require_loaded
+    [[ "${CONFIG_VALUES[attribution.label]:-true}" == "true" ]]
+}
+
+# config::attribution_authors_file
+#   Echo the configured path to the gitignored operator identity map, or the
+#   canonical default when unspecified.
+config::attribution_authors_file() {
+    config::_require_loaded
+    printf '%s\n' "${CONFIG_VALUES[attribution.authors_file]:-.specify/extensions/jira/jira-authors.local.yml}"
+}
+
+# ===========================================================================
 # Feature 002 — configurable artifact mapping (mapping::* namespace).
 #
 # These functions extend config.sh with the optional `mapping:` block: parse +

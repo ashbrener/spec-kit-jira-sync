@@ -59,7 +59,11 @@
           }
         }
       ],
-      "body": "A small placeholder spec used to drive parser and workstate tests for the\nspec-kit-jira-sync bridge. It carries no real coordinates and exists only as\non-disk fixture input."
+      "body": "A small placeholder spec used to drive parser and workstate tests for the\nspec-kit-jira-sync bridge. It carries no real coordinates and exists only as\non-disk fixture input.",
+      "author": {
+        "value": "dev-sample@example.com",
+        "source": "owner_line"
+      }
     },
     {
       "id": "002-updates",
@@ -102,7 +106,11 @@
           }
         }
       ],
-      "body": "A placeholder spec used to drive the US4 integration test (clarify comments +\ncross-spec issue links). It carries no real coordinates and exists only as\non-disk fixture input."
+      "body": "A placeholder spec used to drive the US4 integration test (clarify comments +\ncross-spec issue links). It carries no real coordinates and exists only as\non-disk fixture input.",
+      "author": {
+        "value": "dev-updates@example.com",
+        "source": "owner_line"
+      }
     },
     {
       "id": "005-adr-bold",

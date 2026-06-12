@@ -1069,6 +1069,12 @@ reconcile::sync_spec_issue() {
             printf 'spec-transition\tfailed\n' >>"$RECONCILE_DISPOSITION_FILE"
         fi
     fi
+    # Attribution fail-soft (feature-007 FR-008): a rejected assignee write was
+    # surfaced + retried without the assignee (the author label still landed).
+    # Name it in the run summary — observable, non-fatal (the spec completed).
+    if [[ "${JIRA_SINK_LEVEL_ASSIGNEE_FAILED:-0}" == "1" ]]; then
+        summary::add updated "spec ${feature_number}: author assignee not applied (stale/deactivated account) — author label applied; manual assignment unaffected"
+    fi
     printf '%s\n' "$spec_issue_id"
 }
 
@@ -1137,6 +1143,12 @@ reconcile::compose_payload() {
             # create. mapping::resolve_level is config (neutral), not Jira.
             local _two_level=0
             [[ "$(mapping::resolve_level phase 2>/dev/null | cut -f1)" == "checklist" ]] && _two_level=1
+            # Author (feature-007 M1): pass the NEUTRAL `author {value, source}`
+            # floor straight through so the sink's create branch can read
+            # `input.author` (the sink maps value→accountId/handle from its
+            # gitignored map; the neutral payload NEVER holds a handle/accountId).
+            # `value` is a free email/owner string + a `source` enum — no Jira
+            # vocabulary, so the audited neutrality gate stays green.
             printf '%s' "$item_json" | jq -c \
                 --arg lp "$lifecycle_prefix" --argjson tl "$_two_level" '
                 (.id | split("-")[0]) as $n
@@ -1144,6 +1156,7 @@ reconcile::compose_payload() {
                     body:    (.body // ""),
                     labels:  ([($lp + (.state // ""))] + (.labels // []) | unique),
                     state:   (.state // "") }
+                + (if (.author // {}) | length > 0 then { author: .author } else {} end)
                 + (if $tl == 1 then
                     { checklist_tasks: [ (.children // []) | to_entries[]
                         | (.key) as $i | (.value) as $c

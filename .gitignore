@@ -13,6 +13,13 @@
 # Bootstrap: copy the template, run install.
 .specify/extensions/jira/jira-config.yml
 
+# Author-attribution identity map (feature-007) — maps a git author email to a
+# real Jira accountId + a non-PII handle, so it holds real emails + account ids
+# (PII). Like jira-config.yml above, real values live only in this local-only
+# file; only the committed `jira-authors.local.yml.sample` (placeholder ids)
+# ships. Copy the sample, fill with real ids.
+.specify/extensions/jira/jira-authors.local.yml
+
 # Privacy-guard local deny-list — holds the operator's REAL coordinates
 # (workspace/company name, project keys, site, cloudId, accountId, email) so
 # tests/unit/no-real-identifiers.bats can scan for accidental leaks. Real

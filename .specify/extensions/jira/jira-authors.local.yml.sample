@@ -1,0 +1,37 @@
+# jira-authors.local.yml.sample  (feature-007 — author-based attribution)
+#
+# COMMITTED PLACEHOLDER sample for the gitignored author-identity map.
+#
+# Copy this file to the GITIGNORED resolved location
+#   .specify/extensions/jira/jira-authors.local.yml
+# and replace every placeholder below with REAL values read off your own Jira
+# site. The resolved copy holds real emails + account ids (PII) and is
+# gitignored (see .gitignore); THIS sample, with placeholders only, is the only
+# author map committed to the tree.
+#
+# Privacy (Principle IX): every value here is a neutral, made-up placeholder —
+# example.com emails, obviously-fake account ids, non-PII handles. NO real
+# email, account id, site, or name may EVER appear in this committed file; the
+# privacy guard (tests/unit/no-real-identifiers.bats) scans the tracked tree and
+# gates CI.
+#
+# Map shape (specs/007-author-attribution/contracts/authors-map.md):
+#   authors.<email>.accountId : the Jira account id, or null / omit = the author
+#                               is KNOWN but NOT assignable (label-only — covers
+#                               authors with no Jira account).
+#   authors.<email>.handle    : REQUIRED — the non-PII token used for the
+#                               `author:<handle>` label. NEVER an email or email
+#                               local-part (which can be PII on a shareable
+#                               issue); an operator-chosen handle.
+#   default_assignee          : null = leave an unmapped author's issue
+#                               unassigned (NOT the project lead). An id here
+#                               would default an unmapped-but-assignable author.
+schema_version: 1
+authors:
+  "dev-one@example.com":
+    accountId: "0000aaaa1111bbbb2222cccc"   # placeholder shape, not a real id
+    handle: "dev-one"
+  "dev-two@example.com":
+    accountId: null                          # known author, no Jira account → label only
+    handle: "dev-two"
+default_assignee: null

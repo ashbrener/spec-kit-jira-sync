@@ -155,6 +155,58 @@ Subtask issues) are on the [roadmap](#status--roadmap).
 > Subtasks (or run `--remode`) before re-pushing. See the
 > [CHANGELOG](CHANGELOG.md) for details.
 
+### Author attribution (opt-in)
+
+By default the bridge creates issues with no assignee, so they fall to the
+consumer project's default-assignee policy — on a `PROJECT_LEAD` project every
+spec shows the project lead, never the actual author. Opt into
+**author-based attribution** to make the board reflect *who* authored each spec,
+as **two tracks**:
+
+- **An `author:<handle>` label, always** — account-independent, so it works even
+  for authors who have **no Jira account**. The `<handle>` is an operator-chosen,
+  **non-PII** token from the gitignored authors map (never an email).
+- **A Jira assignee, on create only** — set when the author maps to a real
+  `accountId`. It is **never re-sent on update**, so a manual reassignment in
+  Jira survives (the Linear bridge's FR-034 semantics). A `null`/absent
+  `accountId` is **label-only** (the non-member case).
+
+Author **resolution** (per spec): an explicit `Owner:`/`Author:` line in
+`spec.md` wins; otherwise the **first git author to add the spec dir**;
+otherwise *unknown* (no label, no assignee — not an error). Email → `accountId`
+cannot be resolved at runtime (Jira's email user-search is GDPR-restricted), so
+a **static, operator-maintained map** is required.
+
+Enable it in the gitignored `jira-config.yml`:
+
+```yaml
+attribution:
+  enabled: true          # default OFF — absent/false = byte-identical to today
+  assignee: true         # set the create-time assignee when the author maps
+  label: true            # stamp the always-on author:<handle> label
+  authors_file: ".specify/extensions/jira/jira-authors.local.yml"
+```
+
+Then copy `jira-authors.local.yml.sample` to the gitignored
+`jira-authors.local.yml` and fill in real ids (it holds real emails + account
+ids = PII, so it is **never committed**):
+
+```yaml
+schema_version: 1
+authors:
+  "dev@example.com": { accountId: "<jira-account-id>", handle: "dev" }
+  "nonuser@example.com": { accountId: null, handle: "nonuser" }  # label-only
+default_assignee: null   # null = leave unassigned (NOT the project lead)
+```
+
+> **`PROJECT_LEAD` caveat (FR-007):** the bridge does **not** change your
+> project's assignee policy. If `assignee: true` and the project default is
+> `PROJECT_LEAD`, an **unmapped** author's spec still lands on the lead. For a
+> neutral mirror, set the project's default assignee to **Unassigned**.
+
+A stale/deactivated `accountId` is **fail-soft**: the assignee write is surfaced
+(warned) and the spec still completes with its label — never a full-run abort.
+
 ---
 
 ## Changing the mapping: guarded re-mode (`--remode`)

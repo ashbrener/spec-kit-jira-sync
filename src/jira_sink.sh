@@ -91,6 +91,230 @@ jira_sink::_error_detail() {
     fi
 }
 
+# =============================================================================
+# Feature 007 — author-based attribution (sink-side: identity map + accountId/
+# handle MECHANICS). Author RESOLUTION is vendor-neutral and already happened in
+# the engine/parser (the neutral `author {value, source}` floor on the item,
+# threaded through compose_payload). HERE the sink maps `value` (an email/owner
+# string) → a Jira `{accountId, handle}` via the gitignored operator map and
+# projects the two attribution tracks (label always; assignee on create only).
+#
+# PRIVACY (Principle IX): the map holds real emails + account ids (PII) and is
+# gitignored; only a placeholder `.sample` ships. Labels carry a non-PII handle,
+# NEVER an email. This loader reads the gitignored file; nothing here is tracked.
+# =============================================================================
+
+# jira_sink::_load_authors <path>
+#   Parse the gitignored authors map (jira-authors.local.yml) into a NEUTRAL
+#   JSON object on stdout:
+#     { "authors": { "<email>": {"accountId": <id|null>, "handle": "<h>"} ... },
+#       "default_assignee": <id|null> }
+#   An ABSENT/unreadable file → `{"authors":{},"default_assignee":null}` (rc 0 —
+#   attribution then yields no label/assignee for any author, surfaced upstream).
+#
+#   The map shape is shallow + fixed (per contracts/authors-map.md), so it is
+#   parsed with a small awk state machine emitting `email\tfield\tvalue` rows
+#   that jq folds into the object — no yq dependency (keeps the dep surface bash
+#   + jq, matching config.sh's no-yq stance). `null` (unquoted) maps to JSON
+#   null; a quoted value is a JSON string.
+jira_sink::_load_authors() {
+    local path="${1:-}"
+    if [[ -z "$path" || ! -r "$path" ]]; then
+        printf '%s' '{"authors":{},"default_assignee":null}'
+        return 0
+    fi
+
+    # Emit TAB-separated rows the jq reducer consumes:
+    #   A\t<email>\taccountId\t<raw>       (author field)
+    #   A\t<email>\thandle\t<raw>
+    #   D\t<raw>                            (default_assignee)
+    # <raw> is the YAML scalar verbatim (quotes/`null` preserved) so jq can
+    # decide string-vs-null. The awk tracks the current author key by indent.
+    local rows
+    rows="$(awk '
+        function strip(s) {
+            gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s
+        }
+        function unquote(s,   t) {
+            t = s
+            if (t ~ /^".*"$/) { sub(/^"/, "", t); sub(/"$/, "", t) }
+            else if (t ~ /^'"'"'.*'"'"'$/) { sub(/^'"'"'/, "", t); sub(/'"'"'$/, "", t) }
+            return t
+        }
+        # Strip a trailing comment (no # inside the simple values we accept).
+        { sub(/[ \t]+#.*$/, "") }
+        /^[ \t]*$/ { next }
+        {
+            # Compute indent (leading spaces).
+            line = $0
+            n = 0
+            while (substr(line, n + 1, 1) == " ") n++
+            content = strip(line)
+        }
+        # Top-level keys (indent 0): authors:, default_assignee:, schema_version:
+        n == 0 {
+            if (content ~ /^authors:/) { in_authors = 1; cur = ""; next }
+            if (content ~ /^default_assignee:/) {
+                in_authors = 0
+                v = content; sub(/^default_assignee:[ \t]*/, "", v); v = strip(v)
+                printf "D\t%s\n", v
+                next
+            }
+            in_authors = 0
+            next
+        }
+        # An author email key (indent 2): "<email>:" with no value after the colon.
+        in_authors && n <= 2 {
+            ci = index(content, ":")
+            key = strip(substr(content, 1, ci - 1))
+            cur = unquote(key)
+            next
+        }
+        # An author field (indent >= 4): accountId: / handle:
+        in_authors && cur != "" && n >= 4 {
+            ci = index(content, ":")
+            fld = strip(substr(content, 1, ci - 1))
+            val = strip(substr(content, ci + 1))
+            if (fld == "accountId" || fld == "handle") {
+                printf "A\t%s\t%s\t%s\n", cur, fld, val
+            }
+            next
+        }
+    ' "$path")"
+
+    printf '%s\n' "$rows" | jq -Rs '
+        def toval(raw): if (raw == "null" or raw == "") then null
+                        else (raw | ltrimstr("\"") | rtrimstr("\"")
+                                  | ltrimstr("'"'"'") | rtrimstr("'"'"'")) end;
+        reduce (split("\n")[] | select(length > 0) | split("\t")) as $r
+          ( {authors: {}, default_assignee: null};
+            if $r[0] == "D" then .default_assignee = toval($r[1])
+            elif $r[0] == "A" then
+              .authors[$r[1]] = ((.authors[$r[1]] // {}) + { ($r[2]): toval($r[3]) })
+            else . end )
+    '
+}
+
+# jira_sink::_author_accountId <loaded_json> <email>
+#   Echo the mapped accountId for <email>, or empty (rc 0) when the author is
+#   absent OR mapped with a null accountId (label-only, the non-Jira-user case).
+jira_sink::_author_accountId() {
+    local loaded="${1:-}" email="${2:-}"
+    printf '%s' "$loaded" | jq -r --arg e "$email" \
+        '.authors[$e].accountId // empty' 2>/dev/null || true
+}
+
+# jira_sink::_author_handle <loaded_json> <email>
+#   Echo the non-PII handle for <email> on rc 0. rc 1 (empty) when the author is
+#   UNKNOWN (not in the map) OR is mapped but missing a `handle` — a config error
+#   surfaced to the operator, NEVER a PII email fallback (FR-004).
+jira_sink::_author_handle() {
+    local loaded="${1:-}" email="${2:-}"
+    local handle
+    handle="$(printf '%s' "$loaded" | jq -r --arg e "$email" \
+        '.authors[$e].handle // empty' 2>/dev/null || true)"
+    if [[ -n "$handle" ]]; then
+        printf '%s\n' "$handle"
+        return 0
+    fi
+    # Known author with no handle → config error (caller surfaces it); unknown
+    # author → graceful no-op. Either way: no label token.
+    return 1
+}
+
+# jira_sink::_author_known <loaded_json> <email>
+#   rc 0 iff <email> is a key in the loaded map (a KNOWN author, regardless of
+#   accountId/handle). Lets the projection distinguish a config error (known but
+#   no handle) from a graceful no-op (unknown author).
+jira_sink::_author_known() {
+    local loaded="${1:-}" email="${2:-}"
+    [[ -n "$email" ]] || return 1
+    printf '%s' "$loaded" | jq -e --arg e "$email" \
+        '.authors | has($e)' >/dev/null 2>&1
+}
+
+# jira_sink::_apply_author_label <labels_json> <handle>
+#   Echo the labels array with `author:*` hygiene applied: strip ANY existing
+#   `author:*` label and set the current `author:<handle>` (the same strip-stale-
+#   then-set idempotency as the lifecycle `phase:*` labels). Works on create AND
+#   update; an author change replaces (never stacks). Built with jq.
+jira_sink::_apply_author_label() {
+    local labels_json="${1:-[]}" handle="${2:-}"
+    printf '%s' "$labels_json" | jq -c --arg h "author:${handle}" '
+        ([ .[] | select(startswith("author:") | not) ] + [$h]) | unique'
+}
+
+# jira_sink::_resolve_attribution <level> <input_json>
+#   The single attribution entry point for sync_level_artifact. OFF-by-default
+#   SHORT-CIRCUIT first: returns rc 1 immediately (no map load, no resolution
+#   side-effect, no global mutation) when attribution is disabled OR this is not
+#   the spec level (attribution is spec→Task level only — M2; epic/phase label
+#   inheritance is a documented future stretch, not implemented).
+#
+#   When active it resolves the neutral `input.author.value` against the
+#   gitignored map and sets three OUT globals consumed by the caller:
+#     _ATTR_LABELS_JSON   the labels with author:<handle> applied (stale stripped)
+#                         — empty when no label is warranted (unknown author /
+#                         label track off / missing handle).
+#     _ATTR_ACCOUNT_ID    the accountId to set on CREATE (empty = omit assignee).
+#     _ATTR_SUMMARY       a human row: author + source + outcome.
+#   rc 0 when attribution is active (even if it yields no label/assignee — the
+#   caller still consulted it); rc 1 when short-circuited (caller does nothing).
+jira_sink::_resolve_attribution() {
+    local level="${1:-}" input_json="${2:-}"
+    _ATTR_LABELS_JSON=""
+    _ATTR_ACCOUNT_ID=""
+    _ATTR_SUMMARY=""
+
+    # OFF by default + spec-level only — short-circuit BEFORE any map load.
+    config::attribution_enabled || return 1
+    [[ "$level" == "spec" ]] || return 1
+
+    # The neutral author floor threaded through compose_payload.
+    local value source
+    value="$(printf '%s' "$input_json" | jq -r '.author.value // ""' 2>/dev/null || printf '')"
+    source="$(printf '%s' "$input_json" | jq -r '.author.source // ""' 2>/dev/null || printf '')"
+
+    if [[ -z "$value" ]]; then
+        _ATTR_SUMMARY="author unknown (no Owner: line, no git history) — no label, no assignee"
+        return 0
+    fi
+
+    # Load the gitignored operator map (absent → empty map).
+    local authors_file loaded
+    authors_file="$(config::attribution_authors_file)"
+    loaded="$(jira_sink::_load_authors "$authors_file")"
+
+    # Label track (always-on, account-independent) — gated on attribution.label.
+    if config::attribution_label; then
+        local handle
+        if handle="$(jira_sink::_author_handle "$loaded" "$value")"; then
+            _ATTR_LABELS_JSON="$handle"   # caller applies via _apply_author_label
+        elif jira_sink::_author_known "$loaded" "$value"; then
+            # Known author but no handle → config error, surfaced; no PII fallback.
+            jira_sink::_log "attribution: author '${value}' is mapped but has no 'handle' — no author label applied (config error; add a non-PII handle to the authors map)"
+        fi
+    fi
+
+    # Assignee track (create-only; applied by the caller) — gated on
+    # attribution.assignee. A null/absent accountId ⇒ label-only (omit assignee).
+    if config::attribution_assignee; then
+        _ATTR_ACCOUNT_ID="$(jira_sink::_author_accountId "$loaded" "$value")"
+    fi
+
+    # Summary outcome row.
+    local outcome
+    if [[ -n "$_ATTR_ACCOUNT_ID" ]]; then
+        outcome="assigned + labelled"
+    elif [[ -n "$_ATTR_LABELS_JSON" ]]; then
+        outcome="label-only"
+    else
+        outcome="no attribution applied"
+    fi
+    _ATTR_SUMMARY="author ${value} (${source:-unknown}) — ${outcome}"
+    return 0
+}
+
 # -----------------------------------------------------------------------------
 # Feature 002 — mapping-driven level projection (US1/T013).
 #
@@ -1126,6 +1350,45 @@ declare -gx JIRA_SINK_LEVEL_DISPOSITION=""
 # 003; mirrors JIRA_SINK_SPEC_TRANSITION_FAILED). Read by the engine to surface
 # a US5 observable failure. -gx silences SC2034 in the isolated file scan.
 declare -gx JIRA_SINK_LEVEL_TRANSITION_FAILED=0
+# Attribution fail-soft channel (feature-007 FR-008): set to 1 when a create's
+# assignee write was rejected and retried without the assignee (the label still
+# landed). The engine surfaces it as an observable, non-fatal warning. -gx
+# silences SC2034 in the isolated file scan.
+declare -gx JIRA_SINK_LEVEL_ASSIGNEE_FAILED=0
+
+# jira_sink::_compose_create_fields <project> <itype> <parent_id> <summary>
+#   <description_json> <labels_json> <set_parent> <omit_desc> <assignee_json>
+#   Build the `{fields: {...}}` create body. Extracted so the attribution
+#   fail-soft path (feature-007) can recompose the SAME create without the
+#   assignee on a rejected assignee write. `assignee_json` is `null` (omit) or a
+#   `{accountId: "..."}` object — the assignee is a create-only attribution
+#   (FR-003); the update path never composes it.
+jira_sink::_compose_create_fields() {
+    local project="$1" itype="$2" parent_id="$3" summary="$4" \
+        description="$5" labels_json="$6" set_parent="$7" omit_description="$8" \
+        assignee_json="${9:-null}"
+    jq -cn \
+        --arg project "$project" \
+        --arg itype "$itype" \
+        --arg parent "$parent_id" \
+        --arg summary "$summary" \
+        --argjson description "$description" \
+        --argjson labels "$labels_json" \
+        --argjson set_parent "$set_parent" \
+        --argjson omit_desc "$omit_description" \
+        --argjson assignee "$assignee_json" \
+        '{fields:(
+            {
+                project:     {key: $project},
+                issuetype:   {id: $itype},
+                summary:     $summary,
+                labels:      $labels
+            }
+            + (if ($omit_desc == 1) then {} else {description: $description} end)
+            + (if ($set_parent == 1) then {parent: {key: $parent}} else {} end)
+            + (if ($assignee == null) then {} else {assignee: $assignee} end)
+        )}'
+}
 
 # sync_level_artifact <level> <identity_label> <parent_id> <input_json>
 #                      [find_only] [reconcile_parent] [parent_scoped_find]
@@ -1149,6 +1412,7 @@ sync_level_artifact() {
 
     JIRA_SINK_LEVEL_DISPOSITION=""
     JIRA_SINK_LEVEL_TRANSITION_FAILED=0
+    JIRA_SINK_LEVEL_ASSIGNEE_FAILED=0
 
     # Resolve the configured artifact + parent relationship for this level.
     local artifact relationship
@@ -1215,6 +1479,22 @@ sync_level_artifact() {
         --arg id "$identity_label" \
         '([$id] + (.labels // [])) | unique')"
 
+    # Author-based attribution (feature-007). OFF by default + spec-level only —
+    # _resolve_attribution rc 1 short-circuits with zero side-effects so the
+    # default path is byte-identical (US4/SC-004). When active it yields a
+    # non-PII handle (→ the author:<handle> label, strip-stale-then-set, applied
+    # to labels_json here so it rides BOTH create and update) and, separately,
+    # the accountId to set on CREATE only (captured here, injected in the create
+    # branch below — never on update, so a manual reassignment survives, FR-003).
+    local attr_account_id=""
+    if jira_sink::_resolve_attribution "$level" "$input_json"; then
+        if [[ -n "$_ATTR_LABELS_JSON" ]]; then
+            labels_json="$(jira_sink::_apply_author_label "$labels_json" "$_ATTR_LABELS_JSON")"
+        fi
+        attr_account_id="$_ATTR_ACCOUNT_ID"
+        [[ -n "$_ATTR_SUMMARY" ]] && jira_sink::_log "${_ATTR_SUMMARY}"
+    fi
+
     # Whether the configured relationship sets a native parent link on create.
     local set_parent=0
     case "$relationship" in
@@ -1252,32 +1532,41 @@ sync_level_artifact() {
     existing_key="$(printf '%s' "$existing" | jq -r '(.[0].key // "")' 2>/dev/null || printf '')"
 
     if [[ -z "$existing_key" || "$existing_key" == "null" ]]; then
-        # ABSENT → create the configured issue type.
+        # ABSENT → create the configured issue type. Attribution (feature-007):
+        # the assignee is set HERE — on CREATE ONLY — when the author maps to a
+        # non-null accountId (FR-003, Linear FR-034). It is NEVER added on the
+        # update path below, so a manual reassignment in Jira survives.
+        local _assignee_json='null'
+        if [[ -n "$attr_account_id" ]]; then
+            _assignee_json="$(jq -cn --arg a "$attr_account_id" '{accountId: $a}')"
+        fi
         local fields
-        fields="$(jq -cn \
-            --arg project "$project" \
-            --arg itype "$itype" \
-            --arg parent "$parent_id" \
-            --arg summary "$summary" \
-            --argjson description "$description" \
-            --argjson labels "$labels_json" \
-            --argjson set_parent "$set_parent" \
-            --argjson omit_desc "$omit_description" \
-            '{fields:(
-                {
-                    project:     {key: $project},
-                    issuetype:   {id: $itype},
-                    summary:     $summary,
-                    labels:      $labels
-                }
-                + (if ($omit_desc == 1) then {} else {description: $description} end)
-                + (if ($set_parent == 1) then {parent: {key: $parent}} else {} end)
-            )}')"
+        fields="$(jira_sink::_compose_create_fields \
+            "$project" "$itype" "$parent_id" "$summary" "$description" \
+            "$labels_json" "$set_parent" "$omit_description" "$_assignee_json")"
 
         local created key
         if ! created="$(mutate_issue_create "$fields")"; then
-            jira_sink::_log "sync_level_artifact: failed to create ${artifact} for ${level} (${identity_label})"
-            return 1
+            # FAIL-SOFT (FR-008): a rejected create that carried an assignee
+            # (e.g. a stale/deactivated accountId) MUST NOT abort — surface it,
+            # then retry the SAME create WITHOUT the assignee so the spec still
+            # lands with its author:<handle> label. A create failure with NO
+            # assignee is a real failure (return 1 as before).
+            if [[ "$_assignee_json" != "null" ]]; then
+                jira_sink::_log "attribution: assignee write rejected for ${level} (${identity_label}) — accountId '${attr_account_id}' may be stale/deactivated; creating WITHOUT assignee, the author label is still applied$(jira_sink::_error_detail)"
+                JIRA_SINK_LEVEL_ASSIGNEE_FAILED=1
+                local fields_noassignee
+                fields_noassignee="$(jira_sink::_compose_create_fields \
+                    "$project" "$itype" "$parent_id" "$summary" "$description" \
+                    "$labels_json" "$set_parent" "$omit_description" 'null')"
+                if ! created="$(mutate_issue_create "$fields_noassignee")"; then
+                    jira_sink::_log "sync_level_artifact: failed to create ${artifact} for ${level} (${identity_label})"
+                    return 1
+                fi
+            else
+                jira_sink::_log "sync_level_artifact: failed to create ${artifact} for ${level} (${identity_label})"
+                return 1
+            fi
         fi
         key="$(printf '%s' "$created" | jq -r '.key // ""' 2>/dev/null || printf '')"
         if [[ -z "$key" || "$key" == "null" ]]; then

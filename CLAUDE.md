@@ -38,12 +38,22 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **005-adr-mirroring** (active) — mirror each spec's `research.md` decision
-  records (Decision/Rationale/Alternatives) as idempotent comments on the spec's
-  Jira issue, reusing the clarify-comment machinery. Jira sibling of linear 008,
-  parity-locked (FR-009). Neutral `workstate.decisions[]` floor field (Principle
-  X — the Jira delta); fits "non-task artifacts → comments" so NO amendment.
-  Spec+clarify+plan done; rebased onto #9/#10. Plan: `specs/005-adr-mirroring/plan.md`
+- **007-author-attribution** (active) — make the board reflect who authored each
+  spec: a two-track attribution — an account-independent `author:<handle>` LABEL
+  always (works for non-Jira-users), plus a Jira ASSIGNEE only when the author
+  maps to a real accountId (create-only, never clobbered on update — Linear FR-034
+  parity). Author = `Owner:` line else git first-add. Static gitignored
+  email→accountId map (dynamic resolution is GDPR-impossible). Opt-in, default OFF
+  = byte-identical. Additive (no amendment); Privacy IX + 003 neutrality gate are
+  the hard gates. Spec+clarify+plan done. Plan: `specs/007-author-attribution/plan.md`
+- **005-adr-mirroring** — ADR comment mirroring: each spec's `research.md`
+  decision records (Decision/Rationale/Alternatives) mirrored as idempotent
+  comments on the spec's Jira issue. Merged to main (PR #12); neutral
+  `workstate.decisions[]` floor field. Plan: `specs/005-adr-mirroring/plan.md`
+- **006-consumer-privacy-guard** — consumer-side privacy guard
+  (specced+clarified, awaiting plan). Plan under its `specs/` dir.
+- **Engine extraction** (next-big) — carve the now-vendor-neutral engine into a
+  shared lib with spec-kit-linear, unblocked by 003's neutrality gate.
 - **004-mapping-remode** — guarded, opt-in re-mode / orphan pruning: `--remode`
   prunes the bridge-owned orphans the current mapping no longer projects and
   regenerates. Controlled destruction via constitution v1.1.0 carve-out. Merged
