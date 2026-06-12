@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-12
+
 ### Added
 
 - **Author-based attribution (label-first, optional assignee)** — opt-in
@@ -189,6 +191,7 @@ slate instead, an operator may prune the old `task-phase:*` Subtasks (or run
 - Parser phase normalization corrected in the producer half.
 - POST idempotency and feature-pin handling hardened in the foundational sink.
 
-[Unreleased]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ashbrener/spec-kit-jira-sync/releases/tag/v0.2.0

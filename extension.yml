@@ -47,10 +47,10 @@ extension:
   # Human-readable name surfaced in `specify extension list` and the catalog.
   name: "spec-kit-jira-sync"
 
-  # PEP 440 version. Adds feature 003 (engine orchestration unification) and
-  # feature 004 (guarded re-mode / orphan pruning, constitution v1.1.0) on top
-  # of the 001 core bridge + 002 configurable mapping baseline.
-  version: "0.2.1"
+  # PEP 440 version. Adds feature 005 (ADR / decision-record mirroring) and
+  # feature 007 (author-based attribution) on top of the 001 core bridge + 002
+  # configurable mapping + 003 engine unification + 004 re-mode baseline.
+  version: "0.3.0"
 
   # One-line description — matches the catalog entry + README cover.
   description: "An idempotent, drift-aware, fail-closed reconcile engine that mirrors spec-kit specs into Jira (Epic per repo, Story per spec, Subtask per phase)."
