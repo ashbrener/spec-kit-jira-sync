@@ -79,3 +79,31 @@ with no extra config. If you don't install it, nothing changes for you.
 - **No AI-attribution trailers** (`Co-Authored-By`, "Generated with …") in commit
   messages.
 - Branch per feature (`NNN-short-name`); open a PR into `main`.
+
+## Releasing (and the community catalog)
+
+Cutting a release is two decoupled things:
+
+1. **Tag + GitHub release** in this repo (`vX.Y.Z`). GitHub auto-publishes a
+   source tarball at the tag (`…/archive/refs/tags/vX.Y.Z.zip`) — the install
+   artifact.
+2. **The community catalog** (`github/spec-kit` → `extensions/catalog.community.json`)
+   is a static, version-pinned entry. It does **not** watch this repo, so each
+   release needs a PR upstream bumping the entry's `version` + `download_url`,
+   merged by a spec-kit maintainer.
+
+Step 2 is automated for you — two ways, pick one:
+
+- **Recommended (no secret): `scripts/publish-catalog.sh vX.Y.Z`.** Run it locally
+  after tagging. It uses your existing `gh` login (the same auth that already
+  pushes to your fork and opens upstream PRs), syncs the fork, bumps the entry,
+  and opens the PR. **No PAT, no repo secret.**
+- **Optional (hands-off CI): `.github/workflows/catalog-publish.yml`.** Fires on a
+  published release and opens the same PR with zero manual steps — but CI has no
+  access to your personal `gh`, so it needs a one-time repo secret
+  **`CATALOG_PR_TOKEN`** (a PAT that can push to your fork + open a PR upstream).
+  Use this only if you want fully automatic releases and don't mind the token.
+
+Both are **repo-agnostic** — to reuse in a sibling extension, copy the file and
+edit the three values (`CATALOG_ID`, `EXT_REPO`, `FORK`); the copy checklist is in
+each file's header. A maintainer still merges the upstream PR either way.
