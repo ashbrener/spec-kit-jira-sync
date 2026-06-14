@@ -92,13 +92,18 @@ Cutting a release is two decoupled things:
    release needs a PR upstream bumping the entry's `version` + `download_url`,
    merged by a spec-kit maintainer.
 
-Step 2 is automated by `.github/workflows/catalog-publish.yml`: on a published
-release it opens/refreshes that catalog PR for you (a maintainer still merges it).
-One-time setup: add a repo secret **`CATALOG_PR_TOKEN`** — a GitHub PAT that can
-push to your fork of `github/spec-kit` and open a PR upstream (classic `repo` +
-`workflow`, or fine-grained Contents+PR write on the fork). The default
-`GITHUB_TOKEN` can't push cross-repo, so the PAT is required.
+Step 2 is automated for you — two ways, pick one:
 
-The workflow is intentionally **repo-agnostic** — to reuse it in a sibling
-extension, copy the file and edit the three `env:` values (`CATALOG_ID`,
-`EXT_REPO`, `FORK`); the copy checklist is in the file's header.
+- **Recommended (no secret): `scripts/publish-catalog.sh vX.Y.Z`.** Run it locally
+  after tagging. It uses your existing `gh` login (the same auth that already
+  pushes to your fork and opens upstream PRs), syncs the fork, bumps the entry,
+  and opens the PR. **No PAT, no repo secret.**
+- **Optional (hands-off CI): `.github/workflows/catalog-publish.yml`.** Fires on a
+  published release and opens the same PR with zero manual steps — but CI has no
+  access to your personal `gh`, so it needs a one-time repo secret
+  **`CATALOG_PR_TOKEN`** (a PAT that can push to your fork + open a PR upstream).
+  Use this only if you want fully automatic releases and don't mind the token.
+
+Both are **repo-agnostic** — to reuse in a sibling extension, copy the file and
+edit the three values (`CATALOG_ID`, `EXT_REPO`, `FORK`); the copy checklist is in
+each file's header. A maintainer still merges the upstream PR either way.

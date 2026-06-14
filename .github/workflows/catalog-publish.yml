@@ -6,6 +6,10 @@
 # entry (`version` + `download_url`) to the released tag. A maintainer still
 # merges it upstream; this just removes the hand-written-PR toil.
 #
+# OPTIONAL / advanced. This CI version needs a PAT secret (see below). If that
+# is a hassle, prefer the NO-SECRET local equivalent: `scripts/publish-catalog.sh
+# vX.Y.Z`, which uses your existing local `gh` login and needs no token at all.
+#
 # ─── COPY-TO-A-SIBLING-EXTENSION CHECKLIST ──────────────────────────────────
 #   This file is intentionally repo-agnostic. To reuse it in another spec-kit
 #   extension repo (e.g. spec-kit-linear-sync):
