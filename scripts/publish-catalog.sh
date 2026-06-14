@@ -48,15 +48,31 @@ gh repo sync "$FORK" --source "$UPSTREAM" --branch main --force >/dev/null
 gh repo clone "$FORK" "$work/fork" -- --depth 1 --branch main >/dev/null 2>&1
 cd "$work/fork"
 
-tmp="$(mktemp)"
-jq --arg id "$CATALOG_ID" --arg ver "$VER" --arg url "$URL" '
-  if (.extensions[$id] | type) != "object"
-  then error("catalog has no entry for id \($id) — submit it first")
-  else .extensions[$id].version = $ver | .extensions[$id].download_url = $url
-  end
-' "$CATALOG" > "$tmp"
-jq empty "$tmp"            # validate JSON
-mv "$tmp" "$CATALOG"
+# Guard: the entry must already exist upstream (first-time submission is separate).
+jq -e --arg id "$CATALOG_ID" '.extensions[$id] // empty' "$CATALOG" >/dev/null \
+  || { echo "error: catalog has no entry for id '$CATALOG_ID' — submit it first"; exit 1; }
+# SURGICAL line edit: rewrite ONLY this entry's `version` + `download_url` lines,
+# so the PR diff stays a clean 2-liner. (A jq re-serialize would reformat every
+# other entry that isn't already in jq's canonical 2-space form — a noisy diff
+# that touches other people's entries.) We anchor on this repo's download_url
+# (globally unique — it contains EXT_REPO + the old version), then fix the
+# `version` line just above it (the entry's field order is version → download_url).
+python3 - "$CATALOG" "$EXT_REPO" "$VER" "$URL" <<'PY'
+import sys, re
+path, repo, ver, url = sys.argv[1:5]
+lines = open(path).read().split("\n")
+for i, ln in enumerate(lines):
+    if re.search(re.escape(repo) + r"/archive/refs/tags/v[^\"]*\.zip", ln):
+        lines[i] = re.sub(r'("download_url"\s*:\s*")[^"]*(")', lambda m: m.group(1) + url + m.group(2), ln)
+        for j in range(i - 1, -1, -1):
+            if '"version"' in lines[j]:
+                lines[j] = re.sub(r'("version"\s*:\s*")[^"]*(")', lambda m: m.group(1) + ver + m.group(2), lines[j])
+                break
+        open(path, "w").write("\n".join(lines))
+        sys.exit(0)
+sys.exit("error: could not locate the download_url line for " + repo)
+PY
+jq empty "$CATALOG"       # validate JSON
 
 if git diff --quiet -- "$CATALOG"; then
   echo "Catalog already at ${TAG} — nothing to do."; exit 0
@@ -69,5 +85,7 @@ git push -u origin "$BR" --force >/dev/null
 FORK_OWNER="${FORK%%/*}"
 gh pr create --repo "$UPSTREAM" --base main --head "${FORK_OWNER}:${BR}" \
   --title "chore(catalog): bump ${CATALOG_ID} to ${TAG}" \
-  --body "Bumps \`extensions.${CATALOG_ID}\` to **${TAG}** (\`version\` ${VER}, \`download_url\` → the tag .zip). JSON re-validated; no other entries touched." \
+  --body "Bumps \`extensions.${CATALOG_ID}\` to **${TAG}** (\`version\` ${VER}, \`download_url\` → the tag .zip). JSON re-validated; no other entries touched.
+
+Pre-flight verified (the publish script checks before opening this PR): the \`${TAG}\` tag exists and its archive \`${URL}\` returns **HTTP 200**, so the install link is live." \
   || gh pr list --repo "$UPSTREAM" --head "$BR" --json url -q '.[0].url // empty'
