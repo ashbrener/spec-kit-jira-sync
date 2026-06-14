@@ -40,7 +40,8 @@ _audited_functions() {
     reconcile::sync_initiative \
     reconcile::compute_orphans \
     reconcile::remode \
-    reconcile::warn_orphans
+    reconcile::warn_orphans \
+    reconcile::privacy_gate
 }
 
 # Extract a top-level function's BODY (between `name() {` and the col-0 `}`),

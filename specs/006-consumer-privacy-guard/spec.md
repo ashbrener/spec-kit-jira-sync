@@ -77,6 +77,22 @@ fourth decision on build-vs-off-the-shelf scanners:
   NEVER the core guarantee. (trufflehog live-verification is explicitly out — it
   would hit Jira's API.)
 
+### Session 2026-06-14 (analyze finding C1 — shape-tier scoping)
+
+- Q: The broad shapes (generic email / UUID / 24-hex accountId) under a hard
+  fail-closed false-positive heavily — a live scan hit 10+ of this repo's own
+  tracked files (reserved `example.com` emails in the sample/docs, fixture UUIDs,
+  accountId placeholders), so an all-shapes-fail-closed guard would abort on its
+  own repo (breaking the dogfooding edge case + SC-002) and on any consumer repo
+  with a contributor email or lockfile UUID. How should the fail-closed set be
+  scoped? → A: **Two-tier verdict.** BLOCK (fail-closed, exit 4) on the
+  high-precision signals only — the operator's *exact* known coordinates + the two
+  vendor-unique shapes (`ATATT…` token prefix, `<name>.atlassian.net` site). WARN
+  (surface + proceed) on the broad shapes (generic email / UUID / accountId).
+  Best-practice tiering (precision-blocks, recall-warns) that is also more
+  faithful to Principle VIII than the original all-shapes-block. FR-002/FR-003
+  updated; SC-001/SC-002 re-scoped to the BLOCK tier.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A real identifier in the consumer tree stops the bridge (Priority: P1) 🎯 MVP
@@ -95,27 +111,32 @@ never be complicit in committing the operator's real Jira credentials or PII to
 their tracked history. Without this slice there is no consumer-side guard.
 
 **Independent Test**: In a throwaway consumer repo, commit a file containing a
-fixture that matches a forbidden shape (e.g. a placeholder
-`<token-prefix>…`-shaped string, a `<name>.atlassian.net` host, a UUID), run the
-guarded lifecycle point, and confirm the bridge exits non-zero, names the
-offending file + shape, and performs no Jira write. Then remove the offending
-value and confirm the bridge proceeds normally.
+BLOCK-tier fixture (a placeholder `<token-prefix>…`-shaped string or a
+`<name>.atlassian.net` host), run the guarded lifecycle point, and confirm the
+bridge exits 4, names the offending file + shape, and performs no Jira write. Then
+remove the offending value and confirm the bridge proceeds normally (a broad-shape
+UUID/email left behind surfaces only a non-blocking WARN).
 
 **Acceptance Scenarios**:
 
 1. **Given** a consumer repo with a tracked file containing an Atlassian
-   API-token-shaped string, **When** the guarded lifecycle point runs, **Then**
-   the bridge exits non-zero, names the file and the matched shape, and writes
-   nothing to Jira.
+   API-token-shaped string (BLOCK tier), **When** the guarded lifecycle point
+   runs, **Then** the bridge exits 4, names the file and the matched shape, and
+   writes nothing to Jira.
 2. **Given** a consumer repo with a tracked file containing a
-   `<something>.atlassian.net` site host, **When** the guard runs, **Then** the
-   bridge fails closed with that file named.
-3. **Given** a consumer repo with a tracked file containing a UUID-shaped
-   cloudId or an Atlassian accountId shape, **When** the guard runs, **Then** the
-   bridge fails closed with that file named.
-4. **Given** a consumer repo whose tracked tree contains only neutral
-   placeholders, **When** the guard runs, **Then** it passes silently and the
-   bridge proceeds with its normal work.
+   `<something>.atlassian.net` site host (BLOCK tier), **When** the guard runs,
+   **Then** the bridge fails closed with that file named.
+3. **Given** a consumer repo with a tracked file containing the operator's
+   **exact** known coordinate (email / token / site / accountId, BLOCK tier via
+   the known-value pass), **When** the guard runs, **Then** the bridge fails
+   closed with that file named.
+4. **Given** a consumer repo with a tracked file containing only a broad-shape
+   match (a generic UUID / 24-hex accountId / unrelated email, WARN tier), **When**
+   the guard runs, **Then** the bridge **surfaces a warning and proceeds** (it does
+   NOT fail closed — the broad shapes are advisory, FR-003).
+5. **Given** a consumer repo whose tracked tree carries no BLOCK-tier signal,
+   **When** the guard runs, **Then** it does not fail closed and the bridge
+   proceeds with its normal work.
 
 ---
 
@@ -212,19 +233,33 @@ remediation, without printing the entire matched value verbatim.
 - **FR-001**: The bridge MUST provide a consumer-side privacy guard that scans
   the **consumer repo's** tracked tree (the repo the extension is installed into),
   not merely this bridge-development repo.
-- **FR-002**: The guard MUST detect two complementary classes of leak in tracked
-  files: (1) **KNOWN values** — the operator's *own resolved* Jira coordinates,
-  read from the gitignored `.env` / `jira-config.yml` the bridge just used to reach
-  Jira (the exact email, site, token, cloudId, accountId): these are matched
-  **exactly**, giving a zero-false-positive guarantee that the bridge's own
-  coordinates never appear tracked; and (2) **shapes** — generic Jira/Atlassian
-  patterns even when the specific value is unknown: a Jira login **email**, an
-  Atlassian **API-token** prefix, a **cloudId/UUID**, an Atlassian **accountId**,
-  and a **site** host `<name>.atlassian.net`. The known-value pass is the primary,
-  precise guarantee; the shape pass is the defensive net.
-- **FR-003**: On detecting any forbidden value/shape in a tracked file, the guard
-  MUST **fail closed** — the bridge refuses to proceed and exits non-zero — rather
-  than warn-and-continue (clarified 2026-06-11). There is no MVP override.
+- **FR-002**: The guard MUST detect leaks in tracked files across a **precision
+  tier** and a **recall tier** (clarified 2026-06-14):
+  - **BLOCK tier (high-precision, fail-closed)** — (1) **KNOWN values**: the
+    operator's *own resolved* Jira coordinates, read from the gitignored
+    `.env` / `jira-config.yml` / authors-map the bridge just used to reach Jira
+    (the exact email, site, token, cloudId, accountId), matched **exactly** for a
+    zero-false-positive guarantee; and (2) **high-signal shapes**: the Atlassian
+    **API-token** prefix and the **site** host `<name>.atlassian.net` — vendor-
+    unique patterns that effectively never occur by accident.
+  - **WARN tier (high-recall, non-blocking)** — the broad shapes that match real
+    coordinates but also legitimate content: a generic **email**, a
+    **cloudId/UUID**, and an Atlassian **accountId** (24-hex). These are
+    **surfaced as warnings, never fail-closed**, because under a hard block they
+    false-positive on ordinary repo content (a contributor email, a lockfile UUID,
+    a 24-hex hash) — and on this repo's own reserved `example.com` placeholders.
+  The known-value tier is the primary precise guarantee; the high-signal shapes
+  back it; the broad shapes are advisory.
+- **FR-003**: On detecting a **BLOCK-tier** value/shape in a tracked file, the
+  guard MUST **fail closed** — the bridge refuses to proceed and exits non-zero
+  (exit 4) — with no override. On detecting only **WARN-tier** broad shapes, the
+  guard MUST **surface a named warning** and **proceed** (Principle VIII —
+  surface, don't enforce; a low-confidence heuristic must not halt the operator's
+  workflow, the failure mode that gets guards disabled). Rationale (clarified
+  2026-06-14): a blocking control with false positives is removed by operators and
+  leaves them with zero protection; precision-blocks + recall-warns is the
+  industry-standard tiering (GitHub push-protection, gitleaks/trufflehog
+  verified-vs-unverified) and is faithful to Principle VIII.
 - **FR-004**: The guard MUST assert that, in the consumer repo, the resolved
   `jira-config.yml` (`.specify/extensions/jira/jira-config.yml`) and `.env` are
   **gitignored** and not tracked; if either is tracked or not ignored, the guard
@@ -286,8 +321,10 @@ remediation, without printing the entire matched value verbatim.
   matched exactly for a zero-false-positive guarantee (FR-002 pass 1). Never
   written anywhere; held in memory for the scan only.
 - **Forbidden shape**: a pattern class describing a real Jira/Atlassian
-  identifier without naming any real value — email, API-token prefix, cloudId/UUID,
-  accountId, `.atlassian.net` site host (FR-002 pass 2, the defensive net).
+  identifier without naming any real value, carrying a **tier** (FR-002):
+  BLOCK-tier high-signal shapes (API-token prefix, `.atlassian.net` site host) vs
+  WARN-tier broad shapes (generic email, cloudId/UUID, accountId). The tier
+  decides fail-closed (BLOCK) vs surface-and-proceed (WARN).
 - **Resolved config + `.env`**: the two consumer-repo files that legitimately
   hold real values; both MUST be gitignored (the assertion in FR-004).
 
@@ -295,12 +332,16 @@ remediation, without printing the entire matched value verbatim.
 
 ### Measurable Outcomes
 
-- **SC-001**: In a consumer repo containing a tracked file with any of the five
-  forbidden shapes, the bridge fails closed (exits non-zero, performs zero Jira
-  writes) 100% of the time the guarded lifecycle point runs.
-- **SC-002**: In a consumer repo whose tracked tree is placeholder-clean and
-  whose resolved config + `.env` are gitignored, the guard passes and adds no
-  observable failure on an otherwise-successful run.
+- **SC-001**: In a consumer repo containing a tracked file with any **BLOCK-tier**
+  signal (an exact known coordinate, the `ATATT…` token prefix, or a
+  `<name>.atlassian.net` site), the bridge fails closed (exits 4, performs zero
+  Jira writes) 100% of the time the guarded lifecycle point runs.
+- **SC-002**: In a consumer repo whose tracked tree carries no BLOCK-tier signal
+  and whose resolved config + `.env` are gitignored, the guard does **not** fail
+  closed and the reconcile proceeds — even when the tree contains broad-shape
+  content (placeholder emails, UUIDs, 24-hex strings), which surfaces only as a
+  non-blocking WARN. This includes the dogfooding case: running the guard over
+  **this** repo's own tree must not fail closed.
 - **SC-003**: When the resolved `jira-config.yml` or `.env` is tracked or not
   ignored in the consumer repo, the guard fails closed and names the file 100% of
   the time.
@@ -313,6 +354,10 @@ remediation, without printing the entire matched value verbatim.
 - **SC-006**: The user-visible guard behavior matches the spec-kit-linear
   consumer-side guard on lifecycle point, fail-closed posture, and gitignore
   assertion (only the vendor shapes differ).
+- **SC-007**: A tracked file carrying only a broad-shape match (a generic email /
+  UUID / 24-hex accountId, with no exact known-value and no high-signal shape)
+  produces a **non-blocking WARN** and the reconcile still proceeds (exit 0/1, not
+  4) — the WARN tier never halts the operator.
 
 ## Assumptions
 

@@ -38,7 +38,17 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **007-author-attribution** (active) — make the board reflect who authored each
+- **006-consumer-privacy-guard** (active) — extend the privacy guarantee from
+  this repo to the CONSUMER repos: a fail-closed pre-write gate (every reconcile +
+  install) that scans the consumer's whole tracked tree for the operator's own
+  resolved coordinates (exact, zero-FP) + generic Atlassian shapes, asserts
+  jira-config.yml/.env are gitignored, and hard-aborts (exit 4, zero writes) on a
+  hit — naming file+shape-class without re-leaking. Neutral mechanism
+  (`src/privacy_guard.sh` + `reconcile::privacy_gate`, in the 003 audit) + Jira
+  shapes in the sink. Dep-free core; gitleaks/trufflehog recommended-not-bundled.
+  Enforces Principle IX (no amendment). Spec+clarify+plan done.
+  Plan: `specs/006-consumer-privacy-guard/plan.md`
+- **007-author-attribution** — make the board reflect who authored each
   spec: a two-track attribution — an account-independent `author:<handle>` LABEL
   always (works for non-Jira-users), plus a Jira ASSIGNEE only when the author
   maps to a real accountId (create-only, never clobbered on update — Linear FR-034
@@ -50,8 +60,6 @@ internally. This repo is also the independent second consumer that proves
   decision records (Decision/Rationale/Alternatives) mirrored as idempotent
   comments on the spec's Jira issue. Merged to main (PR #12); neutral
   `workstate.decisions[]` floor field. Plan: `specs/005-adr-mirroring/plan.md`
-- **006-consumer-privacy-guard** — consumer-side privacy guard
-  (specced+clarified, awaiting plan). Plan under its `specs/` dir.
 - **Engine extraction** (next-big) — carve the now-vendor-neutral engine into a
   shared lib with spec-kit-linear, unblocked by 003's neutrality gate.
 - **004-mapping-remode** — guarded, opt-in re-mode / orphan pruning: `--remode`

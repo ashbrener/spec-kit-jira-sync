@@ -123,6 +123,30 @@ _private_patterns() {
   grep -q 'jira-authors.local.yml' config-template.yml
 }
 
+@test "feature-006 privacy guard source + fixtures do not self-match a BLOCK shape" {
+  # The consumer-side guard's own source (src/privacy_guard.sh, the sink's
+  # privacy providers) and its committed test fixtures must NOT contain a literal
+  # that matches a BLOCK-tier Atlassian shape (the ATATT token prefix or a
+  # non-example <name>.atlassian.net host). The shape literals are fragmented in
+  # source (FR-009) and the test fixtures assemble any non-example host at
+  # runtime; only the IANA-reserved example.atlassian.net documentation host is
+  # an allowed literal (it is excluded from the BLOCK site shape). This is the
+  # CI-side mirror of tests/unit/privacy_dogfood.bats.
+  cd "$REPO_ROOT"
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/src/jira_sink.sh"
+  local site_re tok_re hits
+  site_re="$(jira_sink::privacy_shapes | awk -F'\t' '$2=="site"{print $3}')"
+  tok_re="$(jira_sink::privacy_shapes | awk -F'\t' '$2=="api-token"{print $3}')"
+  hits="$(git ls-files -z | xargs -0 grep -lIiE -- "$site_re" 2>/dev/null || true)"
+  hits+="$(git ls-files -z | xargs -0 grep -lIiE -- "$tok_re" 2>/dev/null || true)"
+  if [ -n "$hits" ]; then
+    echo "BLOCK-tier shape self-match in a tracked file (FR-009 violation):" >&2
+    printf '%s\n' "$hits" >&2
+    return 1
+  fi
+}
+
 @test "private deny-list, when present, actually contributes patterns" {
   # Guards against a silently-empty deny-list giving false confidence. Skips
   # cleanly in CI where the gitignored file is absent.
