@@ -85,5 +85,7 @@ git push -u origin "$BR" --force >/dev/null
 FORK_OWNER="${FORK%%/*}"
 gh pr create --repo "$UPSTREAM" --base main --head "${FORK_OWNER}:${BR}" \
   --title "chore(catalog): bump ${CATALOG_ID} to ${TAG}" \
-  --body "Bumps \`extensions.${CATALOG_ID}\` to **${TAG}** (\`version\` ${VER}, \`download_url\` → the tag .zip). JSON re-validated; no other entries touched." \
+  --body "Bumps \`extensions.${CATALOG_ID}\` to **${TAG}** (\`version\` ${VER}, \`download_url\` → the tag .zip). JSON re-validated; no other entries touched.
+
+Pre-flight verified (the publish script checks before opening this PR): the \`${TAG}\` tag exists and its archive \`${URL}\` returns **HTTP 200**, so the install link is live." \
   || gh pr list --repo "$UPSTREAM" --head "$BR" --json url -q '.[0].url // empty'
