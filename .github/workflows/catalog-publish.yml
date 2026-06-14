@@ -1,0 +1,118 @@
+# =============================================================================
+# Publish to the spec-kit community catalog
+# =============================================================================
+# When a GitHub Release is published (or you run this manually), this opens —
+# or refreshes — a PR to github/spec-kit that bumps THIS extension's catalog
+# entry (`version` + `download_url`) to the released tag. A maintainer still
+# merges it upstream; this just removes the hand-written-PR toil.
+#
+# ─── COPY-TO-A-SIBLING-EXTENSION CHECKLIST ──────────────────────────────────
+#   This file is intentionally repo-agnostic. To reuse it in another spec-kit
+#   extension repo (e.g. spec-kit-linear-sync):
+#     1. Copy this file to `.github/workflows/catalog-publish.yml`.
+#     2. Edit the THREE values in `env:` below: CATALOG_ID, EXT_REPO, FORK.
+#     3. Add a repo secret `CATALOG_PR_TOKEN` — a GitHub PAT that can push to
+#        YOUR fork of github/spec-kit and open a PR upstream:
+#          • classic PAT: scopes `repo` + `workflow`, OR
+#          • fine-grained PAT on your fork: Contents=write, Pull requests=write.
+#        (The default GITHUB_TOKEN cannot push cross-repo, so a PAT is required.)
+#     4. One-time: make sure you HAVE a fork of github/spec-kit (the `FORK`
+#        value). If not: `gh repo fork github/spec-kit --clone=false`.
+#   Nothing else is repo-specific — the catalog file path + JSON shape are the
+#   same across all community extensions.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Publish to community catalog
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.3.0)"
+        required: true
+
+# ─── EDIT THESE THREE WHEN COPYING TO A SIBLING REPO ────────────────────────
+env:
+  CATALOG_ID: "jira-sync"                          # this extension's catalog id (the key under `extensions`)
+  EXT_REPO: "ashbrener/spec-kit-jira-sync"         # owner/name of THIS extension repo (source of the tag tarball)
+  FORK: "ashbrener/spec-kit"                       # YOUR fork of the catalog repo (where the PR branch is pushed)
+# ─── constants (do not change) ──────────────────────────────────────────────
+  UPSTREAM: "github/spec-kit"
+  CATALOG: "extensions/catalog.community.json"
+
+permissions:
+  contents: read
+
+jobs:
+  bump-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the version + tarball URL
+        id: v
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          [ -n "$TAG" ] || { echo "::error::no tag resolved"; exit 1; }
+          VER="${TAG#v}"
+          URL="https://github.com/${EXT_REPO}/archive/refs/tags/${TAG}.zip"
+          {
+            echo "tag=$TAG"
+            echo "version=$VER"
+            echo "url=$URL"
+            echo "branch=chore/catalog-${CATALOG_ID}-${VER}"
+          } >> "$GITHUB_OUTPUT"
+          # Fail early if the tag's ZIP isn't published yet (the installer is ZIP-only).
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -L "$URL")
+          [ "$code" = "200" ] || { echo "::error::tarball not 200 ($code) at $URL"; exit 1; }
+
+      - name: Sync the fork's main from upstream
+        env:
+          GH_TOKEN: ${{ secrets.CATALOG_PR_TOKEN }}
+        run: gh repo sync "$FORK" --source "$UPSTREAM" --branch main --force
+
+      - name: Check out the fork
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FORK }}
+          token: ${{ secrets.CATALOG_PR_TOKEN }}
+          ref: main
+          fetch-depth: 0
+
+      - name: Bump the catalog entry (version + download_url)
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          jq --arg id "$CATALOG_ID" --arg ver "${{ steps.v.outputs.version }}" --arg url "${{ steps.v.outputs.url }}" '
+            if (.extensions[$id] | type) != "object"
+            then error("catalog has no entry for id \($id)")
+            else .extensions[$id].version = $ver
+               | .extensions[$id].download_url = $url
+            end
+          ' "$CATALOG" > "$tmp"
+          jq empty "$tmp"           # validate JSON
+          mv "$tmp" "$CATALOG"
+          git --no-pager diff -- "$CATALOG" | head -40
+
+      - name: Open or refresh the catalog PR
+        env:
+          GH_TOKEN: ${{ secrets.CATALOG_PR_TOKEN }}
+        run: |
+          set -euo pipefail
+          BR="${{ steps.v.outputs.branch }}"
+          if git diff --quiet -- "$CATALOG"; then
+            echo "Catalog already at ${{ steps.v.outputs.tag }} — nothing to do."; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git commit -am "chore(catalog): bump ${CATALOG_ID} to ${{ steps.v.outputs.tag }}"
+          git push -u origin "$BR" --force
+          FORK_OWNER="${FORK%%/*}"
+          TITLE="chore(catalog): bump ${CATALOG_ID} to ${{ steps.v.outputs.tag }}"
+          BODY="Automated by the \`catalog-publish\` workflow on release ${{ steps.v.outputs.tag }}. Bumps \`extensions.${CATALOG_ID}\` \`version\` → \`${{ steps.v.outputs.version }}\` and \`download_url\` → the tag .zip. JSON re-validated."
+          # Create the PR, or (if one already exists for this head) just report it.
+          gh pr create --repo "$UPSTREAM" --base main --head "${FORK_OWNER}:${BR}" \
+            --title "$TITLE" --body "$BODY" \
+            || gh pr list --repo "$UPSTREAM" --head "$BR" --json url -q '.[0].url // "PR already open"'

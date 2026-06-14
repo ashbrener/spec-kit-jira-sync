@@ -79,3 +79,26 @@ with no extra config. If you don't install it, nothing changes for you.
 - **No AI-attribution trailers** (`Co-Authored-By`, "Generated with …") in commit
   messages.
 - Branch per feature (`NNN-short-name`); open a PR into `main`.
+
+## Releasing (and the community catalog)
+
+Cutting a release is two decoupled things:
+
+1. **Tag + GitHub release** in this repo (`vX.Y.Z`). GitHub auto-publishes a
+   source tarball at the tag (`…/archive/refs/tags/vX.Y.Z.zip`) — the install
+   artifact.
+2. **The community catalog** (`github/spec-kit` → `extensions/catalog.community.json`)
+   is a static, version-pinned entry. It does **not** watch this repo, so each
+   release needs a PR upstream bumping the entry's `version` + `download_url`,
+   merged by a spec-kit maintainer.
+
+Step 2 is automated by `.github/workflows/catalog-publish.yml`: on a published
+release it opens/refreshes that catalog PR for you (a maintainer still merges it).
+One-time setup: add a repo secret **`CATALOG_PR_TOKEN`** — a GitHub PAT that can
+push to your fork of `github/spec-kit` and open a PR upstream (classic `repo` +
+`workflow`, or fine-grained Contents+PR write on the fork). The default
+`GITHUB_TOKEN` can't push cross-repo, so the PAT is required.
+
+The workflow is intentionally **repo-agnostic** — to reuse it in a sibling
+extension, copy the file and edit the three `env:` values (`CATALOG_ID`,
+`EXT_REPO`, `FORK`); the copy checklist is in the file's header.
