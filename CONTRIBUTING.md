@@ -54,6 +54,46 @@ privacy guard (`tests/unit/no-real-identifiers.bats`) enforces this in CI; copy
 `tests/.private-deny.example` to `tests/.private-deny` (gitignored) and fill in
 your real coordinates so it catches leaks locally before you push.
 
+### The consumer-side privacy guard (design)
+
+A second guard protects the repos operators install the bridge into. Its
+mechanism is split to preserve the engine/sink seam:
+
+- **`src/privacy_guard.sh`** — the **vendor-neutral** scan mechanism:
+  `privacy_guard::assert_git` (fail closed if the target is not a git work-tree)
+  and `privacy_guard::scan SHAPES_FN KNOWN_FN IGNORE_FN`. The scan enumerates
+  `git ls-files -z`, runs the caller's shape regexes (`grep -lIiE`) and
+  known-value literals (`grep -lIF`) over the tracked tree, asserts the
+  ignore-target paths are untracked + gitignored, and returns rc 1 **iff** any
+  `block` finding exists. It is always `grep -l` (never `-n`, so the matched
+  bytes are never captured — no re-leak), `-I` (binaries skipped), `--`
+  terminated, and read-only. It carries **no** Jira vocabulary (it is in the
+  `engine_vendor_neutral.bats` audited list and is extractable with the engine).
+- **`src/jira_sink.sh`** — the only Atlassian-aware pieces:
+  `jira_sink::privacy_shapes` (the five tiered shape regexes — BLOCK
+  `api-token`/`site`, WARN `email`/`cloudId-uuid`/`accountId`; every literal
+  fragmented across concatenation so the source never self-matches, FR-009),
+  `jira_sink::privacy_known_values` (the operator's exact `JIRA_*` + authors-map
+  literals, always BLOCK; absent ⇒ no line), and
+  `jira_sink::privacy_ignore_targets` (the must-be-gitignored paths).
+- **`reconcile::privacy_gate`** — the neutral orchestrator, wired into
+  `reconcile::main` right after `load_config` and before the write fork. On a
+  BLOCK finding (or a non-git target) it adds `summary::add error` rows + exits
+  **4**; on WARN it adds advisory rows and proceeds.
+
+When adding a shape: put the regex in `jira_sink::privacy_shapes`, **fragment**
+any literal that could self-match, choose the tier deliberately (BLOCK only for
+vendor-unique / exact signals), and prove the source stays clean via
+`tests/unit/privacy_dogfood.bats` (zero block findings over this repo's own
+tree). The neutral mechanism must never gain vendor vocabulary
+(`tests/unit/engine_vendor_neutral.bats` enforces this).
+
+**gitleaks / trufflehog are recommended, not bundled.** They are a complementary
+broader net for *generic* secrets, **never a dependency** of the guard (the core
+is dep-free `git` + `grep`), invoked only best-effort *if already on `PATH`*,
+with trufflehog **live-verify off** (it would call Jira's API). The guard's
+known-value pass is the precise guarantee no generic scanner can match.
+
 ## Optional: cross-model review (wingman)
 
 This repo is **wingman-ready but wingman is optional** — a per-developer aid, not

@@ -50,6 +50,9 @@
 #       unseeded ids); halt without partial mutation
 #   3 — transport failure across the board (config OK, but Jira
 #       unreachable; nothing was written)
+#   4 — consumer-tree privacy leak — fail-closed, zero Jira writes (a real
+#       identifier shape / known coordinate found in a tracked file, or the
+#       target is not a git work-tree); terminal, never demoted (like 2)
 # =============================================================================
 
 set -euo pipefail
@@ -67,6 +70,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # for IDE-side shellcheck integrations that DO follow external sources.
 # shellcheck source=./config.sh disable=SC1091
 source "${SCRIPT_DIR}/config.sh"
+# Vendor-neutral consumer-tree privacy scan mechanism (feature 006). Sourced
+# after config (it needs no config) and before the sink, which supplies the
+# Jira-aware shape/known-value/ignore providers the gate hands to the scan.
+# shellcheck source=./privacy_guard.sh disable=SC1091
+source "${SCRIPT_DIR}/privacy_guard.sh"
 # shellcheck source=./summary.sh disable=SC1091
 source "${SCRIPT_DIR}/summary.sh"
 # shellcheck source=./git_helpers.sh disable=SC1091
@@ -209,13 +217,16 @@ Options:
                    (default: .specify/extensions/jira/jira-config.yml).
   --help           Show this help.
 
-Exit codes (monotonic escalation: 0 < 1 < 3 < 2):
+Exit codes (monotonic escalation: 0 < 1 < 3 < 2; 4 is terminal):
   0  Clean success — no warnings or errors.
   1  Completed with per-spec warnings (backward-drift surfaced, missing
      spec.md, or a skipped spec dir).
   2  Project-level config error (halt without partial mutation).
   3  A spec failed closed (Jira unreadable / retries exhausted); nothing
      written for it.
+  4  Consumer-tree privacy leak — fail-closed, zero Jira writes (a real
+     identifier shape / known coordinate in a tracked file, or the target
+     is not a git work-tree). Terminal: never demoted by 1/3.
 EOF
 }
 
@@ -241,12 +252,23 @@ reconcile::log() {
 # -----------------------------------------------------------------------------
 reconcile::promote_exit() {
     local incoming="$1"
-    # 2 is terminal — never demote.
+    # 2 is terminal — never demote, never overwritten (config error is the most
+    # severe: the operator MUST act).
     if (( RECONCILE_EXIT_CODE == 2 )); then
+        return 0
+    fi
+    # 4 (consumer-tree privacy leak — feature 006) is ALSO terminal: once a leak
+    # fails closed, a later 1 or 3 must not demote it. Only a 2 may still
+    # supersede it (a deeper config-error halt). Mirrors the 2-is-terminal guard.
+    if (( RECONCILE_EXIT_CODE == 4 )); then
+        if [[ "$incoming" == "2" ]]; then
+            RECONCILE_EXIT_CODE=2
+        fi
         return 0
     fi
     case "$incoming" in
         2) RECONCILE_EXIT_CODE=2 ;;
+        4) RECONCILE_EXIT_CODE=4 ;;
         3) (( RECONCILE_EXIT_CODE < 3 )) && RECONCILE_EXIT_CODE=3 ;;
         1) (( RECONCILE_EXIT_CODE < 1 )) && RECONCILE_EXIT_CODE=1 ;;
         0) : ;;
@@ -479,6 +501,58 @@ reconcile::load_config() {
     fi
     mapping::validate_available "${available_types[@]}"
     reconcile::log "config loaded from ${path}"
+}
+
+# =============================================================================
+# Step 2.5 — Consumer-tree privacy gate (feature 006). VENDOR-NEUTRAL.
+#
+# A fail-closed pre-write gate: scan the consumer repo's whole tracked tree for
+# the operator's own resolved coordinates (exact, zero-FP) + generic high-signal
+# shapes, assert the credential/config files are gitignored, and HARD-ABORT
+# (exit 4, zero writes) on any BLOCK finding — naming the file + shape class
+# WITHOUT re-leaking the matched bytes. WARN findings (broad shapes) are
+# surfaced and the run proceeds.
+#
+# This orchestrator stays vendor-neutral (it is in the engine_vendor_neutral
+# audited list): it knows NO vendor vocabulary; the shape/known-value/ignore
+# definitions come from the sink callbacks, passed to the neutral scanner as
+# opaque data. Runs identically in --dry-run (the verdict is independent of
+# whether this run writes).
+#
+# rc 0 ⇒ proceed (clean, or warn-only). rc 1 ⇒ a BLOCK finding fired: the
+# summary carries an error per offending file and the exit is promoted to 4.
+# =============================================================================
+reconcile::privacy_gate() {
+    if ! privacy_guard::assert_git; then
+        summary::add error "not a git repo — cannot verify the tracked tree; refusing to write"
+        reconcile::promote_exit 4
+        return 1
+    fi
+
+    local findings rc=0
+    findings="$(privacy_guard::scan \
+        jira_sink::privacy_shapes \
+        jira_sink::privacy_known_values \
+        jira_sink::privacy_ignore_targets)" || rc=$?
+
+    local severity class file
+    # Surface every WARN finding (advisory — never fails the run; FR-003/SC-007).
+    while IFS=$'\t' read -r severity class file; do
+        [[ "$severity" == "warn" ]] || continue
+        [[ -n "$file" ]] || continue
+        summary::add warned "${file}: possible ${class} in a tracked file (advisory — verify it is not a real coordinate)"
+    done <<<"$findings"
+
+    if (( rc != 0 )); then
+        while IFS=$'\t' read -r severity class file; do
+            [[ "$severity" == "block" ]] || continue
+            [[ -n "$file" ]] || continue
+            summary::add error "${file}: forbidden ${class} in a tracked file — move real values to the gitignored .env / jira-config.yml, replace the tracked occurrence with a neutral placeholder, and scrub history if already committed (rotate the token if it was a credential)"
+        done <<<"$findings"
+        reconcile::promote_exit 4
+        return 1
+    fi
+    return 0
 }
 
 # =============================================================================
@@ -2845,6 +2919,14 @@ reconcile::main() {
 
     # Step 2 — config load. Exits 2 via config::*'s own halt on failure.
     reconcile::load_config
+
+    # Step 2.5 — consumer-tree privacy gate (feature 006). Fail-closed BEFORE any
+    # write path: a BLOCK-tier leak in the tracked tree (or a non-git target)
+    # aborts the run with exit 4 and zero Jira writes. Runs in --dry-run too.
+    if ! reconcile::privacy_gate; then
+        summary::emit
+        exit "$RECONCILE_EXIT_CODE"
+    fi
 
     if (( ARG_REMODE == 1 )); then
         # Feature 004 — the explicit, opt-in destructive re-mode: prune the

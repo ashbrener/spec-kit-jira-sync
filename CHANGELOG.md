@@ -10,6 +10,28 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Consumer-side privacy guard** (feature 006) — a fail-closed pre-write gate on
+  every reconcile (and at install) that scans the consumer repo's whole tracked
+  tree (`git ls-files`, binaries skipped) for the operator's own resolved Jira
+  coordinates (exact, zero false positives) plus generic Atlassian shapes, and
+  asserts the resolved `jira-config.yml`, `.env`, and `jira-authors.local.yml`
+  are gitignored-and-untracked. Findings are **two-tier**: **BLOCK** (the exact
+  known coordinates, the `ATATT…` API-token prefix, and a non-example
+  `<name>.atlassian.net` site host) fails closed with the new **exit 4**
+  (terminal, zero Jira writes), naming the file + shape class with copy-paste
+  remediation and **never echoing the matched secret**; **WARN** (a generic
+  email, a cloudId/UUID, a 24-hex accountId) is surfaced and the run proceeds. A
+  non-git target also fails closed. The scan **mechanism** is vendor-neutral
+  (`src/privacy_guard.sh` + `reconcile::privacy_gate`, in the engine-neutrality
+  audit); only the Atlassian shape/known-value/ignore definitions live in the
+  sink (`jira_sink::privacy_*`), fragmented so the source never self-matches
+  (proven by a dogfood self-scan over this repo's own tree). The core is
+  dependency-free (`git` + `grep`); gitleaks/trufflehog are recommended-not-
+  bundled, best-effort-if-on-`PATH`, never a dependency (trufflehog live-verify
+  off). Enforces Principle IX (no constitutional amendment).
+
 ## [0.3.0] - 2026-06-12
 
 ### Added

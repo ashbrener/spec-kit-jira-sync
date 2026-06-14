@@ -38,8 +38,11 @@ reconcile.sh [--spec NNN | --all] [--dry-run] [--on-drift=proceed|abort]
 | 1 | Completed with per-spec warnings (e.g., drift surfaced, missing `tasks.md`). |
 | 3 | One or more specs failed closed (unreadable Jira, exhausted 429 retries). |
 | 2 | Project-level configuration error (no/invalid binding) — run halted. |
+| 4 | Consumer-tree privacy leak — fail-closed, zero Jira writes (a real identifier shape / known coordinate in a tracked file, or the target is not a git work-tree). Terminal: never demoted by 1/3. |
 
 Higher code wins when multiple occur. Non-zero on any fail-closed (SC-005).
+Exit 4 is terminal (like 2): once a privacy leak is detected the run halts
+before any write and the code is never demoted.
 
 ## Guarantees
 

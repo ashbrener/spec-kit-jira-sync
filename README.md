@@ -388,6 +388,7 @@ is nothing to pull back. A read-only drift report may land later.
 | **1** | Completed with per-spec warnings (drift surfaced, missing `tasks.md`). |
 | **2** | Project-level configuration error (no/invalid binding) — run halted. |
 | **3** | One or more specs failed closed (unreadable Jira, exhausted 429 retries). |
+| **4** | Consumer-tree privacy leak — fail-closed, zero Jira writes (see below). Terminal: never demoted by 1/3. |
 
 The highest code that fires wins. See
 [`quickstart.md`](specs/001-core-bridge/quickstart.md) for setup and running the
@@ -502,6 +503,47 @@ Real values live exclusively in gitignored files — `.env`, `jira-config.yml`,
 and `tests/.private-deny` — and the privacy guard
 (`tests/unit/no-real-identifiers.bats`) scans the tracked tree and gates CI on
 any shape-based or operator-literal leak (Principle IX).
+
+### Consumer-side privacy guard (auto, every reconcile)
+
+The CI guard above protects *this* repo. A separate **consumer-side guard**
+protects the repos you install the bridge into. It runs automatically as a
+**fail-closed pre-write gate on every reconcile** (and at install) — after the
+config is loaded, **before any Jira write**, in `--dry-run` too. It scans the
+consumer repo's whole tracked tree (`git ls-files`, binaries skipped) and
+asserts the resolved `jira-config.yml`, `.env`, and `jira-authors.local.yml` are
+gitignored-and-untracked.
+
+It reports findings in **two tiers** (precision-blocks, recall-warns — the
+industry norm):
+
+- **BLOCK** (fail closed, **exit 4**, zero Jira writes):
+  - your **exact known coordinates** — the `JIRA_EMAIL`, the `JIRA_BASE_URL`
+    host, the `JIRA_API_TOKEN`, and any accountId in your authors map — matched
+    as fixed strings (zero false positives; only the bridge knows them);
+  - the Atlassian **API-token prefix** (`ATATT…`);
+  - an Atlassian **site host** `<name>.atlassian.net` (the reserved
+    `example.atlassian.net` documentation host is intentionally exempt).
+- **WARN** (surfaced, run **proceeds**): a generic **email**, a **cloudId/UUID**,
+  or a 24-hex / `NNNNNN:UUID` **accountId** — broad shapes that also match
+  ordinary content (a contributor email, a lockfile UUID), so they never halt
+  you (a blocking control with false positives just gets disabled).
+
+A non-git target also fails closed (the tree can't be proven clean). The failure
+names the **file** and the **shape class** with copy-paste remediation, and
+**never echoes the matched secret** (it reports the shape, not the bytes). On a
+BLOCK: move the real value into the gitignored `.env` / `jira-config.yml`,
+replace the tracked occurrence with a placeholder, scrub history if already
+committed, and rotate the token if it was a credential.
+
+**Off-the-shelf scanners are recommended, never bundled.** `gitleaks` /
+`trufflehog` are a useful *complementary* net for generic secrets the bridge
+doesn't know about; run them in your own CI. They are **never a dependency** of
+the guard (its core is dep-free `git` + `grep`), are only ever invoked
+best-effort *if already on `PATH`*, and trufflehog live-verification stays
+**off** (it would call Jira's API). The bridge's known-value pass is the precise
+guarantee no generic scanner can offer, since only the bridge knows its own
+exact resolved coordinates.
 
 ---
 

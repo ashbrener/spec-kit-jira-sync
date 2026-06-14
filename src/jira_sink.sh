@@ -2346,3 +2346,107 @@ jira_sink::prune_artifact() {
             ;;
     esac
 }
+
+# =============================================================================
+# Consumer-side privacy guard — Jira-AWARE providers (feature 006).
+#
+# These are the ONLY vendor-aware pieces of the consumer-tree privacy guard; the
+# scan mechanism (src/privacy_guard.sh) and orchestrator (reconcile::privacy_gate)
+# stay vendor-neutral. Each function prints lines the neutral scanner consumes.
+#
+# PRIVACY IX / FR-009: every literal that could itself match a forbidden shape is
+# FRAGMENTED across string concatenation so this source file never self-matches
+# when the guard scans the bridge's own tree (the dogfood case, C-11). The
+# Atlassian token prefix and the `.atlassian.net` site literal are each split.
+# =============================================================================
+
+# jira_sink::privacy_shapes
+#   Print the five `severity<TAB>class<TAB>regex` shape rows, TIERED (FR-002):
+#     block: api-token (the Atlassian Cloud token prefix), site (<name>.atlassian.net)
+#     warn : email, cloudId-uuid, accountId (broad — advisory only)
+#   Each regex is assembled from fragments so the literal never appears whole in
+#   this source (FR-009). Emitted as extended-regex for `grep -E`.
+jira_sink::privacy_shapes() {
+    # BLOCK — vendor-unique, near-zero false positive.
+    # Atlassian Cloud API-token prefix (v3). Fragmented: "ATA" + "TT".
+    local _tok="ATA""TT"'[A-Za-z0-9_=-]{8,}'
+    # Site host <name>.atlassian.net — the leading label EXCLUDES the IANA-
+    # reserved documentation host `example` (RFC 2606), the Atlassian analogue
+    # of the WARN-tolerated example.com email: a real tenant is never literally
+    # `example.atlassian.net`, so excluding it keeps the bridge's own
+    # placeholder fixtures clean (dogfood, C-11/SC-005) while every REAL tenant
+    # host still fails closed. The match is boundary-anchored so `example` as a
+    # sub-label (e.g. `example-corp`) still BLOCKs. The `atlassian` literal is
+    # fragmented ("atlas"+"sian") so this source never self-matches (FR-009).
+    local _lbl='[A-Za-z0-9-]'
+    local _notexample="(${_lbl}{1,6}|${_lbl}{8,}|[^eE]${_lbl}{6}|${_lbl}[^xX]${_lbl}{5}|${_lbl}{2}[^aA]${_lbl}{4}|${_lbl}{3}[^mM]${_lbl}{3}|${_lbl}{4}[^pP]${_lbl}{2}|${_lbl}{5}[^lL]${_lbl}|${_lbl}{6}[^eE])"
+    local _site="(^|[^A-Za-z0-9.@_-])${_notexample}"'\.atlas''sian\.net'
+    printf 'block\tapi-token\t%s\n' "$_tok"
+    printf 'block\tsite\t%s\n' "$_site"
+    # WARN — broad, high false-positive: surface, never fail closed.
+    printf 'warn\temail\t%s\n' '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+    printf 'warn\tcloudId-uuid\t%s\n' '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+    # accountId: a bare 24-hex OR the NNNNNN:UUID form.
+    printf 'warn\taccountId\t%s\n' '[0-9a-f]{24}|[0-9]{5,}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+}
+
+# jira_sink::_privacy_authors_file
+#   Resolve the authors-map path for the known-value pass without requiring
+#   config to be loaded: PRIVACY_AUTHORS_FILE override (tests) → the config
+#   getter when available → the documented default. Never echoes a value.
+jira_sink::_privacy_authors_file() {
+    if [[ -n "${PRIVACY_AUTHORS_FILE:-}" ]]; then
+        printf '%s\n' "${PRIVACY_AUTHORS_FILE}"
+        return 0
+    fi
+    if declare -F config::attribution_authors_file >/dev/null 2>&1; then
+        config::attribution_authors_file
+        return 0
+    fi
+    printf '%s\n' ".specify/extensions/jira/jira-authors.local.yml"
+}
+
+# jira_sink::privacy_known_values
+#   Print `block<TAB>class<TAB>literal` for each PRESENT operator coordinate
+#   (known values are always BLOCK — exact, zero false positive):
+#     email     → $JIRA_EMAIL
+#     site      → ${JIRA_BASE_URL#scheme} (host, trailing / stripped)
+#     api-token → $JIRA_API_TOKEN
+#     accountId → each non-null id parsed from the gitignored authors map
+#   An absent value contributes NO line (the pass degrades to a no-op; the shape
+#   pass still covers it). The literals are passed to the scanner as grep args
+#   only — never written, never echoed elsewhere.
+jira_sink::privacy_known_values() {
+    [[ -n "${JIRA_EMAIL:-}" ]] && printf 'block\temail\t%s\n' "${JIRA_EMAIL}"
+    if [[ -n "${JIRA_BASE_URL:-}" ]]; then
+        local _host="${JIRA_BASE_URL#*://}"
+        _host="${_host%%/*}"
+        [[ -n "$_host" ]] && printf 'block\tsite\t%s\n' "$_host"
+    fi
+    [[ -n "${JIRA_API_TOKEN:-}" ]] && printf 'block\tapi-token\t%s\n' "${JIRA_API_TOKEN}"
+
+    # accountIds from the gitignored authors map (absent ⇒ no rows). Reuse the
+    # neutral loader; emit one block row per non-null accountId.
+    local _authors_file _loaded
+    _authors_file="$(jira_sink::_privacy_authors_file)"
+    if [[ -n "$_authors_file" && -r "$_authors_file" ]]; then
+        _loaded="$(jira_sink::_load_authors "$_authors_file")"
+        local _id
+        while IFS= read -r _id; do
+            [[ -n "$_id" ]] && printf 'block\taccountId\t%s\n' "$_id"
+        done < <(printf '%s' "$_loaded" | jq -r '.authors[].accountId // empty' 2>/dev/null || true)
+    fi
+    return 0
+}
+
+# jira_sink::privacy_ignore_targets
+#   Print the consumer paths that MUST be gitignored-and-untracked: the active
+#   resolved config path (RECONCILE_CONFIG_PATH, falling back to the default),
+#   .env, and the authors map. The neutral scanner asserts each is untracked +
+#   ignored (FR-004).
+jira_sink::privacy_ignore_targets() {
+    local _cfg="${RECONCILE_CONFIG_PATH:-${RECONCILE_CONFIG_PATH_DEFAULT:-.specify/extensions/jira/jira-config.yml}}"
+    printf '%s\n' "$_cfg"
+    printf '%s\n' ".env"
+    printf '%s\n' "$(jira_sink::_privacy_authors_file)"
+}
