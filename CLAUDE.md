@@ -38,17 +38,7 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **006-consumer-privacy-guard** (active) — extend the privacy guarantee from
-  this repo to the CONSUMER repos: a fail-closed pre-write gate (every reconcile +
-  install) that scans the consumer's whole tracked tree for the operator's own
-  resolved coordinates (exact, zero-FP) + generic Atlassian shapes, asserts
-  jira-config.yml/.env are gitignored, and hard-aborts (exit 4, zero writes) on a
-  hit — naming file+shape-class without re-leaking. Neutral mechanism
-  (`src/privacy_guard.sh` + `reconcile::privacy_gate`, in the 003 audit) + Jira
-  shapes in the sink. Dep-free core; gitleaks/trufflehog recommended-not-bundled.
-  Enforces Principle IX (no amendment). Spec+clarify+plan done.
-  Plan: `specs/006-consumer-privacy-guard/plan.md`
-- **007-author-attribution** — make the board reflect who authored each
+- **007-author-attribution** (active) — make the board reflect who authored each
   spec: a two-track attribution — an account-independent `author:<handle>` LABEL
   always (works for non-Jira-users), plus a Jira ASSIGNEE only when the author
   maps to a real accountId (create-only, never clobbered on update — Linear FR-034
@@ -56,6 +46,14 @@ internally. This repo is also the independent second consumer that proves
   email→accountId map (dynamic resolution is GDPR-impossible). Opt-in, default OFF
   = byte-identical. Additive (no amendment); Privacy IX + 003 neutrality gate are
   the hard gates. Spec+clarify+plan done. Plan: `specs/007-author-attribution/plan.md`
+- **006-consumer-privacy-guard** — consumer-side privacy guard: a fail-closed
+  pre-write gate scanning the consumer's tracked tree for the operator's own
+  resolved coordinates (exact, zero-FP) + Atlassian shapes, two-tier verdict
+  (BLOCK = exact coords + `ATATT` + `.atlassian.net` → exit 4, zero writes; WARN =
+  generic email/UUID/accountId → surface + proceed). Neutral `src/privacy_guard.sh`
+  + `reconcile::privacy_gate` (in the 003 audit) + Jira shapes in the sink.
+  Enforces Principle IX (no amendment). Merged to main (PR #18; #17 merged the
+  spec only). Plan: `specs/006-consumer-privacy-guard/plan.md`
 - **005-adr-mirroring** — ADR comment mirroring: each spec's `research.md`
   decision records (Decision/Rationale/Alternatives) mirrored as idempotent
   comments on the spec's Jira issue. Merged to main (PR #12); neutral
