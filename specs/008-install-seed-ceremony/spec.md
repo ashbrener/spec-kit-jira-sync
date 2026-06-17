@@ -40,25 +40,28 @@ vendor-neutral engine, so the 003 neutrality gate is unaffected.
 
 ## Clarifications
 
-### Session 2026-06-17 (open decisions — leans recorded, resolve in /speckit-clarify)
+### Session 2026-06-17
 
-Three design forks carry leans for `/speckit-clarify`:
+All three design forks resolved by their leans (strong, constitution-grounded,
+none contentious):
 
-- **(a) Resolution transport — MCP vs REST.** LEAN: the durable ids that get
-  written are **REST-derived** (Basic-auth from `.env`, the same transport the
-  sink already uses), so the binding is authoritative and reproducible (Principle
-  V — no name-fallback). The Atlassian Remote MCP MAY be used as an optional
-  *interactive* convenience (e.g. browsing projects), but never as the source of
-  the written ids.
-- **(b) Seed — create missing labels vs validate-only.** LEAN: Jira labels are
-  created on first use by the reconcile writes themselves, so seed **validates +
-  normalizes** the `phase:*` / `task-phase:N` label prefixes and **confirms** the
-  status/transition mapping is reachable on the project's workflow, rather than
-  pre-creating anything. (Jira workflow statuses/transitions are admin-scoped and
-  out of scope to mutate.)
-- **(c) Chaining — should install offer to run seed at the end.** LEAN: **yes** —
-  install offers to run seed immediately (with a confirm), since the two are
-  almost always run together; declining leaves seed as a separate explicit step.
+- Q: (a) Resolution transport — should the written ids come from the Atlassian
+  MCP or the Jira REST API? → A: **REST-authoritative.** The durable ids written
+  to `jira-config.yml` are resolved via the Jira REST API using the Basic-auth
+  credential from the gitignored `.env` (the sink's transport), captured as ids at
+  resolution time (Principle V — no name-fallback). The Atlassian Remote MCP MAY
+  be an optional *interactive* convenience (e.g. browsing projects) but is **never**
+  the source of the written ids.
+- Q: (b) Seed — create missing labels/workflow, or validate-only? → A:
+  **Validate + normalize, never mutate the workflow.** Jira labels auto-create on
+  first reconcile use, so seed validates/normalizes the `phase:*` / `task-phase:N`
+  prefixes and **confirms** the lifecycle status/transition mapping is reachable on
+  the project's workflow; it does **not** pre-create labels and **never** mutates
+  the project's (admin-scoped) workflow statuses/transitions.
+- Q: (c) Install→seed chaining — should install run seed automatically? → A:
+  **Offer with a confirm.** On a successful install, the command offers to run seed
+  immediately (they are almost always run together); declining leaves seed as a
+  separate explicit step.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -201,7 +204,7 @@ leaves the tree unchanged (no config written).
   status/transition/field **id** at resolution time, never a name to be re-looked
   up later (Principle V, no name-fallback). The Atlassian Remote MCP MAY be used
   as an optional interactive convenience but MUST NOT be the source of the written
-  ids (clarify a).
+  ids (resolved 2026-06-17: REST-authoritative).
 - **FR-003 (Seed command)**: The bridge MUST provide a seed command
   (`speckit.jira.seed` / `/speckit-jira-seed`) — one-shot-per-project, idempotent,
   safe to re-run — that validates/normalizes the `phase:*` and `task-phase:N`
@@ -209,7 +212,7 @@ leaves the tree unchanged (no config written).
   reachable on the project's workflow, and captures every id into the binding. It
   MUST NOT attempt to create or edit Jira workflow statuses/transitions
   (admin-scoped, out of scope); label creation is left to first reconcile use
-  (clarify b).
+  (resolved 2026-06-17: seed validates/normalizes, never mutates the workflow).
 - **FR-004 (Dependency verification — surface, don't enforce)**: Install MUST
   verify every dependency it touches — `.env` Basic-auth present and authenticates
   (a `myself` probe), `jq`/`curl`/`git` present, the target project key readable,
@@ -251,7 +254,7 @@ leaves the tree unchanged (no config written).
   overwriting only the resolved id fields it is responsible for.
 - **FR-013 (Install→seed chaining)**: Install SHOULD offer to run seed
   immediately on success (with a confirm); declining leaves seed as a separate
-  explicit step (clarify c).
+  explicit step (resolved 2026-06-17: chained with confirm).
 
 ### Key Entities *(include if feature involves data)*
 
@@ -324,9 +327,12 @@ leaves the tree unchanged (no config written).
 - Changing the reconcile/engine behavior — install/seed only produce the binding
   the existing reconcile consumes.
 
-## Open Questions — for /speckit-clarify
+## Open Questions — RESOLVED (Clarifications, Session 2026-06-17)
 
-The three forks in Clarifications (Session 2026-06-17) carry strong leans:
-(a) REST-authoritative resolution (MCP optional), (b) seed validates/normalizes
-labels rather than pre-creating, (c) install offers to chain into seed. Resolve by
-the leans unless one is genuinely contentious.
+All three forks are pinned in the Clarifications section above:
+(a) **REST-authoritative** resolution (MCP optional, never the source of written
+ids); (b) seed **validates/normalizes** labels + confirms the workflow mapping,
+never pre-creates or mutates the workflow; (c) install **offers to chain** into
+seed with a confirm. No `[NEEDS CLARIFICATION]` markers remain. No constitutional
+amendment — Install + Seed are already defined in the constitution's Operational
+Workflow; this feature implements them.
