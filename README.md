@@ -344,11 +344,15 @@ registers **no `after_*` hooks**: reconcile is operator-driven, so your board is
 never mutated as a side effect of a lifecycle command — you run
 `/speckit-jira-push` (or `src/reconcile.sh`) when you want to sync.
 
-Install does **not** auto-resolve your Jira ids or scaffold credentials. After
-installing, bind the project by configuring the two gitignored files below, then
-dry-run. (An auto-resolving `install`/`seed` ceremony — the kind the Linear
-bridge ships — is on the [roadmap](#roadmap); for now you fill the ids by hand
-or read them off the project via the Atlassian MCP.)
+Install does **not** scaffold your credentials. After installing, add your
+gitignored `.env` (below), then run **`/speckit-jira-install`** to resolve the
+binding — it reads the project over the Jira REST API and writes
+`.specify/extensions/jira/jira-config.yml` (project key, issue-type ids, the
+lifecycle phase→status map, and the story-points field id) automatically, so you
+never read an id off Jira by hand. Then **`/speckit-jira-seed`** confirms the
+lifecycle mapping is reachable on the project's workflow. Both are idempotent
+(a re-run is a byte-identical no-op) and fail-closed (exit 2 = missing input,
+exit 3 = Jira unreadable).
 
 ## Quick start
 
@@ -373,11 +377,14 @@ JIRA_API_TOKEN=<atlassian-api-token>   # never commit; .env is gitignored
 ```
 
 `.specify/extensions/jira/jira-config.yml` — the resolved per-project binding
-(project key, issue-type / status / transition ids). Copy the committed
-placeholder [`config-template.yml`](config-template.yml) to that gitignored
-location and fill in your real ids. (Auto-resolving them is the seed/install
-feature; for now you fill them by hand or read them off the project via the
-Atlassian MCP — see [`dogfood.md`](specs/001-core-bridge/dogfood.md).)
+(project key, issue-type / status / transition ids). You do **not** write this
+by hand: run **`/speckit-jira-install`** to resolve every id over the Jira REST
+API and write this gitignored file, then **`/speckit-jira-seed`** to confirm the
+lifecycle mapping is reachable. The committed placeholder
+[`config-template.yml`](config-template.yml) shows the shape the install step
+fills. (The manual route — copy the template and read the ids off the project via
+the Atlassian MCP — still works; see
+[`dogfood.md`](specs/001-core-bridge/dogfood.md).)
 
 ### Dry-run first — preview every write, touch nothing
 
@@ -506,6 +513,12 @@ real Jira instance** (see *Live-dogfood-proven* below).
   layered idempotency, kept free of any Jira specifics.
 - **`workstate` schema gate** — every emitted record validated against the
   published schema (under `uv`, PEP 668-safe) before any write.
+- **Install + seed ceremony** — `/speckit-jira-install` resolves the binding
+  (project key, issue-type ids, lifecycle phase→status map, story-points field)
+  over the Jira REST API and writes the gitignored `jira-config.yml`; no more
+  hand-editing ids. `/speckit-jira-seed` validates the labels + confirms every
+  lifecycle status is reachable on the project's workflow. Idempotent
+  (byte-identical re-run), fail-closed (exit 2/3), Privacy IX.
 
 ### Live-dogfood-proven
 
@@ -535,7 +548,7 @@ preview) drive it.
   repo a pure `workstate → Jira` consumer.
 - **Engine extraction** — collapsing the engine shared with `spec-kit-linear`
   into one package with per-tracker sinks.
-- Layer E (the real-time GitHub Action status flips) and seed/install ergonomics.
+- Layer E (the real-time GitHub Action status flips).
 
 ---
 

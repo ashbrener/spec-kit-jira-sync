@@ -38,14 +38,23 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **007-author-attribution** (active) — make the board reflect who authored each
-  spec: a two-track attribution — an account-independent `author:<handle>` LABEL
-  always (works for non-Jira-users), plus a Jira ASSIGNEE only when the author
-  maps to a real accountId (create-only, never clobbered on update — Linear FR-034
-  parity). Author = `Owner:` line else git first-add. Static gitignored
-  email→accountId map (dynamic resolution is GDPR-impossible). Opt-in, default OFF
-  = byte-identical. Additive (no amendment); Privacy IX + 003 neutrality gate are
-  the hard gates. Spec+clarify+plan done. Plan: `specs/007-author-attribution/plan.md`
+- **008-install-seed-ceremony** (active) — the adoption on-ramp: implement the
+  constitution's Operational-Workflow Install + Seed. `/speckit-jira-install`
+  REST-resolves the binding (project key, issue-type ids, the 6 lifecycle
+  phase→status maps — operator-semantic since Jira statuses can't be created,
+  default by statusCategory — + best-effort story-points field) and writes the
+  gitignored jira-config.yml; `/speckit-jira-seed` validates phase:*/task-phase:N
+  labels + confirms the lifecycle status/transition mapping is reachable (never
+  mutates the admin-scoped workflow). Sink-side (003 neutrality untouched); new
+  `config::write_binding` (byte-stable, preserves operator mapping/attribution/
+  remode blocks); reuse exit 2/3; fail-closed-no-partial-write; Privacy IX
+  (binding only in gitignored config). Implements the constitution = no amendment.
+  sk-linear install/seed parity. Spec+clarify+plan done.
+  Plan: `specs/008-install-seed-ceremony/plan.md`
+- **007-author-attribution** — two-track attribution: an account-independent
+  `author:<handle>` LABEL always, plus a Jira ASSIGNEE only when the author maps
+  to a real accountId (create-only, Linear FR-034 parity). Opt-in, default OFF =
+  byte-identical. Merged to main (PR #13). Plan: `specs/007-author-attribution/plan.md`
 - **006-consumer-privacy-guard** — consumer-side privacy guard: a fail-closed
   pre-write gate scanning the consumer's tracked tree for the operator's own
   resolved coordinates (exact, zero-FP) + Atlassian shapes, two-tier verdict

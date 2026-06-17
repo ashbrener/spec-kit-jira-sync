@@ -12,6 +12,25 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Jira install + seed ceremony** (feature 008) — the adoption on-ramp:
+  `/speckit-jira-install` REST-resolves the per-repo binding (project key,
+  issue-type ids, the 6 lifecycle phase→status maps defaulted by status category,
+  and the best-effort story-points field id) over the same Basic-auth transport
+  the sink uses, and writes the gitignored `jira-config.yml` — no more
+  hand-editing ids. `/speckit-jira-seed` validates the `phase:*` / `task-phase:N`
+  label prefixes and confirms every lifecycle status is reachable on the
+  project's workflow (never mutating the admin-scoped workflow, never
+  pre-creating labels). Both are **fail-closed** (exit 2 = missing input /
+  unmappable or unreachable phase / source==target; exit 3 = Jira unreadable —
+  no new exit code), **idempotent** (a re-run against an unchanged project is a
+  byte-identical no-op; an accept-defaults re-run keeps the operator's existing
+  phase→status choices), and resolve-in-memory-then-write-once so any failure
+  writes **zero bytes**. The resolved binding is written ONLY to the gitignored
+  path (Privacy IX); the new `config::write_binding` writer preserves
+  operator-authored `mapping:` / `attribution:` / `remode:` blocks byte-for-byte.
+  Install/seed are sink-side config resolution — the vendor-neutral engine path
+  is untouched (003 neutrality gate stays green).
+
 - **Consumer-side privacy guard** (feature 006) — a fail-closed pre-write gate on
   every reconcile (and at install) that scans the consumer repo's whole tracked
   tree (`git ls-files`, binaries skipped) for the operator's own resolved Jira

@@ -114,6 +114,22 @@ provides:
       file: "commands/jira-status.md"
       description: "Read-only sync status / drift preview: what would be created/updated/transitioned, plus any backward-drift (Jira ahead of disk). Never mutates."
 
+    # The install on-ramp (feature 008). Resolves the per-repo binding (project
+    # key, issue-type ids, the 6 lifecycle phase→status ids, story-points field
+    # id) over the Jira REST API and writes the gitignored jira-config.yml —
+    # ending the hand-edit. Idempotent (byte-identical re-run); fail-closed.
+    - name: "speckit.jira.install"
+      file: "commands/jira-install.md"
+      description: "Resolve the per-repo Jira binding (project key, issue-type ids, phase->status map, story-points field) over REST and write the gitignored jira-config.yml. No more hand-editing ids. Idempotent; fail-closed (exit 2/3)."
+
+    # The seed trust gate (feature 008). Validates the phase:* / task-phase:N
+    # label conventions and confirms every lifecycle status is reachable on the
+    # project's workflow before the first real reconcile. Never mutates the
+    # admin-scoped workflow; safe to re-run.
+    - name: "speckit.jira.seed"
+      file: "commands/jira-seed.md"
+      description: "Validate the phase:* / task-phase:N labels and confirm every lifecycle status is reachable on the project's workflow. Never mutates the workflow; idempotent; fail-closed (exit 2)."
+
   # -------------------------------------------------------------------------
   # `config:` — INFORMATIONAL. The CLI does NOT auto-scaffold this file on
   # install. The runtime binding `jira-config.yml` is produced by copying the

@@ -147,6 +147,57 @@ _private_patterns() {
   fi
 }
 
+@test "feature-008 install/seed surface is committed placeholder-only (Privacy IX / C-10)" {
+  # The install/seed command bodies + scripts are committed to a PUBLIC repo and
+  # must carry only neutral placeholders — no real site/key/id/email. The only
+  # allowed *.atlassian.net literal is the IANA-reserved example documentation
+  # host (excluded from the BLOCK site shape).
+  cd "$REPO_ROOT"
+  local f
+  for f in \
+    commands/jira-install.md commands/jira-seed.md \
+    .claude/commands/speckit-jira-install.md .claude/commands/speckit-jira-seed.md \
+    src/install.sh src/seed.sh; do
+    git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || {
+      echo "untracked (the privacy guard would not scan it): $f" >&2
+      return 1
+    }
+  done
+  # No non-example .atlassian.net host literal in any committed 008 file.
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/src/jira_sink.sh"
+  local site_re hits
+  site_re="$(jira_sink::privacy_shapes | awk -F'\t' '$2=="site"{print $3}')"
+  hits="$(grep -lIiE -- "$site_re" \
+            commands/jira-install.md commands/jira-seed.md \
+            .claude/commands/speckit-jira-install.md \
+            .claude/commands/speckit-jira-seed.md \
+            src/install.sh src/seed.sh 2>/dev/null || true)"
+  if [ -n "$hits" ]; then
+    echo "a non-example .atlassian.net host leaked into a committed 008 file:" >&2
+    printf '%s\n' "$hits" >&2
+    return 1
+  fi
+}
+
+@test "feature-008 install writes ONLY to the gitignored binding path (C-10)" {
+  # After a (shimmed) install, the written jira-config.yml must be gitignored —
+  # so a public repo never leaks the operator's resolved coordinates. We assert
+  # the DEFAULT binding path is git-ignored and never tracked.
+  cd "$REPO_ROOT"
+  local binding=".specify/extensions/jira/jira-config.yml"
+  # The path is declared in .gitignore.
+  git check-ignore -q -- "$binding" || {
+    echo "the resolved binding path is NOT gitignored: $binding" >&2
+    return 1
+  }
+  # And it is not tracked.
+  if git ls-files --error-unmatch -- "$binding" >/dev/null 2>&1; then
+    echo "the resolved binding (real coordinates) is TRACKED — it must be gitignored" >&2
+    return 1
+  fi
+}
+
 @test "private deny-list, when present, actually contributes patterns" {
   # Guards against a silently-empty deny-list giving false confidence. Skips
   # cleanly in CI where the gitignored file is absent.
