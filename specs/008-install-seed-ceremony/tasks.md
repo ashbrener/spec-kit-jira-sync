@@ -104,10 +104,10 @@ the workflow.
 **Goal**: missing precondition ⇒ fail closed, exact remediation, zero bytes
 written.
 
-- [ ] T026 [US3] Test `tests/unit/install_us3.bats` (new, curl-shim) **C-5**: missing/blank `.env` (no `JIRA_*`) ⇒ `install::main` exits 2, the summary names the missing var(s) + the exact `.env` lines to add, and **no `jira-config.yml` is written** (assert the path does not exist / is unchanged).
-- [ ] T027 [US3] Test (same file) **C-6**: present but non-authenticating credential (shim `myself` 401/403) ⇒ exit 3 (Jira unreadable), named, **zero bytes written**.
-- [ ] T028 [US3] Test (same file) **C-7 e2e**: run `install::main` with the target == the bridge checkout ⇒ exit 2 (source==target), nothing written.
-- [ ] T029 [US3] Implement any remaining fail-closed wiring in `src/install.sh` so T026–T028 pass: the dependency report + guard run **before** resolve; the single `config::write_binding` is reached only after all preconditions pass (structural no-partial-write). (Most logic already in T010/T012/T019 — this task closes the gaps the tests reveal.)
+- [X] T026 [US3] Test `tests/unit/install_us3.bats` (new, curl-shim) **C-5**: missing/blank `.env` (no `JIRA_*`) ⇒ `install::main` exits 2, the summary names the missing var(s) + the exact `.env` lines to add, and **no `jira-config.yml` is written** (assert the path does not exist / is unchanged).
+- [X] T027 [US3] Test (same file) **C-6**: present but non-authenticating credential (shim `myself` 401/403) ⇒ exit 3 (Jira unreadable), named, **zero bytes written**.
+- [X] T028 [US3] Test (same file) **C-7 e2e**: run `install::main` with the target == the bridge checkout ⇒ exit 2 (source==target), nothing written.
+- [X] T029 [US3] Implement any remaining fail-closed wiring in `src/install.sh` so T026–T028 pass: the dependency report + guard run **before** resolve; the single `config::write_binding` is reached only after all preconditions pass (structural no-partial-write). (Most logic already in T010/T012/T019 — this task closes the gaps the tests reveal.)
 
 **Checkpoint**: `bats tests/unit/install_us3.bats` green; every failure writes zero
 bytes.
