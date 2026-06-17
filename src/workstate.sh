@@ -108,6 +108,109 @@ workstate::_spec_body() {
 }
 
 # ---------------------------------------------------------------------------
+# workstate::_cap_title <string>          (feature-009 — FR-002, C-3/C-8)
+#
+# Caps a candidate title at 120 on a WORD BOUNDARY, with NO inserted ellipsis
+# (the full text remains in the description body, so the title need not signal
+# truncation). A <=120 input is echoed verbatim (so a clean within-cap H1 is
+# byte-identical — the zero-churn anchor, FR-004). Over the cap: take the first
+# 120, and if it contains a space cut back to the last space (word boundary);
+# a single >120 token with no space is hard-cut at 120.
+#
+# DETERMINISM (D1): bash `${#s}` / `${s:0:N}` are LOCALE-DEPENDENT (char vs byte
+# per LC_CTYPE). To keep the cap byte-identical across environments regardless
+# of $LANG, the length measure and the slice run under `LC_ALL=C` — the cap is
+# 120 BYTES, the same for every operator. Word-boundary cuts happen at ASCII
+# spaces so they never split a multibyte char; the only place a char could split
+# is the no-space hard-cut at 120 bytes — we trim back to a UTF-8 char boundary
+# there so we never emit a partial code point. Pure shell — no time/random.
+# ---------------------------------------------------------------------------
+workstate::_cap_title() {
+    local s="$1"
+    # Locale-stable measure + slice: byte semantics under LC_ALL=C.
+    LC_ALL=C
+    if (( ${#s} <= 120 )); then
+        printf '%s\n' "$s"
+        return 0
+    fi
+    local pre="${s:0:120}"
+    if [[ "$pre" == *" "* ]]; then
+        # Cut back to the last space => word boundary, no mid-word split.
+        printf '%s\n' "${pre% *}"
+        return 0
+    fi
+    # No space in the first 120 bytes: hard-cut at 120, but back off any
+    # trailing bytes that form a partial UTF-8 sequence (lead byte 0xC0+ or
+    # continuation bytes 0x80-0xBF) so we never emit a split code point.
+    while [[ -n "$pre" && "${pre: -1}" == [$'\x80'-$'\xbf'] ]]; do
+        pre="${pre%?}"
+    done
+    if [[ -n "$pre" && "${pre: -1}" == [$'\xc0'-$'\xff'] ]]; then
+        pre="${pre%?}"
+    fi
+    printf '%s\n' "$pre"
+}
+
+# ---------------------------------------------------------------------------
+# workstate::_summary_first_sentence <spec_dir>   (feature-009 — FR-001, C-2/C-10)
+#
+# Echoes the FIRST PROSE SENTENCE of the spec's `## Summary` section, for the
+# title ladder's third rung. Reuses workstate::_spec_body to read the trimmed
+# Summary block, then skips leading non-prose lines (blank, blockquote `>`,
+# list `-`/`*`/`+`, image `!`, code-fence ```, heading `#`, table `|`). On the
+# first prose line it extracts the first sentence — up to a period-then-space, a
+# period-at-EOL, a `?`, or a `!` (terminator included, then trimmed) — or the
+# whole line when there is no terminator. Empty output when no prose line exists
+# (the caller then falls through to the kebab short-name). Deterministic,
+# read-only, vendor-neutral.
+#
+# known limitation (D2): the naive period-then-space split treats abbreviations
+# like "e.g."/"i.e."/"etc." as sentence terminators (so "Uses e.g. the X." ->
+# "Uses e.g."). This is accepted and PINNED by test, not handled — abbreviation
+# detection would over-engineer a fallback rung for negligible gain.
+# ---------------------------------------------------------------------------
+workstate::_summary_first_sentence() {
+    local spec_dir="${1%/}"
+    workstate::_spec_body "$spec_dir" | awk '
+        # Skip leading non-prose lines; on the first prose line, emit its first
+        # sentence and stop. Code-fence / blockquote / list / image / heading /
+        # table / blank are not prose.
+        function trim(s) {
+            sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s
+        }
+        found { next }
+        /^[[:space:]]*$/        { next }   # blank
+        /^[[:space:]]*```/      { next }   # code fence
+        /^[[:space:]]*>/        { next }   # blockquote
+        /^[[:space:]]*[-*+][[:space:]]/ { next }   # list item
+        /^[[:space:]]*!/        { next }   # image
+        /^[[:space:]]*#/        { next }   # heading
+        /^[[:space:]]*\|/       { next }   # table row
+        {
+            line = trim($0)
+            if (line == "") next
+            found = 1
+            # First sentence: scan for the first terminator (`.` + space, `.` at
+            # EOL, `?`, or `!`); include the terminator.
+            n = length(line)
+            for (i = 1; i <= n; i++) {
+                c = substr(line, i, 1)
+                if (c == "?" || c == "!") { print trim(substr(line, 1, i)); exit }
+                if (c == ".") {
+                    nx = (i < n) ? substr(line, i + 1, 1) : ""
+                    if (nx == "" || nx == " " || nx == "\t") {
+                        print trim(substr(line, 1, i)); exit
+                    }
+                }
+            }
+            # No terminator on the line: the whole (trimmed) line is the sentence.
+            print line
+            exit
+        }
+    '
+}
+
+# ---------------------------------------------------------------------------
 # workstate::_last_commit_iso <spec_dir>
 #
 # Echoes the ISO-8601 committer date of the most recent commit touching the

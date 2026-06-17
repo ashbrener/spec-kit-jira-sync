@@ -19,8 +19,8 @@ Tick `[ ]`→`[X]` as completed.
 
 ## Phase 1: Setup
 
-- [ ] T001 [P] Create `tests/unit/title_ladder.bats` (new) sourcing `src/parser.sh` + `src/workstate.sh`, with a helper that writes a small placeholder `spec.md` into a `mktemp -d` dir named like `009-<slug>` so `parser::short_name` resolves. (Bodies of the cases land in the phases below.)
-- [ ] T002 [P] Confirm `## Summary` is the canonical section (it is — `workstate::_spec_body` reads `^## Summary$`); no template change needed. (Verification task — no file change.)
+- [X] T001 [P] Create `tests/unit/title_ladder.bats` (new) sourcing `src/parser.sh` + `src/workstate.sh`, with a helper that writes a small placeholder `spec.md` into a `mktemp -d` dir named like `009-<slug>` so `parser::short_name` resolves. (Bodies of the cases land in the phases below.)
+- [X] T002 [P] Confirm `## Summary` is the canonical section (it is — `workstate::_spec_body` reads `^## Summary$`); no template change needed. (Verification task — no file change.)
 
 ---
 
@@ -30,18 +30,18 @@ Tick `[ ]`→`[X]` as completed.
 
 ### `parser::spec_title_line` (the `Title:` rung)
 
-- [ ] T003 Test in `tests/unit/title_ladder.bats`: `parser::spec_title_line <spec.md>` returns the value of a `Title:` line (plain `Title: Foo Bar` AND bold `**Title:**  Foo Bar`), trimmed; a spec with no `Title:` line ⇒ empty output; a `Title:` with an empty value ⇒ empty.
-- [ ] T004 Implement `parser::spec_title_line <spec_md_path>` in `src/parser.sh`: clone `parser::spec_author`'s awk exactly, changing the key match to `title` (case-insensitive), strip leading/trailing bold markers, split on the first colon, trim the value, print + exit on first non-empty match; no match ⇒ rc 0 no output. No Jira vocabulary.
+- [X] T003 Test in `tests/unit/title_ladder.bats`: `parser::spec_title_line <spec.md>` returns the value of a `Title:` line (plain `Title: Foo Bar` AND bold `**Title:**  Foo Bar`), trimmed; a spec with no `Title:` line ⇒ empty output; a `Title:` with an empty value ⇒ empty.
+- [X] T004 Implement `parser::spec_title_line <spec_md_path>` in `src/parser.sh`: clone `parser::spec_author`'s awk exactly, changing the key match to `title` (case-insensitive), strip leading/trailing bold markers, split on the first colon, trim the value, print + exit on first non-empty match; no match ⇒ rc 0 no output. No Jira vocabulary.
 
 ### `workstate::_cap_title` (the 120 cap)
 
-- [ ] T005 [P] Test in `tests/unit/title_ladder.bats`: `workstate::_cap_title` — a ≤120-char string is echoed verbatim; a >120 multi-word string is cut to the longest prefix ≤120 ending on a **word boundary** (assert `${#out} ≤ 120`, the output is a prefix of the input, the char after the cut in the input is a space, and NO trailing ellipsis); a >120 single-token string is hard-cut to exactly 120.
-- [ ] T006 Implement `workstate::_cap_title <string>` in `src/workstate.sh`: `(( ${#s} <= 120 ))` ⇒ `printf '%s' "$s"`; else take `pre=${s:0:120}`, if `pre` contains a space cut at the last space (`pre=${pre% *}` loop or `${pre%[![:space:]]*}` trim style) else keep `${s:0:120}`; print, no ellipsis. Pure parameter ops — no locale/time/random.
+- [X] T005 [P] Test in `tests/unit/title_ladder.bats`: `workstate::_cap_title` — a ≤120-char string is echoed verbatim; a >120 multi-word string is cut to the longest prefix ≤120 ending on a **word boundary** (assert `${#out} ≤ 120`, the output is a prefix of the input, the char after the cut in the input is a space, and NO trailing ellipsis); a >120 single-token string is hard-cut to exactly 120.
+- [X] T006 Implement `workstate::_cap_title <string>` in `src/workstate.sh`: `(( ${#s} <= 120 ))` ⇒ `printf '%s' "$s"`; else take `pre=${s:0:120}`, if `pre` contains a space cut at the last space (`pre=${pre% *}` loop or `${pre%[![:space:]]*}` trim style) else keep `${s:0:120}`; print, no ellipsis. Pure parameter ops — no locale/time/random.
 
 ### `workstate::_summary_first_sentence` (the Summary rung)
 
-- [ ] T007 Test in `tests/unit/title_ladder.bats`: a spec whose `## Summary` first prose line is `"Does X. More text."` ⇒ `"Does X."`; a `## Summary` opening with a blockquote/list/image/code-fence then prose ⇒ the first **prose** sentence (C-10); a `## Summary` with only markup / no prose ⇒ empty; a single prose line with no terminal punctuation ⇒ the whole line (trimmed).
-- [ ] T008 Implement `workstate::_summary_first_sentence <spec_dir>` in `src/workstate.sh`: pipe `workstate::_spec_body "$spec_dir"`; skip leading lines matching blank / blockquote `^>` / list `^[-*+]` / image `^!` / code-fence / heading `^#` / table `^|`; on the first remaining (prose) line, extract the first sentence — up to the first `.`-followed-by-space, `.`-at-EOL, `?`, or `!` (include the terminator, then trim) — or the whole line if no terminator; trim; empty if no prose line. Deterministic, read-only.
+- [X] T007 Test in `tests/unit/title_ladder.bats`: a spec whose `## Summary` first prose line is `"Does X. More text."` ⇒ `"Does X."`; a `## Summary` opening with a blockquote/list/image/code-fence then prose ⇒ the first **prose** sentence (C-10); a `## Summary` with only markup / no prose ⇒ empty; a single prose line with no terminal punctuation ⇒ the whole line (trimmed).
+- [X] T008 Implement `workstate::_summary_first_sentence <spec_dir>` in `src/workstate.sh`: pipe `workstate::_spec_body "$spec_dir"`; skip leading lines matching blank / blockquote `^>` / list `^[-*+]` / image `^!` / code-fence / heading `^#` / table `^|`; on the first remaining (prose) line, extract the first sentence — up to the first `.`-followed-by-space, `.`-at-EOL, `?`, or `!` (include the terminator, then trim) — or the whole line if no terminator; trim; empty if no prose line. Deterministic, read-only.
 
 **Checkpoint**: `bats tests/unit/title_ladder.bats` — the 3 foundational units green.
 
