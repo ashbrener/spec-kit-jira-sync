@@ -46,8 +46,8 @@ internally. This repo is also the independent second consumer that proves
   a verbose pasted-Input H1 below the Summary so a wall never becomes the title.
   Backward-compatible (good-H1 specs byte-identical, no churn); vendor-neutral
   (reads spec.md, stays in the neutral layer — 003 gate green); Privacy IX. Fixes
-  an operator-reported gap on both bridges (sk-linear port is a follow-up). Spec done.
-  Plan: `specs/009-title-source-ladder/plan.md`
+  an operator-reported gap on both bridges (sk-linear port is a follow-up).
+  Spec+clarify+plan done. Plan: `specs/009-title-source-ladder/plan.md`
 - **008-install-seed-ceremony** — the adoption on-ramp: `/speckit-jira-install`
   REST-resolves the binding (project key, issue-type ids, phase→status maps,
   story-points) and writes the gitignored jira-config.yml; `/speckit-jira-seed`
