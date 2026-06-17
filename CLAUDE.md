@@ -38,18 +38,22 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **008-install-seed-ceremony** (active) — the adoption on-ramp: implement the
-  constitution's Operational-Workflow Install + Seed. `/speckit-jira-install`
-  REST-resolves the binding (project key, issue-type ids, the 6 lifecycle
-  phase→status maps — operator-semantic since Jira statuses can't be created,
-  default by statusCategory — + best-effort story-points field) and writes the
-  gitignored jira-config.yml; `/speckit-jira-seed` validates phase:*/task-phase:N
-  labels + confirms the lifecycle status/transition mapping is reachable (never
-  mutates the admin-scoped workflow). Sink-side (003 neutrality untouched); new
-  `config::write_binding` (byte-stable, preserves operator mapping/attribution/
-  remode blocks); reuse exit 2/3; fail-closed-no-partial-write; Privacy IX
-  (binding only in gitignored config). Implements the constitution = no amendment.
-  sk-linear install/seed parity. Spec+clarify+plan done.
+- **009-title-source-ladder** (active) — make the issue title human-readable: a
+  deterministic title-source ladder (NO LLM at reconcile — Principle II) replacing
+  today's H1-or-kebab rule in `workstate::_spec_title`. First-match-wins: explicit
+  `Title:` line → a concise within-cap `# Feature Specification:` H1 → first
+  sentence of `## Summary` → kebab short-name. ~120-char word-boundary cap demotes
+  a verbose pasted-Input H1 below the Summary so a wall never becomes the title.
+  Backward-compatible (good-H1 specs byte-identical, no churn); vendor-neutral
+  (reads spec.md, stays in the neutral layer — 003 gate green); Privacy IX. Fixes
+  an operator-reported gap on both bridges (sk-linear port is a follow-up). Spec done.
+  Plan: `specs/009-title-source-ladder/plan.md`
+- **008-install-seed-ceremony** — the adoption on-ramp: `/speckit-jira-install`
+  REST-resolves the binding (project key, issue-type ids, phase→status maps,
+  story-points) and writes the gitignored jira-config.yml; `/speckit-jira-seed`
+  validates labels + confirms the lifecycle mapping reachable. New
+  `config::write_binding` (byte-stable, preserves operator blocks); fail-closed
+  exit 2/3; Privacy IX; sink-side (003 untouched). Merged to main (PR #21).
   Plan: `specs/008-install-seed-ceremony/plan.md`
 - **007-author-attribution** — two-track attribution: an account-independent
   `author:<handle>` LABEL always, plus a Jira ASSIGNEE only when the author maps
