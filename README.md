@@ -303,6 +303,53 @@ highest code that fires wins.
 
 ---
 
+## Install
+
+Install the extension into the spec-kit project you want mirrored — run this
+from **that consumer repo**, not from inside the bridge's own checkout (the
+installer detects source-equals-target and halts rather than copy the bridge
+into itself).
+
+Until this extension lands in the spec-kit community catalog, install from the
+GitHub archive URL (the CLI's `--from` flag expects a direct `.zip`, not a repo
+URL):
+
+```bash
+specify extension add jira-sync --from https://github.com/ashbrener/spec-kit-jira-sync/archive/refs/heads/main.zip
+```
+
+Or from a local checkout (`--dev` symlinks rather than copies, so your local
+edits flow straight through):
+
+```bash
+specify extension add /path/to/spec-kit-jira-sync --dev
+```
+
+Once the extension is listed in the catalog, the short form works:
+
+```bash
+specify extension add jira-sync
+```
+
+> **Naming** — the *catalog* id is `jira-sync` (the bare `jira` slot is taken by
+> an unrelated extension), but the extension installs under
+> `.specify/extensions/jira/` and its commands are namespaced `speckit.jira.*`.
+
+Install copies the bridge into your repo's `.specify/extensions/jira/`,
+registers its two on-demand commands (`speckit.jira.push`,
+`speckit.jira.status`), and — if your project was initialised with
+`--ai-skills` — generates a `SKILL.md` per command. Unlike the
+[Linear sibling](https://github.com/ashbrener/spec-kit-linear-sync), this bridge
+registers **no `after_*` hooks**: reconcile is operator-driven, so your board is
+never mutated as a side effect of a lifecycle command — you run
+`/speckit-jira-push` (or `src/reconcile.sh`) when you want to sync.
+
+Install does **not** auto-resolve your Jira ids or scaffold credentials. After
+installing, bind the project by configuring the two gitignored files below, then
+dry-run. (An auto-resolving `install`/`seed` ceremony — the kind the Linear
+bridge ships — is on the [roadmap](#roadmap); for now you fill the ids by hand
+or read them off the project via the Atlassian MCP.)
+
 ## Quick start
 
 ### Prerequisites
