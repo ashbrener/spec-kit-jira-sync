@@ -52,8 +52,8 @@ Tick `[ ]`→`[X]` as completed.
 **Goal**: lock zero-churn BEFORE wiring fallbacks. **Independent test**: a clean-H1
 fixture resolves byte-identically to today; same fixture twice is identical.
 
-- [ ] T009 [US2] Test in `tests/unit/title_ladder.bats` (C-1): a fixture with `# Feature Specification: Clean Name` (and any body) ⇒ `workstate::_spec_title` returns exactly `Clean Name` — and assert it equals the value the **pre-feature** rule produced (capture the old awk's output inline in the test as the oracle). (C-9) Deriving the same fixture twice ⇒ identical output.
-- [ ] T010 [US2] Rewrite `workstate::_spec_title <spec_dir>` in `src/workstate.sh` as the 4-rung ladder: (1) `t=$(parser::spec_title_line "$spec_md")`; `[[ -n $t ]]` ⇒ `_cap_title "$t"`, return. (2) compute `h1` (first `#` heading, strip `Feature Specification:` label — keep today's awk); `short=$(parser::short_name "$spec_dir" || true)`; use h1 ⇔ `[[ -n $h1 && $h1 != '[FEATURE NAME]' && $h1 != "$short" && ${#h1} -le 120 ]]` ⇒ `_cap_title "$h1"`, return. (3) `s=$(workstate::_summary_first_sentence "$spec_dir")`; `[[ -n $s ]]` ⇒ `_cap_title "$s"`, return. (4) `printf '%s\n' "$short"`. Preserve the signature + the empty-spec early-return; clean within-cap H1 stays byte-identical (T009 green).
+- [X] T009 [US2] Test in `tests/unit/title_ladder.bats` (C-1): a fixture with `# Feature Specification: Clean Name` (and any body) ⇒ `workstate::_spec_title` returns exactly `Clean Name` — and assert it equals the value the **pre-feature** rule produced (capture the old awk's output inline in the test as the oracle). (C-9) Deriving the same fixture twice ⇒ identical output.
+- [X] T010 [US2] Rewrite `workstate::_spec_title <spec_dir>` in `src/workstate.sh` as the 4-rung ladder: (1) `t=$(parser::spec_title_line "$spec_md")`; `[[ -n $t ]]` ⇒ `_cap_title "$t"`, return. (2) compute `h1` (first `#` heading, strip `Feature Specification:` label — keep today's awk); `short=$(parser::short_name "$spec_dir" || true)`; use h1 ⇔ `[[ -n $h1 && $h1 != '[FEATURE NAME]' && $h1 != "$short" && ${#h1} -le 120 ]]` ⇒ `_cap_title "$h1"`, return. (3) `s=$(workstate::_summary_first_sentence "$spec_dir")`; `[[ -n $s ]]` ⇒ `_cap_title "$s"`, return. (4) `printf '%s\n' "$short"`. Preserve the signature + the empty-spec early-return; clean within-cap H1 stays byte-identical (T009 green).
 
 **Checkpoint**: T009 green — the regression anchor holds; clean specs do not churn.
 
@@ -61,11 +61,11 @@ fixture resolves byte-identically to today; same fixture twice is identical.
 
 ## Phase 4: User Story 1 — a weak H1 yields a readable title (P1)
 
-- [ ] T011 [US1] Test (C-2): placeholder H1 `# Feature Specification: [FEATURE NAME]` + `## Summary` with prose ⇒ title = first Summary sentence (capped), NOT the kebab slug.
-- [ ] T012 [US1] Test (C-5): no usable `#` heading + a `## Summary` ⇒ title = first Summary sentence.
-- [ ] T013 [US1] Test (C-6): no `#` heading, no `## Summary`, dir `009-foo-bar` ⇒ title = `foo-bar` (kebab last resort).
-- [ ] T014 [US1] Test (C-7): H1 byte-equal to the kebab short-name + a `## Summary` ⇒ H1 treated as weak ⇒ title = first Summary sentence.
-- [ ] T015 [US1] Test (C-10): `## Summary` opening with a list/blockquote/image then prose ⇒ first prose sentence (markup skipped). (Implementation already covered by T008/T010 — these are assertion tasks; fix any gap they reveal.)
+- [X] T011 [US1] Test (C-2): placeholder H1 `# Feature Specification: [FEATURE NAME]` + `## Summary` with prose ⇒ title = first Summary sentence (capped), NOT the kebab slug.
+- [X] T012 [US1] Test (C-5): no usable `#` heading + a `## Summary` ⇒ title = first Summary sentence.
+- [X] T013 [US1] Test (C-6): no `#` heading, no `## Summary`, dir `009-foo-bar` ⇒ title = `foo-bar` (kebab last resort).
+- [X] T014 [US1] Test (C-7): H1 byte-equal to the kebab short-name + a `## Summary` ⇒ H1 treated as weak ⇒ title = first Summary sentence.
+- [X] T015 [US1] Test (C-10): `## Summary` opening with a list/blockquote/image then prose ⇒ first prose sentence (markup skipped). (Implementation already covered by T008/T010 — these are assertion tasks; fix any gap they reveal.)
 
 **Checkpoint**: `bats tests/unit/title_ladder.bats` — US1 cases green.
 
@@ -73,9 +73,9 @@ fixture resolves byte-identically to today; same fixture twice is identical.
 
 ## Phase 5: User Story 3 — override + verbose-H1 demotion (P2)
 
-- [ ] T016 [US3] Test (C-3): a >120-char verbose H1 + a `## Summary` ⇒ title = first Summary sentence (capped ≤120 on a word boundary), NOT the H1 wall.
-- [ ] T017 [US3] Test (C-4): a `Title: Crisp Override` line + a verbose H1 ⇒ title = `Crisp Override` (rung 1 wins).
-- [ ] T018 [US3] Test (C-8): a `## Summary` whose first sentence is >120 chars ⇒ title capped ≤120, ends on a word boundary, no mid-word cut, no inserted ellipsis. (Covered by T006/T008/T010 — assertion task; close any gap.)
+- [X] T016 [US3] Test (C-3): a >120-char verbose H1 + a `## Summary` ⇒ title = first Summary sentence (capped ≤120 on a word boundary), NOT the H1 wall.
+- [X] T017 [US3] Test (C-4): a `Title: Crisp Override` line + a verbose H1 ⇒ title = `Crisp Override` (rung 1 wins).
+- [X] T018 [US3] Test (C-8): a `## Summary` whose first sentence is >120 chars ⇒ title capped ≤120, ends on a word boundary, no mid-word cut, no inserted ellipsis. (Covered by T006/T008/T010 — assertion task; close any gap.)
 
 **Checkpoint**: `bats tests/unit/title_ladder.bats` — all C-1..C-10 green.
 

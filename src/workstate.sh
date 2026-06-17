@@ -50,19 +50,38 @@ fi
 WORKSTATE_SCHEMA_VERSION="${WORKSTATE_SCHEMA_VERSION:-0.1.0}"
 
 # ---------------------------------------------------------------------------
-# workstate::_spec_title <spec_dir>
+# workstate::_spec_title <spec_dir>          (feature-009 — FR-001, the ladder)
 #
-# Echoes the spec's human title from the first `# ` heading in spec.md,
-# stripping a leading `Feature Specification:` label if present (spec-kit's
-# canonical heading shape). Falls back to the short_name when spec.md has no
-# heading. Empty spec.md → empty output (caller treats as skip).
+# Derives the spec issue's human title via a deterministic, first-match-wins
+# SOURCE LADDER (replacing the former single H1-or-kebab rule):
+#   1. an explicit `Title:` line in spec.md (the operator override),
+#   2. else the first `# ` heading (with the `Feature Specification:` label
+#      stripped) ONLY when it is a real, concise name — non-empty, not the
+#      `[FEATURE NAME]` placeholder, not byte-equal to the kebab short-name, and
+#      within the 120 cap (a verbose pasted-input wall is thereby DEMOTED),
+#   3. else the first prose sentence of the `## Summary` section,
+#   4. else the kebab directory short-name (the unchanged last resort).
+# Rungs 1–3 pass through the 120-char word-boundary cap. A clean within-cap H1
+# hits rung 2 where _cap_title is a no-op, so its title is BYTE-IDENTICAL to the
+# pre-feature result (FR-004 — zero churn). Empty spec.md → empty output (caller
+# treats as skip). Deterministic, read-only, vendor-neutral (reads spec.md only).
 # ---------------------------------------------------------------------------
 workstate::_spec_title() {
     local spec_dir="${1%/}"
     local spec_md="${spec_dir}/spec.md"
     [[ -s "$spec_md" ]] || return 0
-    local title
-    title="$(awk '
+
+    # Rung 1: an explicit `Title:` line wins over everything.
+    local t
+    t="$(parser::spec_title_line "$spec_md")"
+    if [[ -n "$t" ]]; then
+        workstate::_cap_title "$t"
+        return 0
+    fi
+
+    # Rung 2: the H1 feature name, used only when real + concise.
+    local h1
+    h1="$(awk '
         /^# / {
             line = $0
             sub(/^# /, "", line)
@@ -73,10 +92,27 @@ workstate::_spec_title() {
             exit
         }
     ' "$spec_md")"
-    if [[ -z "$title" ]]; then
-        title="$(parser::short_name "$spec_dir" || true)"
+    local short
+    short="$(parser::short_name "$spec_dir" || true)"
+    # Locale-stable length guard (D1): measure the cap test in bytes (LC_ALL=C)
+    # so the same H1 is accepted/demoted identically across environments.
+    local h1_len
+    h1_len="$(LC_ALL=C; printf '%s' "${#h1}")"
+    if [[ -n "$h1" && "$h1" != '[FEATURE NAME]' && "$h1" != "$short" && "$h1_len" -le 120 ]]; then
+        workstate::_cap_title "$h1"
+        return 0
     fi
-    printf '%s\n' "$title"
+
+    # Rung 3: the first prose sentence of `## Summary`.
+    local s
+    s="$(workstate::_summary_first_sentence "$spec_dir")"
+    if [[ -n "$s" ]]; then
+        workstate::_cap_title "$s"
+        return 0
+    fi
+
+    # Rung 4: the kebab short-name (may be empty for a non-NNN dir).
+    printf '%s\n' "$short"
 }
 
 # ---------------------------------------------------------------------------
