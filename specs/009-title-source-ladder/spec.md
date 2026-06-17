@@ -46,19 +46,20 @@ ladder there is a follow-up, not a dependency of this work.
 
 ## Clarifications
 
-### Session 2026-06-17 (open decisions — leans recorded, resolve in /speckit-clarify)
+### Session 2026-06-17
 
-- **(a) Ladder priority when both a concise H1 and a `## Summary` exist.** LEAN:
-  explicit `Title:` line > a concise, within-cap H1 > first sentence of `##
-  Summary` > kebab short-name. A *verbose* H1 (over the cap) is demoted **below**
+All three design forks resolved by their leans (strong, non-contentious):
+
+- Q: (a) Ladder priority when both a concise H1 and a `## Summary` exist? → A:
+  **explicit `Title:` line > a concise, within-cap H1 > first sentence of `##
+  Summary` > kebab short-name.** A *verbose* H1 (over the cap) is demoted **below**
   the Summary sentence, so a pasted-Input heading never wins.
-- **(b) Length cap value + truncation style.** LEAN: ~120 characters, truncated on
-  a **word boundary** (never mid-word), with **no inserted ellipsis** — the full
-  text already lives in the description body, so the title need not signal
-  truncation.
-- **(c) Prepend the feature number to the title?** (e.g. `001: <title>`) LEAN:
-  **no** — keep titles clean; the `speckit-spec:NNN` label already carries the
-  number for traceability. Surfaced as an explicit question.
+- Q: (b) Length cap value + truncation style? → A: **120 characters, truncated on
+  a word boundary** (never mid-word), with **no inserted ellipsis** — the full text
+  already lives in the description body, so the title need not signal truncation.
+- Q: (c) Prepend the feature number to the title (e.g. `001: <title>`)? → A:
+  **No** — keep titles clean; the `speckit-spec:NNN` label already carries the
+  number for traceability.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -170,9 +171,9 @@ but no `Title:` → title is the Summary sentence (capped), not the H1 wall.
   kebab short-name, and within the length cap; (3) the first sentence of the `##
   Summary` section (trimmed); (4) the kebab directory short-name (unchanged last
   resort).
-- **FR-002 (Length cap)**: The resolved title MUST be capped at a sensible maximum
-  (~120 characters, pinned in clarify) on a **word boundary** (never mid-word),
-  with no inserted ellipsis. The cap MUST demote an over-cap H1 (so a verbose H1
+- **FR-002 (Length cap)**: The resolved title MUST be capped at **120 characters**
+  (resolved 2026-06-17) on a **word boundary** (never mid-word), with no inserted
+  ellipsis. The cap MUST demote an over-cap H1 (so a verbose H1
   cannot become the title) and MUST bound the Summary sentence and the `Title:`
   override. No spec content is lost — the full text remains in the description body.
 - **FR-003 (Determinism + idempotency)**: The same `spec.md` MUST yield the same
@@ -259,10 +260,11 @@ but no `Title:` → title is the Summary sentence (capped), not the H1 wall.
 - Titles of **non-spec levels** — the repo Epic and phase Subtasks keep their
   current titles.
 
-## Open Questions — for /speckit-clarify
+## Open Questions — RESOLVED (Clarifications, Session 2026-06-17)
 
-The three forks in Clarifications (Session 2026-06-17) carry strong leans:
-(a) ladder priority (explicit `Title:` > concise-within-cap H1 > Summary sentence >
-kebab; verbose H1 demoted below Summary); (b) cap = ~120 chars, word-boundary, no
-ellipsis; (c) do **not** prepend the feature number. Resolve by the leans unless one
-is genuinely contentious.
+All three forks are pinned in the Clarifications section above: (a) ladder priority
+= explicit `Title:` > concise-within-cap H1 > first Summary sentence > kebab (a
+verbose H1 demoted below Summary); (b) cap = **120 chars**, word-boundary, no
+ellipsis; (c) do **not** prepend the feature number. No `[NEEDS CLARIFICATION]`
+markers remain. No constitutional amendment — deterministic title derivation
+reinforces Principle II (no LLM at reconcile) and stays vendor-neutral (003).
