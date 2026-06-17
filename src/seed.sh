@@ -27,11 +27,11 @@
 
 SEED_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# shellcheck source=src/jira_rest.sh
+# shellcheck source=./jira_rest.sh disable=SC1091
 source "${SEED_SH_DIR}/jira_rest.sh"
-# shellcheck source=src/config.sh
+# shellcheck source=./config.sh disable=SC1091
 source "${SEED_SH_DIR}/config.sh"
-# shellcheck source=src/summary.sh
+# shellcheck source=./summary.sh disable=SC1091
 source "${SEED_SH_DIR}/summary.sh"
 
 declare -g SEED_EXIT_CODE=0

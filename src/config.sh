@@ -64,6 +64,12 @@ declare -g CONFIG_LOADED_PATH=""
 # Default resolved-config location (gitignored per Principle V/IX).
 readonly CONFIG_DEFAULT_PATH=".specify/extensions/jira/jira-config.yml"
 
+# The committed placeholder template `config::write_binding` copies from when the
+# target binding does not yet exist (feature 008). Env-overridable so tests can
+# point at a fixture copy; defaults to the repo-root template next to this lib's
+# parent. Resolved lazily in config::write_binding so a missing override is fine.
+: "${CONFIG_TEMPLATE_PATH:=}"
+
 # The six lifecycle phases the engine drives, in ordinal order. Each maps
 # to a target Jira status id under `phase_status` (data-model § 2/§ 3).
 readonly -a CONFIG_LIFECYCLE_PHASES=(
@@ -490,6 +496,145 @@ config::validate() {
         exit 2
     fi
 
+    return 0
+}
+
+# ===========================================================================
+# Feature 008 — the binding WRITER (config.sh has only had readers until now).
+#
+# `config::write_binding <path> <key=value>…` produces / updates the gitignored
+# jira-config.yml from the resolved ids install/seed hold in memory. It is the
+# LAST step of the install/seed ceremony (resolve-in-memory then write-once), so
+# any earlier failure writes ZERO bytes (FR-005/SC-003).
+#
+# Two modes, one code path (per-line substitution within block scope):
+#   - target ABSENT  ⇒ copy CONFIG_TEMPLATE_PATH (the committed placeholder),
+#     then substitute each resolved value into its placeholder line.
+#   - target PRESENT ⇒ substitute ONLY the resolved id fields, leaving every
+#     other line — crucially the operator-authored mapping:/attribution:/remode:
+#     blocks (FR-012/VR-6) — byte-for-byte verbatim. Never reorders.
+#
+# Byte-stable (FR-008/SC-005): no timestamp/nonce; the same resolved ids produce
+# an identical file, so a re-run is a visible no-op. Written via a temp file +
+# atomic `mv`, ONLY to the supplied (gitignored) path — never echoing a real
+# coordinate elsewhere (Principle IX). No vendor vocabulary beyond the Jira
+# config field names already in this module.
+#
+# The accepted resolved keys (every value is an id, never a name — Principle V):
+#   project_key
+#   issue_types.{epic,story,subtask,task,initiative}
+#   phase_status.{specifying,planning,tasking,implementing,ready_to_merge,merged}
+#   story_points_field_id   (optional; only written when supplied)
+# ===========================================================================
+config::write_binding() {
+    if (( $# < 1 )); then
+        config::_die "config::write_binding requires a target path"
+    fi
+    local target="$1"; shift
+
+    # Build the resolved key→value lookup from the remaining key=value args.
+    local -A resolved=()
+    local kv key val
+    for kv in "$@"; do
+        if [[ "${kv}" != *=* ]]; then
+            config::_die "config::write_binding: malformed resolved arg (expected key=value): ${kv}"
+        fi
+        key="${kv%%=*}"
+        val="${kv#*=}"
+        resolved["${key}"]="${val}"
+    done
+
+    # Choose the SOURCE we substitute over: the existing binding (preserve
+    # operator blocks) when present, else the committed placeholder template.
+    local source
+    if [[ -e "${target}" ]]; then
+        if [[ ! -r "${target}" ]]; then
+            config::_die "config::write_binding: target not readable: ${target}"
+        fi
+        source="${target}"
+    else
+        local template="${CONFIG_TEMPLATE_PATH}"
+        if [[ -z "${template}" ]]; then
+            # Default: the template sits at the repo root, a sibling of src/.
+            template="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/config-template.yml"
+        fi
+        if [[ ! -r "${template}" ]]; then
+            config::_die "config::write_binding: template not readable: ${template}"
+        fi
+        source="${template}"
+    fi
+
+    # Substitute resolved scalars into their placeholder lines, tracking the
+    # current block under `jira:` so `epic:` under `issue_types:` and `merged:`
+    # under `phase_status:` are addressed unambiguously. Only the keys we own are
+    # rewritten; every other line passes through verbatim (operator blocks). A
+    # supplied story_points_field_id is inserted once (after `transitions:`) when
+    # the source has no such line yet, else rewritten in place — byte-stable.
+    local sp_id="${resolved[story_points_field_id]:-}"
+    # Precompute whether the SOURCE already carries a story-points line, so the
+    # loop below never re-reads `source` while iterating over it (SC2094).
+    local sp_in_source=0
+    if grep -qE '^[[:space:]]*story_points_field_id:' "${source}"; then
+        sp_in_source=1
+    fi
+    local tmp
+    tmp="$(mktemp "${target}.XXXXXX.tmp")"
+    # shellcheck disable=SC2064  # expand the path now so the trap removes this file.
+    trap "rm -f -- '${tmp}'" RETURN
+
+    local line stripped indent block raw_key sp_written=0
+    block=""
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        stripped="${line#"${line%%[![:space:]]*}"}"
+        indent=$(( ${#line} - ${#stripped} ))
+
+        # Track the top-level block under `jira:`: a 2-space-indented `key:` that
+        # ENDS in a colon (no inline scalar) opens a block (issue_types:,
+        # phase_status:, labels:, …). A 2-space `key: value` scalar (project_key,
+        # transitions: {}) is not a block opener and resets the block context so
+        # a later 4-space line under a block-less scalar is never mis-attributed.
+        if (( indent == 2 )) && [[ "${stripped}" == *: ]]; then
+            block="${stripped%:}"
+        elif (( indent <= 2 )); then
+            block=""
+        fi
+
+        raw_key="${stripped%%:*}"
+        local newval="" matched=0
+        if (( indent == 2 )) && [[ "${raw_key}" == "project_key" ]] \
+            && [[ -n "${resolved[project_key]:-}" ]]; then
+            newval="${resolved[project_key]}"; matched=1
+        elif (( indent == 4 )) && [[ "${block}" == "issue_types" ]] \
+            && [[ -n "${resolved[issue_types.${raw_key}]:-}" ]]; then
+            newval="${resolved[issue_types.${raw_key}]}"; matched=1
+        elif (( indent == 4 )) && [[ "${block}" == "phase_status" ]] \
+            && [[ -n "${resolved[phase_status.${raw_key}]:-}" ]]; then
+            newval="${resolved[phase_status.${raw_key}]}"; matched=1
+        elif (( indent == 2 )) && [[ "${raw_key}" == "story_points_field_id" ]] \
+            && [[ -n "${sp_id}" ]]; then
+            newval="${sp_id}"; matched=1; sp_written=1
+        fi
+
+        if (( matched )); then
+            # Preserve the original indentation + key; rewrite only the value as a
+            # double-quoted scalar (the template's convention) — byte-stable.
+            printf '%*s%s: "%s"\n' "${indent}" "" "${raw_key}" "${newval}" >>"${tmp}"
+        else
+            printf '%s\n' "${line}" >>"${tmp}"
+            # Insert a story-points line right after `transitions:` if the source
+            # has no `story_points_field_id:` line of its own (fresh-from-template
+            # path). Idempotent: a present line is rewritten in place above.
+            if (( indent == 2 )) && [[ "${raw_key}" == "transitions" ]] \
+                && [[ -n "${sp_id}" ]] && (( sp_written == 0 )) \
+                && (( sp_in_source == 0 )); then
+                # No such key in the source — insert it once after `transitions:`.
+                printf '  story_points_field_id: "%s"\n' "${sp_id}" >>"${tmp}"
+                sp_written=1
+            fi
+        fi
+    done < "${source}"
+
+    mv -f -- "${tmp}" "${target}"
     return 0
 }
 
