@@ -144,6 +144,18 @@ The ADF checklist is today's default. Configurable artifact mapping and a
 **2-level mode** (collapse tasks into a Story-body checklist instead of separate
 Subtask issues) are on the [roadmap](#status--roadmap).
 
+> **Where the Story title comes from.** The spec issue's title is derived from
+> `spec.md` by a deterministic **source ladder** (no AI, no network — the bridge
+> never summarizes at reconcile time): an explicit `Title:` line → a concise
+> `# Feature Specification:` H1 → the first sentence of the `## Summary` section
+> → the directory slug, first match wins. Every rung is capped at **120
+> characters** on a word boundary (no ellipsis). A clean, within-cap H1 is used
+> verbatim — byte-identical to before — so well-formed specs never see a title
+> change; only specs whose H1 is the unfilled `[FEATURE NAME]` placeholder, is a
+> verbose pasted wall, or is missing get a readable title instead of a raw slug.
+
+<!-- markdownlint-disable-next-line MD028 -->
+
 > **Upgrading a multi-spec board?** A bug in earlier builds matched a phase
 > Subtask by its `task-phase:N` label alone — a phase *number* that is unique
 > only within a spec — so across a repo with several specs every spec's "Phase N"

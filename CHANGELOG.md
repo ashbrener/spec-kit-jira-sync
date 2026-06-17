@@ -12,6 +12,20 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Human-readable Story titles via a source ladder** (feature 009) — the spec
+  issue's title is now derived from `spec.md` by a deterministic, first-match-wins
+  ladder: an explicit `Title:` line → a concise `# Feature Specification:` H1 →
+  the first sentence of the `## Summary` section → the directory slug. Every
+  non-slug rung is capped at **120 characters** on a word boundary (no ellipsis,
+  no AI, no network — the bridge still never summarizes at reconcile time). A
+  clean, within-cap H1 is byte-identical to before, so **well-formed specs see no
+  title change**; specs whose H1 is the unfilled `[FEATURE NAME]` placeholder, a
+  verbose pasted wall, or missing get a one-time, desirable title improvement
+  (a readable Summary sentence instead of a raw kebab slug) on the next reconcile.
+  Lives wholly in the vendor-neutral producer layer (`parser.sh` / `workstate.sh`),
+  uses the existing `item.title` field — no schema, sink, exit-code, or
+  constitution change; the 003 neutrality + Privacy IX gates stay green.
+
 - **Jira install + seed ceremony** (feature 008) — the adoption on-ramp:
   `/speckit-jira-install` REST-resolves the per-repo binding (project key,
   issue-type ids, the 6 lifecycle phase→status maps defaulted by status category,

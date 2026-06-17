@@ -50,19 +50,38 @@ fi
 WORKSTATE_SCHEMA_VERSION="${WORKSTATE_SCHEMA_VERSION:-0.1.0}"
 
 # ---------------------------------------------------------------------------
-# workstate::_spec_title <spec_dir>
+# workstate::_spec_title <spec_dir>          (feature-009 — FR-001, the ladder)
 #
-# Echoes the spec's human title from the first `# ` heading in spec.md,
-# stripping a leading `Feature Specification:` label if present (spec-kit's
-# canonical heading shape). Falls back to the short_name when spec.md has no
-# heading. Empty spec.md → empty output (caller treats as skip).
+# Derives the spec issue's human title via a deterministic, first-match-wins
+# SOURCE LADDER (replacing the former single H1-or-kebab rule):
+#   1. an explicit `Title:` line in spec.md (the operator override),
+#   2. else the first `# ` heading (with the `Feature Specification:` label
+#      stripped) ONLY when it is a real, concise name — non-empty, not the
+#      `[FEATURE NAME]` placeholder, not byte-equal to the kebab short-name, and
+#      within the 120 cap (a verbose pasted-input wall is thereby DEMOTED),
+#   3. else the first prose sentence of the `## Summary` section,
+#   4. else the kebab directory short-name (the unchanged last resort).
+# Rungs 1–3 pass through the 120-char word-boundary cap. A clean within-cap H1
+# hits rung 2 where _cap_title is a no-op, so its title is BYTE-IDENTICAL to the
+# pre-feature result (FR-004 — zero churn). Empty spec.md → empty output (caller
+# treats as skip). Deterministic, read-only, vendor-neutral (reads spec.md only).
 # ---------------------------------------------------------------------------
 workstate::_spec_title() {
     local spec_dir="${1%/}"
     local spec_md="${spec_dir}/spec.md"
     [[ -s "$spec_md" ]] || return 0
-    local title
-    title="$(awk '
+
+    # Rung 1: an explicit `Title:` line wins over everything.
+    local t
+    t="$(parser::spec_title_line "$spec_md")"
+    if [[ -n "$t" ]]; then
+        workstate::_cap_title "$t"
+        return 0
+    fi
+
+    # Rung 2: the H1 feature name, used only when real + concise.
+    local h1
+    h1="$(awk '
         /^# / {
             line = $0
             sub(/^# /, "", line)
@@ -73,10 +92,27 @@ workstate::_spec_title() {
             exit
         }
     ' "$spec_md")"
-    if [[ -z "$title" ]]; then
-        title="$(parser::short_name "$spec_dir" || true)"
+    local short
+    short="$(parser::short_name "$spec_dir" || true)"
+    # Locale-stable length guard (D1): measure the cap test in bytes (LC_ALL=C)
+    # so the same H1 is accepted/demoted identically across environments.
+    local h1_len
+    h1_len="$(LC_ALL=C; printf '%s' "${#h1}")"
+    if [[ -n "$h1" && "$h1" != '[FEATURE NAME]' && "$h1" != "$short" && "$h1_len" -le 120 ]]; then
+        workstate::_cap_title "$h1"
+        return 0
     fi
-    printf '%s\n' "$title"
+
+    # Rung 3: the first prose sentence of `## Summary`.
+    local s
+    s="$(workstate::_summary_first_sentence "$spec_dir")"
+    if [[ -n "$s" ]]; then
+        workstate::_cap_title "$s"
+        return 0
+    fi
+
+    # Rung 4: the kebab short-name (may be empty for a non-NNN dir).
+    printf '%s\n' "$short"
 }
 
 # ---------------------------------------------------------------------------
@@ -103,6 +139,109 @@ workstate::_spec_body() {
             while (start <= end && lines[start] ~ /^[[:space:]]*$/) start++
             while (end >= start && lines[end] ~ /^[[:space:]]*$/) end--
             for (i = start; i <= end; i++) print lines[i]
+        }
+    '
+}
+
+# ---------------------------------------------------------------------------
+# workstate::_cap_title <string>          (feature-009 — FR-002, C-3/C-8)
+#
+# Caps a candidate title at 120 on a WORD BOUNDARY, with NO inserted ellipsis
+# (the full text remains in the description body, so the title need not signal
+# truncation). A <=120 input is echoed verbatim (so a clean within-cap H1 is
+# byte-identical — the zero-churn anchor, FR-004). Over the cap: take the first
+# 120, and if it contains a space cut back to the last space (word boundary);
+# a single >120 token with no space is hard-cut at 120.
+#
+# DETERMINISM (D1): bash `${#s}` / `${s:0:N}` are LOCALE-DEPENDENT (char vs byte
+# per LC_CTYPE). To keep the cap byte-identical across environments regardless
+# of $LANG, the length measure and the slice run under `LC_ALL=C` — the cap is
+# 120 BYTES, the same for every operator. Word-boundary cuts happen at ASCII
+# spaces so they never split a multibyte char; the only place a char could split
+# is the no-space hard-cut at 120 bytes — we trim back to a UTF-8 char boundary
+# there so we never emit a partial code point. Pure shell — no time/random.
+# ---------------------------------------------------------------------------
+workstate::_cap_title() {
+    local s="$1"
+    # Locale-stable measure + slice: byte semantics under LC_ALL=C.
+    LC_ALL=C
+    if (( ${#s} <= 120 )); then
+        printf '%s\n' "$s"
+        return 0
+    fi
+    local pre="${s:0:120}"
+    if [[ "$pre" == *" "* ]]; then
+        # Cut back to the last space => word boundary, no mid-word split.
+        printf '%s\n' "${pre% *}"
+        return 0
+    fi
+    # No space in the first 120 bytes: hard-cut at 120, but back off any
+    # trailing bytes that form a partial UTF-8 sequence (lead byte 0xC0+ or
+    # continuation bytes 0x80-0xBF) so we never emit a split code point.
+    while [[ -n "$pre" && "${pre: -1}" == [$'\x80'-$'\xbf'] ]]; do
+        pre="${pre%?}"
+    done
+    if [[ -n "$pre" && "${pre: -1}" == [$'\xc0'-$'\xff'] ]]; then
+        pre="${pre%?}"
+    fi
+    printf '%s\n' "$pre"
+}
+
+# ---------------------------------------------------------------------------
+# workstate::_summary_first_sentence <spec_dir>   (feature-009 — FR-001, C-2/C-10)
+#
+# Echoes the FIRST PROSE SENTENCE of the spec's `## Summary` section, for the
+# title ladder's third rung. Reuses workstate::_spec_body to read the trimmed
+# Summary block, then skips leading non-prose lines (blank, blockquote `>`,
+# list `-`/`*`/`+`, image `!`, code-fence ```, heading `#`, table `|`). On the
+# first prose line it extracts the first sentence — up to a period-then-space, a
+# period-at-EOL, a `?`, or a `!` (terminator included, then trimmed) — or the
+# whole line when there is no terminator. Empty output when no prose line exists
+# (the caller then falls through to the kebab short-name). Deterministic,
+# read-only, vendor-neutral.
+#
+# known limitation (D2): the naive period-then-space split treats abbreviations
+# like "e.g."/"i.e."/"etc." as sentence terminators (so "Uses e.g. the X." ->
+# "Uses e.g."). This is accepted and PINNED by test, not handled — abbreviation
+# detection would over-engineer a fallback rung for negligible gain.
+# ---------------------------------------------------------------------------
+workstate::_summary_first_sentence() {
+    local spec_dir="${1%/}"
+    workstate::_spec_body "$spec_dir" | awk '
+        # Skip leading non-prose lines; on the first prose line, emit its first
+        # sentence and stop. Code-fence / blockquote / list / image / heading /
+        # table / blank are not prose.
+        function trim(s) {
+            sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s
+        }
+        found { next }
+        /^[[:space:]]*$/        { next }   # blank
+        /^[[:space:]]*```/      { next }   # code fence
+        /^[[:space:]]*>/        { next }   # blockquote
+        /^[[:space:]]*[-*+][[:space:]]/ { next }   # list item
+        /^[[:space:]]*!/        { next }   # image
+        /^[[:space:]]*#/        { next }   # heading
+        /^[[:space:]]*\|/       { next }   # table row
+        {
+            line = trim($0)
+            if (line == "") next
+            found = 1
+            # First sentence: scan for the first terminator (`.` + space, `.` at
+            # EOL, `?`, or `!`); include the terminator.
+            n = length(line)
+            for (i = 1; i <= n; i++) {
+                c = substr(line, i, 1)
+                if (c == "?" || c == "!") { print trim(substr(line, 1, i)); exit }
+                if (c == ".") {
+                    nx = (i < n) ? substr(line, i + 1, 1) : ""
+                    if (nx == "" || nx == " " || nx == "\t") {
+                        print trim(substr(line, 1, i)); exit
+                    }
+                }
+            }
+            # No terminator on the line: the whole (trimmed) line is the sentence.
+            print line
+            exit
         }
     '
 }

@@ -476,6 +476,50 @@ parser::spec_author() {
 }
 
 # ---------------------------------------------------------------------------
+# parser::spec_title_line <spec_md_path>          (feature-009 — FR-001, C-1)
+#
+# Echoes the value of the FIRST `Title:` line in the spec's top matter
+# (case-insensitive on the key), with a leading `**`/`__` bold marker stripped
+# and surrounding whitespace trimmed. Empty output (exit 0) when no such line
+# exists, the value is empty, or the file is absent — the caller then falls
+# through to the next rung of the title ladder (concise H1 → Summary → kebab).
+#
+# Vendor-neutral: this MIRRORS parser::spec_author exactly (same front-matter
+# shape, feature 007), only the matched key changes to `title`. It is a pure
+# markdown read; it carries NO Jira vocabulary (the value is a free string).
+# ---------------------------------------------------------------------------
+parser::spec_title_line() {
+    local spec_md="$1"
+    [[ -f "$spec_md" ]] || return 0
+    awk '
+        # Match a leading optional bold marker, then Title, a colon, and the
+        # value. Case-insensitive via tolower() on a normalized prefix.
+        {
+            line = $0
+            # Strip a leading bold marker (** or __) so "**Title**:" matches.
+            sub(/^[[:space:]]*(\*\*|__)?/, "", line)
+            key = line
+            # Take the substring up to the first colon as the key candidate.
+            ci = index(line, ":")
+            if (ci == 0) next
+            key = substr(line, 1, ci - 1)
+            # Drop a trailing bold marker on the key ("Title**").
+            sub(/(\*\*|__)$/, "", key)
+            sub(/[[:space:]]+$/, "", key)
+            if (tolower(key) == "title") {
+                value = substr(line, ci + 1)
+                # Drop a leading bold marker when the colon sat INSIDE the bold
+                # span ("**Title:**  Foo" => value "**  Foo" => "Foo").
+                sub(/^(\*\*|__)/, "", value)
+                sub(/^[[:space:]]+/, "", value)
+                sub(/[[:space:]]+$/, "", value)
+                if (value != "") { print value; exit }
+            }
+        }
+    ' "$spec_md"
+}
+
+# ---------------------------------------------------------------------------
 # parser::decision_records <research_md_path>
 #
 # Tolerant extractor for a spec's decision records (ADRs) from its research.md

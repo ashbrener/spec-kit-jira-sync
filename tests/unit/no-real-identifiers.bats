@@ -198,6 +198,29 @@ _private_patterns() {
   fi
 }
 
+@test "feature-009 title-ladder fixtures are inline + placeholder-only (Privacy IX / C-11)" {
+  # The title-ladder tests use INLINE heredoc spec.md fixtures (no tracked
+  # fixture files), so the privacy assertion is on the test source itself: it
+  # must be UNDER the git-ls-files scan and carry only neutral placeholder text
+  # (e.g. "Clean Name", "Does X. More.", example dirs like 009-foo-bar) — no
+  # real name/email/coordinate. The generic structural + deny-list scan above
+  # already covers it; here we pin tracked-ness + the absence of any '@' email
+  # literal (placeholders never embed an email) so a regression is caught.
+  cd "$REPO_ROOT"
+  local src="tests/unit/title_ladder.bats"
+  git ls-files --error-unmatch -- "$src" >/dev/null 2>&1 || {
+    echo "untracked (the privacy guard would not scan it): $src" >&2
+    return 1
+  }
+  # No real Atlassian/email coordinate: the ladder reads only spec.md prose and
+  # the fixtures are neutral text — there is no email literal in the source.
+  if grep -qE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "$src"; then
+    echo "an email literal leaked into the title-ladder test fixtures" >&2
+    grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "$src" >&2
+    return 1
+  fi
+}
+
 @test "private deny-list, when present, actually contributes patterns" {
   # Guards against a silently-empty deny-list giving false confidence. Skips
   # cleanly in CI where the gitignored file is absent.
