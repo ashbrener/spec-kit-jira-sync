@@ -165,7 +165,7 @@ install::dependency_report() {
         install::_log "  remediation: add to the gitignored .env, then re-run:"
         for var in "${missing[@]}"; do
             case "${var}" in
-                JIRA_BASE_URL)  install::_log "    JIRA_BASE_URL=https://your-site.atlassian.net" ;;
+                JIRA_BASE_URL)  install::_log "    JIRA_BASE_URL=https://<your-site>.atlassian.net" ;;
                 JIRA_EMAIL)     install::_log "    JIRA_EMAIL=you@example.com" ;;
                 JIRA_API_TOKEN) install::_log "    JIRA_API_TOKEN=<your Atlassian API token>" ;;
             esac

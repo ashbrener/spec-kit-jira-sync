@@ -19,9 +19,13 @@
 # config.sh never reads secrets.
 #
 # Shape mirrors exactly what src/config.sh `config::validate` requires
-# (data-model.md § 2). Auto-discovery of these ids by the seed/install step is a
-# later feature; for now you fill them in by hand (or read them off the project
-# via the Atlassian MCP). See specs/001-core-bridge/dogfood.md.
+# (data-model.md § 2). You do NOT fill these ids in by hand: run
+# `/speckit-jira-install` to resolve the project key, issue-type ids, the
+# lifecycle phase->status map, and the story-points field id over the Jira REST
+# API and write the gitignored jira-config.yml automatically; then
+# `/speckit-jira-seed` confirms the lifecycle mapping is reachable on the
+# project's workflow. The placeholders below show the shape the install step
+# fills. See specs/008-install-seed-ceremony/ and specs/001-core-bridge/dogfood.md.
 #
 # ADR / decision-record mirroring (feature 005) needs NO config: it is additive
 # and on by default. Each spec's research.md Decision/Rationale/Alternatives
