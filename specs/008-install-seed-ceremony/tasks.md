@@ -21,10 +21,10 @@ code — reuse 2 (config/missing inputs) + 3 (Jira unreadable).
 
 ## Phase 1: Setup
 
-- [ ] T001 [P] Create `src/install.sh` skeleton: vendor-aware sink header (state: sink-side config resolution, not engine — reuses jira_rest + config), `set -euo pipefail`, `# shellcheck source=` wiring for `jira_rest.sh` + `config.sh` + `summary.sh`, and empty stubs `install::{main,parse_args,guard_source_target,dependency_report,resolve,promote_exit}`.
-- [ ] T002 [P] Create `src/seed.sh` skeleton: same header/sourcing shape, stubs `seed::{main,parse_args,validate_labels,confirm_reachability,promote_exit}`.
-- [ ] T003 [P] Register the two commands in `extension.yml` `provides.commands`: `speckit.jira.install` → `commands/jira-install.md`, `speckit.jira.seed` → `commands/jira-seed.md`, each with a one-line description (mirror the push/status entries).
-- [ ] T004 [P] Stub `commands/jira-install.md` + `commands/jira-seed.md` (agent-executed bodies, frontmatter mirroring `commands/jira-push.md`: `name:`, `description:`, `arguments:`) and the dev-layout twins `.claude/commands/speckit-jira-{install,seed}.md`. Bodies filled in US1/US2.
+- [X] T001 [P] Create `src/install.sh` skeleton: vendor-aware sink header (state: sink-side config resolution, not engine — reuses jira_rest + config), `set -euo pipefail`, `# shellcheck source=` wiring for `jira_rest.sh` + `config.sh` + `summary.sh`, and empty stubs `install::{main,parse_args,guard_source_target,dependency_report,resolve,promote_exit}`.
+- [X] T002 [P] Create `src/seed.sh` skeleton: same header/sourcing shape, stubs `seed::{main,parse_args,validate_labels,confirm_reachability,promote_exit}`.
+- [X] T003 [P] Register the two commands in `extension.yml` `provides.commands`: `speckit.jira.install` → `commands/jira-install.md`, `speckit.jira.seed` → `commands/jira-seed.md`, each with a one-line description (mirror the push/status entries).
+- [X] T004 [P] Stub `commands/jira-install.md` + `commands/jira-seed.md` (agent-executed bodies, frontmatter mirroring `commands/jira-push.md`: `name:`, `description:`, `arguments:`) and the dev-layout twins `.claude/commands/speckit-jira-{install,seed}.md`. Bodies filled in US1/US2.
 
 **Checkpoint**: `bash -n src/install.sh src/seed.sh` parses; `yamllint -d relaxed`
 passes on `extension.yml`; the two commands appear in the manifest.
