@@ -147,3 +147,55 @@ _register_full_project() {
   # Zero bytes written — the resolve stage failed before the single write.
   [ ! -e "$TARGET" ]
 }
+
+@test "R2 re-run defaults phase→status from the EXISTING binding (byte-identical accept-defaults)" {
+  # The project has TWO done-category statuses; the statusCategory default picks
+  # the FIRST (31003). The operator's existing binding instead mapped merged →
+  # the SECOND (31004). A re-run with no override must KEEP 31004 (R2), so the
+  # re-resolved binding is byte-identical to the operator's choice.
+  local stat2="$BATS_TEST_TMPDIR/stat2.json"
+  jq -n '[ { "id":"10000","name":"Story","statuses":[
+      {"id":"31001","name":"To Do","statusCategory":{"key":"new"}},
+      {"id":"31002","name":"In Progress","statusCategory":{"key":"indeterminate"}},
+      {"id":"31003","name":"Done","statusCategory":{"key":"done"}},
+      {"id":"31004","name":"Closed","statusCategory":{"key":"done"}}
+  ]} ]' >"$stat2"
+  jira_shim::set_response GET "*/myself*" "myself_ok.json" 200
+  jira_shim::set_response GET "*/project/PROJ/statuses*" "$stat2" 200
+  jira_shim::set_response GET "*/project/PROJ*" "$PROJ_FX" 200
+  jira_shim::set_response GET "*/field*" "$FLD_FX" 200
+
+  # Seed an existing binding where merged → 31004 (the non-default done status).
+  cat > "$TARGET" <<'YAML'
+jira:
+  project_key: "PROJ"
+  issue_types:
+    epic: "12001"
+    story: "12002"
+    subtask: "12003"
+  phase_status:
+    specifying: "31001"
+    planning: "31001"
+    tasking: "31002"
+    implementing: "31002"
+    ready_to_merge: "31003"
+    merged: "31004"
+  transitions: {}
+  story_points_field_id: "customfield_10016"
+  labels:
+    spec_prefix: "speckit-spec:"
+    repo_prefix: "speckit-repo:"
+    phase_prefix: "task-phase:"
+    lifecycle_prefix: "phase:"
+YAML
+  cp "$TARGET" "$BATS_TEST_TMPDIR/before.yml"
+
+  run install::main --project PROJ --non-interactive --no-seed --config "$TARGET"
+  [ "$status" -eq 0 ]
+  # merged kept the operator's existing 31004, not the category default 31003.
+  config::load "$TARGET"
+  [ "$(config::get phase_status.merged)" = "31004" ]
+  # The accept-defaults re-run is byte-identical to the operator's binding.
+  run cmp "$BATS_TEST_TMPDIR/before.yml" "$TARGET"
+  [ "$status" -eq 0 ]
+}

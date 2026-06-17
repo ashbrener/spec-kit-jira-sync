@@ -302,6 +302,28 @@ install::resolve() {
         [merged]="${cat_done}"
     )
 
+    # R2 (robust SC-005): on a RE-RUN where a binding already exists, default
+    # each phase from the EXISTING binding's phase_status id — but ONLY when that
+    # id still exists on the project's workflow (else it is stale; fall back to
+    # the statusCategory default). This makes an interactive accept-defaults
+    # re-run byte-identical instead of silently re-categorizing.
+    local -A phase_existing=()
+    if [[ -n "${INSTALL_CONFIG_PATH:-}" && -r "${INSTALL_CONFIG_PATH}" ]]; then
+        local eph eid
+        for eph in specifying planning tasking implementing ready_to_merge merged; do
+            # A shallow grep over the existing binding's phase_status block —
+            # avoids re-loading config (which would clobber CONFIG_VALUES we set).
+            eid="$(awk -v key="${eph}" '
+                /^[[:space:]]*phase_status:[[:space:]]*$/ { inblk=1; next }
+                inblk && /^[[:space:]]{0,2}[A-Za-z]/ && $0 !~ /^[[:space:]]{4}/ { inblk=0 }
+                inblk && $0 ~ ("^[[:space:]]+" key "[[:space:]]*:") {
+                    v=$0; sub(/^[^:]*:[[:space:]]*/,"",v); gsub(/["\x27[:space:]]/,"",v); print v; exit
+                }
+            ' "${INSTALL_CONFIG_PATH}" 2>/dev/null)" || eid=""
+            [[ -n "${eid}" ]] && phase_existing["${eph}"]="${eid}"
+        done
+    fi
+
     local phase chosen
     for phase in specifying planning tasking implementing ready_to_merge merged; do
         if [[ -n "${phase_override[${phase}]:-}" ]]; then
@@ -316,6 +338,10 @@ install::resolve() {
                 install::promote_exit 2; rc=2
                 continue
             fi
+        elif [[ -n "${phase_existing[${phase}]:-}" \
+                && -n "${id_set[${phase_existing[${phase}]}]:-}" ]]; then
+            # R2: keep the operator's existing (still-valid) mapping on a re-run.
+            chosen="${phase_existing[${phase}]}"
         else
             chosen="${phase_default[${phase}]}"
         fi
