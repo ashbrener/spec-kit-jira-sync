@@ -83,10 +83,10 @@ fixture resolves byte-identically to today; same fixture twice is identical.
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T019 [P] Privacy (C-11): extend `tests/unit/no-real-identifiers.bats` to assert the new title fixtures (whether heredoc-inline or under `tests/fixtures/titles/`) are placeholder-only — neutral text only (`Clean Name`, `Does X. More.`, example dirs); no real name/email/coordinate. If fixtures are inline-heredoc (not tracked files), assert the `title_ladder.bats` source itself carries no real identifier.
-- [ ] T020 [P] Neutrality (C-12): run `bats tests/unit/engine_vendor_neutral.bats` — green. The new `parser::spec_title_line` / `workstate::_*` functions are in the neutral producer layer, NOT in the audited `reconcile::*` list, and carry no Jira vocabulary. Guard-confirmation task (no change expected).
-- [ ] T021 [P] Docs: add a brief note to `README.md` (the section describing what lands in Jira / the spec title) that the spec issue title is derived via a deterministic ladder (explicit `Title:` → concise `# Feature Specification:` H1 → first `## Summary` sentence → dir slug; 120-char cap; no AI). Add a `CHANGELOG.md` `[Unreleased]` entry.
-- [ ] T022 Run the **full CI gate** locally (CI parity): `shellcheck --shell=bash --severity=style src/*.sh`, `yamllint -d relaxed .github/workflows/ci.yml`, `npx --yes markdownlint-cli2 "specs/**/*.md" "*.md"`, `bats --recursive tests/unit`. All green.
+- [X] T019 [P] Privacy (C-11): extend `tests/unit/no-real-identifiers.bats` to assert the new title fixtures (whether heredoc-inline or under `tests/fixtures/titles/`) are placeholder-only — neutral text only (`Clean Name`, `Does X. More.`, example dirs); no real name/email/coordinate. If fixtures are inline-heredoc (not tracked files), assert the `title_ladder.bats` source itself carries no real identifier.
+- [X] T020 [P] Neutrality (C-12): run `bats tests/unit/engine_vendor_neutral.bats` — green. The new `parser::spec_title_line` / `workstate::_*` functions are in the neutral producer layer, NOT in the audited `reconcile::*` list, and carry no Jira vocabulary. Guard-confirmation task (no change expected).
+- [X] T021 [P] Docs: add a brief note to `README.md` (the section describing what lands in Jira / the spec title) that the spec issue title is derived via a deterministic ladder (explicit `Title:` → concise `# Feature Specification:` H1 → first `## Summary` sentence → dir slug; 120-char cap; no AI). Add a `CHANGELOG.md` `[Unreleased]` entry.
+- [X] T022 Run the **full CI gate** locally (CI parity): `shellcheck --shell=bash --severity=style src/*.sh`, `yamllint -d relaxed .github/workflows/ci.yml`, `npx --yes markdownlint-cli2 "specs/**/*.md" "*.md"`, `bats --recursive tests/unit`. All green.
 - [ ] T023 Open the PR into `main` (branch `009-title-source-ladder`): title `feat(title): human-readable issue-title source ladder`; body cites FR-001..FR-009, the deterministic neutral derivation, backward-compat (clean-H1 byte-identical), Privacy IX + 003 neutrality, "no schema change, no amendment; sk-linear port is a follow-up". Confirm the full bats matrix + neutrality + privacy gates green in CI.
 
 ---
@@ -97,6 +97,25 @@ fixture resolves byte-identically to today; same fixture twice is identical.
 - US1 + US3 are assertion-heavy over the ladder built in T010; they reveal and close
   edge gaps in T008/T006 rather than add new code.
 - T022 (full gate) precedes T023 (PR).
+
+## Notes (analyze fold-ins)
+
+- **D1 (locale-stable cap)**: `_cap_title`'s length measure + slice and the rung-2
+  `≤120` H1 guard run under `LC_ALL=C` (120 BYTES), so the same `spec.md` caps
+  identically regardless of `$LANG` (FR-003/FR-004 determinism). A multibyte
+  determinism test asserts identical output under `LANG=C` and `LANG=en_US.UTF-8`
+  for both `_cap_title` and the full `_spec_title` ladder. The no-space hard-cut
+  backs off to a UTF-8 char boundary so a code point is never split.
+- **D2 (abbreviation behavior)**: the naive period-then-space split treats
+  `e.g.`/`i.e.`/`etc.` as a terminator; this is an **accepted known limitation**,
+  pinned by a test (`Uses e.g. the X. More.` → `Uses e.g.`) and a one-line
+  comment in `_summary_first_sentence` — abbreviation handling is intentionally
+  NOT built (it would over-engineer a fallback rung).
+- **D3 (FR-008 — surface the chosen rung)**: the resolved title is already visible
+  in the reconcile run summary's created/updated rows (Principle VIII), which
+  satisfies FR-008's "title is observable". Surfacing *which rung* produced it is
+  explicitly **deferred** (it would need a non-floor workstate field; research R6
+  keeps the derivation a pure, side-effect-free producer with no schema change).
 
 ## Parallel execution examples
 
