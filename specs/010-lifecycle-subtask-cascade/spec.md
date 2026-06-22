@@ -38,23 +38,27 @@ v0.4.0 release.
 
 ## Clarifications
 
-### Session 2026-06-22 (open decisions — leans recorded, resolve in /speckit-clarify)
+### Session 2026-06-22
 
-- **(a) Cascade trigger set** — `{merged}` only, or `{ready_to_merge, merged}`?
-  LEAN: `{ready_to_merge, merged}` (by ready-to-merge the phases are implemented and
-  the PR is up; matches the Linear fix). Flagged edge: if lifecycle later moves
-  *back* from ready-to-merge, the cascade won't un-set children unless the ratio
-  rollup is on; `{merged}`-only is the safer irreversible-authority alternative.
-- **(b) Constitution** — does an always-on lifecycle→subtask-status cascade need a
-  MINOR amendment to the Architectural Constraints (today: "lifecycle state →
-  spec-Issue status")? LEAN: **no** — it enforces the constitution's own intent
-  that the board mirror lifecycle (stranded subtasks *violate* that), and feature
-  002's status rollup already established Layer-D subtask-status writes without an
-  amendment. The plan's Constitution Check formalizes; a MINOR (v1.1.0→v1.2.0) bump
-  is the fallback if the gate disagrees.
-- **(c) Letter-index scope/ordering** — single letters only or arbitrary tokens?
-  LEAN: numeric + single ASCII letter (A–Z); order numerics then letters lexically;
-  the `task-phase:A` identity label is acceptable.
+All three forks resolved by their leans (none contentious):
+
+- Q: (a) Cascade trigger set — `{merged}` only, or `{ready_to_merge, merged}`? →
+  A: **`{ready_to_merge, merged}`** (by ready-to-merge the phases are implemented
+  and the PR is up; matches the Linear fix). Accepted, documented limitation: if
+  lifecycle later moves *back* from `ready_to_merge`, the cascade will not un-set
+  children to active unless the ratio rollup is on (the merge/ready signal is
+  treated as forward-only authority).
+- Q: (b) Constitution — does the always-on lifecycle→subtask-status cascade need a
+  MINOR amendment? → A: **No amendment.** It enforces the constitution's existing
+  intent (the board mirrors lifecycle — stranded subtasks violate "lifecycle state
+  → spec-Issue status"), and feature 002's status rollup already established Layer-D
+  subtask-status writes without an amendment. **The plan's Constitution Check is the
+  formal ruling point**; a MINOR (v1.1.0→v1.2.0) bump is the fallback only if the
+  gate reads the Architectural-Constraints "lifecycle → spec-Issue status" line as
+  exclusive.
+- Q: (c) Letter-index scope/ordering? → A: **numeric + single ASCII letter (A–Z)**;
+  order numerics first, then letters, lexically; the `task-phase:A` identity label
+  is acceptable. Multi-character/arbitrary tokens stay out of scope.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -162,7 +166,8 @@ subtask transitions; with rollup on → ratio behavior unchanged from today.
 ### Functional Requirements
 
 - **FR-001 (Terminal cascade)**: When a spec's resolved lifecycle phase is
-  **terminal** (decision a), the bridge MUST transition every bridge-owned phase
+  **terminal** — `ready_to_merge` or `merged` (resolved 2026-06-22) — the bridge
+  MUST transition every bridge-owned phase
   Subtask to the done status (the status the `merged` lifecycle phase maps to),
   regardless of the tasks.md checkbox ratio and regardless of
   `status_rollup.enabled`. Idempotent (transition only on a real status change).
@@ -205,8 +210,8 @@ subtask transitions; with rollup on → ratio behavior unchanged from today.
 
 ### Key Entities *(include if feature involves data)*
 
-- **Terminal lifecycle set**: the lifecycle phases that trigger the cascade
-  (decision a — lean `{ready_to_merge, merged}`).
+- **Terminal lifecycle set**: the lifecycle phases that trigger the cascade —
+  **`{ready_to_merge, merged}`** (resolved 2026-06-22), treated as forward-only.
 - **Done status**: the Jira status the `merged` lifecycle phase maps to
   (`phase_status.merged`) — the cascade target for phase Subtasks.
 - **Phase index token**: the per-phase identifier parsed from the header (numeric
@@ -253,10 +258,10 @@ subtask transitions; with rollup on → ratio behavior unchanged from today.
 - The cross-repo port into spec-kit-linear (a follow-up PR there).
 - Multi-character / arbitrary phase index tokens (single letter + numeric only).
 
-## Open Questions — for /speckit-clarify
+## Open Questions — RESOLVED (Clarifications, Session 2026-06-22)
 
-The three forks in Clarifications (Session 2026-06-22) carry leans: (a) cascade
-trigger `{ready_to_merge, merged}` vs `{merged}`-only; (b) no constitution
-amendment (bug-fix enforcing existing intent; 002 rollup precedent) vs a MINOR
-v1.2.0 fallback; (c) single-letter + numeric indices, numerics-then-letters order.
-Resolve by the leans unless one is genuinely contentious.
+All three forks are pinned above: (a) cascade trigger = **`{ready_to_merge,
+merged}`** (forward-only); (b) **no constitution amendment** — the plan's
+Constitution Check is the formal ruling point, MINOR v1.2.0 the fallback; (c)
+**numeric + single ASCII letter** indices, numerics-then-letters order. No `[NEEDS
+CLARIFICATION]` markers remain. Artifact mapping unchanged (no MAJOR).
