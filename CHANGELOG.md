@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-23
+
 ### Added
 
 - **Human-readable Story titles via a source ladder** (feature 009) — the spec
