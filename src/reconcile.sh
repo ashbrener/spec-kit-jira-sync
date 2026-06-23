@@ -1234,7 +1234,7 @@ reconcile::compose_payload() {
                 + (if $tl == 1 then
                     { checklist_tasks: [ (.children // []) | to_entries[]
                         | (.key) as $i | (.value) as $c
-                        | ( ($c.id // "") | ([match("[0-9]+$")?][0].string) ) as $cap
+                        | ( ($c.id // "") | ([match("phase[-:]([0-9A-Za-z]+)$")?][0].captures[0].string) ) as $cap
                         | ($cap // (($i + 1) | tostring)) as $p
                         | ($c.extensions.tasks // []) | to_entries[]
                         | { id: ($p + "." + (.key | tostring)),
@@ -1243,10 +1243,10 @@ reconcile::compose_payload() {
                    else {} end)'
             ;;
         phase)
-            printf '%s' "$item_json" | jq -c --argjson n "${phase_index:-0}" '
+            printf '%s' "$item_json" | jq -c --arg p "${phase_index:-0}" '
                 ( [ (.children // [])[]
-                    | ((.id // "") | [match("[0-9]+$")?][0].string) as $cap
-                    | select(($cap // "") == ($n | tostring)) ] | .[0] ) as $c
+                    | ((.id // "") | [match("phase[-:]([0-9A-Za-z]+)$")?][0].captures[0].string) as $cap
+                    | select(($cap // "") == $p) ] | .[0] ) as $c
                 | { summary: ($c.title // ""),
                     tasks:   ($c.extensions.tasks // []),
                     labels:  [] }'
@@ -1306,7 +1306,7 @@ reconcile::rollup_phases() {
         local tasks computed
         tasks="$(printf '%s' "$item_json" | jq -c --arg p "$phase_index" '
             [ (.children // [])[]
-              | select((((.id // "") | [match("[0-9]+$")?][0].string) // "") == $p)
+              | select((((.id // "") | [match("phase[-:]([0-9A-Za-z]+)$")?][0].captures[0].string) // "") == $p)
               | (.extensions.tasks // [])[] ]' 2>/dev/null || printf '[]')"
         computed="$(rollup::compute_completion phase "$tasks")"
 
@@ -1330,6 +1330,61 @@ reconcile::rollup_phases() {
             reconcile::promote_exit 1
         elif [[ "$verdict" == "transitioned" ]]; then
             summary::add updated "spec ${feature_number}: phase ${phase_index} Subtask rolled up (${computed})"
+        fi
+    done < <(printf '%s' "$phase_map" | jq -r 'to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null || true)
+}
+
+# reconcile::cascade_phases <item_json> <phase_map_json> <feature_number>
+#   Feature-010 (FR-001..004): the terminal lifecycle cascade. When a spec is
+#   terminal (ready_to_merge/merged), force EVERY bridge-owned phase child to the
+#   done state — ALWAYS, regardless of the checkbox ratio and regardless of the
+#   status-rollup gate (the merge is the authority). This is the vendor-NEUTRAL
+#   decision ("a terminal spec's phases are done"); the actual transition reuses
+#   the sink's existing rollup::transition_if_changed (no new sink fn, 003 seam).
+#
+#   Posture (FR-004): fail-CLOSED on an unreadable child read — surface, promote
+#   exit 3, and ABORT the whole cascade for this spec (return non-zero) so no
+#   PARTIAL cascade lands. fail-SOFT on an unmapped done state — surface a warn
+#   and return 0 (nothing to transition to). Idempotent: a child already at the
+#   done state is a noop (transition_if_changed compares computed vs prior).
+reconcile::cascade_phases() {
+    local item_json="$1" phase_map="$2" feature_number="$3"
+    : "${item_json:-}"
+    local done_status
+    done_status="$(rollup::done_status_id)"
+    # fail-soft: no done state mapped → nothing to cascade to.
+    if [[ -z "$done_status" ]]; then
+        summary::add warn "spec ${feature_number}: merged status unmapped — phase Subtasks not cascaded"
+        return 0
+    fi
+
+    local phase_index key
+    while IFS=$'\t' read -r phase_index key; do
+        [[ -n "$key" && "$key" != "null" ]] || continue
+
+        local cur cur_status prior
+        if ! cur="$(query_issue_full "$key")"; then
+            # fail-closed: abort the whole cascade for this spec — no partial.
+            summary::add error "spec ${feature_number}: phase ${phase_index} status read unreadable — fail-closed, cascade aborted (Jira may be incomplete)"
+            reconcile::promote_exit 3
+            return 1
+        fi
+        cur_status="$(printf '%s' "$cur" | jq -r '.status.id // ""' 2>/dev/null || printf '')"
+        # The terminal cascade forces the done state; `prior` derives from the
+        # child's CURRENT status so an already-done child is a clean noop.
+        if [[ "$cur_status" == "$done_status" ]]; then
+            prior="complete"
+        else
+            prior="partial"
+        fi
+
+        local verdict rc=0
+        verdict="$(rollup::transition_if_changed "$key" "complete" "$prior")" || rc=$?
+        if (( rc != 0 )); then
+            summary::add error "spec ${feature_number}: phase ${phase_index} cascade transition failed (transport) — board status not applied"
+            reconcile::promote_exit 1
+        elif [[ "$verdict" == "transitioned" ]]; then
+            summary::add updated "spec ${feature_number}: phase ${phase_index} Subtask cascaded to done (merged)"
         fi
     done < <(printf '%s' "$phase_map" | jq -r 'to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null || true)
 }
@@ -1496,8 +1551,16 @@ reconcile::sync_task_phase_subissues() {
         local child child_id phase_index identity payload
         child="$(printf '%s' "$item_json" | jq -c --argjson n "$i" '.children[$n]')"
         child_id="$(printf '%s' "$child" | jq -r '.id // ""')"
-        phase_index="${child_id##*-}"
-        [[ "$phase_index" =~ ^[0-9]+$ ]] || phase_index="$(( i + 1 ))"
+        # The child id is `<feature>-phase-<idx>` (idx numeric OR single letter;
+        # legacy fixtures use the `task-phase:<idx>` label form). Key on the
+        # `phase[-:]<idx>` suffix capture (FR-006, string-keyed) so letter
+        # indices survive; fall back to the ordinal only when the id has no
+        # recognizable phase suffix at all.
+        if [[ "$child_id" =~ phase[-:]([0-9A-Za-z]+)$ ]]; then
+            phase_index="${BASH_REMATCH[1]}"
+        else
+            phase_index="$(( i + 1 ))"
+        fi
         identity="$(reconcile::compose_identity phase "$item_json" "" "$phase_index")"
         payload="$(reconcile::compose_payload phase "$item_json" "" "$phase_index")"
 
@@ -2309,11 +2372,23 @@ reconcile::process_spec() {
         fi
     fi
 
-    # --- Status rollup: phase Subtasks (US4; off by default) ----------
+    # --- Phase-Subtask status dispatch (feature 010 + US4) ------------
     # 3-level only: in 2-level mode phase_map is `{}` (no Subtasks) so this
     # no-ops. Reuses the neutral item rebuilt for the links/comments pass.
-    if reconcile::_rollup_enabled && [[ "$phase_map" != "{}" && -n "$_us4_item" ]]; then
-        reconcile::rollup_phases "$_us4_item" "$phase_map" "$feature_number"
+    #   terminal lifecycle (ready_to_merge/merged) → cascade EVERY phase child
+    #     to the done state, ALWAYS (ungated — the merge is the authority);
+    #   else status-rollup enabled → today's checkbox-ratio rollup;
+    #   else → no phase-status write (today's default).
+    # The terminal trigger reads the neutral item's `.state` (the lifecycle
+    # token set by workstate::item_for_spec), not a local var.
+    if [[ "$phase_map" != "{}" && -n "$_us4_item" ]]; then
+        local _us4_state
+        _us4_state="$(printf '%s' "$_us4_item" | jq -r '.state // ""' 2>/dev/null || printf '')"
+        if [[ "$_us4_state" == "ready_to_merge" || "$_us4_state" == "merged" ]]; then
+            reconcile::cascade_phases "$_us4_item" "$phase_map" "$feature_number"
+        elif reconcile::_rollup_enabled; then
+            reconcile::rollup_phases "$_us4_item" "$phase_map" "$feature_number"
+        fi
     fi
 
     # --- Record lifecycle for the Project Status aggregate ------------
@@ -2403,7 +2478,9 @@ reconcile::process_workstate_item() {
             local _wchild _wcid _wpx _wident _wpayload _wpf _wprc _wpkey
             _wchild="$(printf '%s' "$item_json" | jq -c --argjson n "$_wi" '.children[$n]')"
             _wcid="$(printf '%s' "$_wchild" | jq -r '.id // ""')"
-            _wpx="${_wcid##*-}"; [[ "$_wpx" =~ ^[0-9]+$ ]] || _wpx="$(( _wi + 1 ))"
+            # `<feature>-phase-<idx>` (numeric OR single letter); key on the
+            # `-phase-<idx>` suffix (FR-006) so letter indices survive.
+            if [[ "$_wcid" =~ phase[-:]([0-9A-Za-z]+)$ ]]; then _wpx="${BASH_REMATCH[1]}"; else _wpx="$(( _wi + 1 ))"; fi
             _wident="$(reconcile::compose_identity phase "$item_json" "" "$_wpx")"
             _wpayload="$(reconcile::compose_payload phase "$item_json" "" "$_wpx")"
             _wpf="$(mktemp "${TMPDIR:-/tmp}/reconcile-ws-ph.XXXXXX")"
@@ -2450,9 +2527,16 @@ reconcile::process_workstate_item() {
         reconcile::promote_exit "$(( _lrc == 3 ? 3 : 1 ))"
     fi
 
-    # Phase rollup (US4; off by default; 3-level only — phase_map is {} in 2-level).
-    if reconcile::_rollup_enabled && [[ "$phase_map" != "{}" ]]; then
-        reconcile::rollup_phases "$item_json" "$phase_map" "$feature_number"
+    # Phase-Subtask status dispatch (feature 010 + US4; 3-level only — phase_map
+    # is {} in 2-level). Terminal lifecycle (`.state` ∈ ready_to_merge/merged) →
+    # cascade every phase child to done (always); else status-rollup → ratio;
+    # else no write. `state` is this item's `.state` lifecycle token.
+    if [[ "$phase_map" != "{}" ]]; then
+        if [[ "$state" == "ready_to_merge" || "$state" == "merged" ]]; then
+            reconcile::cascade_phases "$item_json" "$phase_map" "$feature_number"
+        elif reconcile::_rollup_enabled; then
+            reconcile::rollup_phases "$item_json" "$phase_map" "$feature_number"
+        fi
     fi
 
     # Accumulate the item state for the post-loop repo rollup (no spec_dir mtime
@@ -2653,7 +2737,7 @@ reconcile::compute_orphans() {
                 desired="$(jq -cn --argjson d "$desired" \
                     --arg p "$(reconcile::compose_identity phase "$item" "$repo_slug" "$pidx")" '$d + [$p]')"
             done < <(printf '%s' "$item" | jq -r '
-                [ .children[]? | ((.id // "") | [match("[0-9]+$")?][0].string) ]
+                [ .children[]? | ((.id // "") | [match("phase[-:]([0-9A-Za-z]+)$")?][0].captures[0].string) ]
                 | map(select(. != null)) | .[]')
         fi
     done

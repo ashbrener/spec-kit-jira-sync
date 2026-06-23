@@ -1,0 +1,11 @@
+{
+  "id": "10110",
+  "key": "PROJ-110",
+  "fields": {
+    "summary": "Phase A — Foundations",
+    "description": null,
+    "labels": ["task-phase:A"],
+    "status": { "id": "20006", "name": "Done" },
+    "parent": { "key": "PROJ-101" }
+  }
+}

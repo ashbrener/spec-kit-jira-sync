@@ -200,17 +200,25 @@ parser::lifecycle_phase() {
 parser::task_phases() {
     local tasks_md="$1"
     [[ -f "$tasks_md" ]] || return 0
+    # FR-005: match `## Phase <idx><sep><name>` where <idx> is a numeric or
+    # single-letter token and <sep> is any non-alphanumeric run (`:`/`-`/en-/
+    # em-dash or whitespace) — so `## Phase A — Name` and `## Phase 1 — Name`
+    # are recognized in addition to `## Phase N: Name`. The boundary after the
+    # index ([^A-Za-z0-9] or EOL) keeps `## Phaser` from matching.
     awk '
-        /^## Phase [0-9]+:/ {
+        /^## Phase [0-9A-Za-z]+([^A-Za-z0-9]|$)/ {
             line = $0
             # Strip the leading "## Phase " prefix.
             sub(/^## Phase /, "", line)
-            # Index of ":" splits "<N>" from "<Name>".
-            colon = index(line, ":")
-            if (colon == 0) next
-            idx = substr(line, 1, colon - 1)
-            name = substr(line, colon + 1)
-            sub(/^[[:space:]]+/, "", name)
+            # <idx> = the leading numeric|letter token.
+            idx = line
+            sub(/[^A-Za-z0-9].*$/, "", idx)
+            if (idx == "") next
+            # <name> = the remainder with the leading separator run stripped via
+            # a negated ASCII class (locale-stable; removes spaces + `:`/`-`/en-/
+            # em-dash bytes without embedding a multibyte char in the regex).
+            name = substr(line, length(idx) + 1)
+            sub(/^[^A-Za-z0-9]+/, "", name)
             sub(/[[:space:]]+$/, "", name)
             printf "%s\t%s\n", idx, name
         }
@@ -246,12 +254,12 @@ parser::tasks_in_phase() {
     local phase_index="$2"
     [[ -f "$tasks_md" ]] || return 0
     awk -v want="$phase_index" '
-        /^## Phase [0-9]+:/ {
+        /^## Phase [0-9A-Za-z]+([^A-Za-z0-9]|$)/ {
             line = $0
             sub(/^## Phase /, "", line)
-            colon = index(line, ":")
-            if (colon == 0) { in_phase = 0; next }
-            idx = substr(line, 1, colon - 1)
+            idx = line
+            sub(/[^A-Za-z0-9].*$/, "", idx)
+            if (idx == "") { in_phase = 0; next }
             in_phase = (idx == want) ? 1 : 0
             next
         }
@@ -362,7 +370,7 @@ parser::malformed_task_lines() {
     local tasks_md="$1"
     [[ -f "$tasks_md" ]] || return 0
     awk '
-        /^## Phase [0-9]+:/ { in_phase = 1; next }
+        /^## Phase [0-9A-Za-z]+([^A-Za-z0-9]|$)/ { in_phase = 1; next }
         /^## / { in_phase = 0; next }
         !in_phase && /^- \[[ xX]\][[:space:]]/ {
             printf "%d\t%s\n", NR, $0

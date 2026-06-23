@@ -38,16 +38,22 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **009-title-source-ladder** (active) — make the issue title human-readable: a
-  deterministic title-source ladder (NO LLM at reconcile — Principle II) replacing
-  today's H1-or-kebab rule in `workstate::_spec_title`. First-match-wins: explicit
-  `Title:` line → a concise within-cap `# Feature Specification:` H1 → first
-  sentence of `## Summary` → kebab short-name. ~120-char word-boundary cap demotes
-  a verbose pasted-Input H1 below the Summary so a wall never becomes the title.
-  Backward-compatible (good-H1 specs byte-identical, no churn); vendor-neutral
-  (reads spec.md, stays in the neutral layer — 003 gate green); Privacy IX. Fixes
-  an operator-reported gap on both bridges (sk-linear port is a follow-up).
-  Spec+clarify+plan done. Plan: `specs/009-title-source-ladder/plan.md`
+- **010-lifecycle-subtask-cascade** (active) — board-correctness bug fix (dogfound;
+  same two bugs as the Linear sibling). (1) Merging a spec strands its phase
+  Subtasks in To Do — lifecycle drives only the Story; subtask status only via the
+  opt-in ratio rollup (off by default). Fix: a terminal-lifecycle cascade
+  (`{ready_to_merge,merged}` → force each phase Subtask to the merged/done status,
+  always-on, idempotent, fail-closed) reusing the sink's `rollup::transition_if_changed`
+  — cascade decision stays neutral in reconcile (003 gate green). (2) `parser::task_phases`
+  required `## Phase [0-9]+:` → letter/em-dash headers (`## Phase A — …`) parsed to
+  zero subtasks; fix broadens to numeric|letter index + any separator, string-keying
+  the index pipeline. No schema/mapping change; no amendment (enforces existing
+  lifecycle-mirror intent; 002 Layer-D subtask-write precedent). Rides v0.4.0.
+  Spec+clarify+plan done. Plan: `specs/010-lifecycle-subtask-cascade/plan.md`
+- **009-title-source-ladder** — human-readable issue titles via a deterministic
+  source ladder (`Title:` → concise H1 → first `## Summary` sentence → kebab;
+  120-char cap; no LLM). Backward-compatible (clean-H1 byte-identical); vendor-neutral.
+  Merged to main (PR #22). Plan: `specs/009-title-source-ladder/plan.md`
 - **008-install-seed-ceremony** — the adoption on-ramp: `/speckit-jira-install`
   REST-resolves the binding (project key, issue-type ids, phase→status maps,
   story-points) and writes the gitignored jira-config.yml; `/speckit-jira-seed`

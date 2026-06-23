@@ -304,8 +304,12 @@ _drift_src='source "'"$SUMMARY_SH"'"; source "'"$RECONCILE_SH"'" 2>/dev/null'
   # An explicit --on-drift is an operator OVERRIDE that skips the prompt
   # everywhere. We can't allocate a real TTY here, so we assert the precedence
   # directly: with ARG_ON_DRIFT=abort the function returns `abort` WITHOUT ever
-  # consulting the prompt/tty (it would otherwise read stdin).
-  run bash -c "$_drift_src; ARG_ON_DRIFT=abort; printf 'p\n' | reconcile::_drift_disposition 005 'fired=1 phase_drift=1 recency_drift=0 signals=phase_ordering disk=planning linear=implementing'"
+  # consulting the prompt/tty (it would otherwise read stdin). Feed the 'p' via a
+  # here-string (NOT a pipe): the override never drains stdin, so a `printf | func`
+  # pipe SIGPIPEs the writer on macOS and — under pipefail — fails the pipeline
+  # (141) non-deterministically; a here-string provides stdin without a writer to
+  # break, so the assertion is portable.
+  run bash -c "$_drift_src; ARG_ON_DRIFT=abort; reconcile::_drift_disposition 005 'fired=1 phase_drift=1 recency_drift=0 signals=phase_ordering disk=planning linear=implementing' <<<'p'"
   [ "$status" -eq 0 ]
   # `p` on stdin would mean proceed IF the prompt were consulted; abort proves
   # the flag short-circuited the prompt.

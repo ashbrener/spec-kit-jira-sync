@@ -221,6 +221,44 @@ _private_patterns() {
   fi
 }
 
+@test "feature-010 cascade/parser fixtures are tracked + placeholder-only (Privacy IX / C-12)" {
+  # The cascade tests + new issue-status fixtures + the phase-parser tests must be
+  # UNDER the git-ls-files scan and carry only neutral placeholders: the project
+  # key PROJ, the reserved example.atlassian.net host (or none), fabricated issue
+  # keys/ids, and neutral phase names (e.g. "Phase A — Foundations"). No real
+  # site/key/id/email/name.
+  cd "$REPO_ROOT"
+  local f
+  for f in \
+    tests/unit/cascade_phases.bats \
+    tests/unit/phase_parser.bats \
+    tests/fixtures/jira_responses/issue_status_todo.json \
+    tests/fixtures/jira_responses/issue_status_done.json; do
+    git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || {
+      echo "untracked (the privacy guard would not scan it): $f" >&2
+      return 1
+    }
+  done
+  # No non-example .atlassian.net host literal in the new fixtures.
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/src/jira_sink.sh"
+  local site_re hits
+  site_re="$(jira_sink::privacy_shapes | awk -F'\t' '$2=="site"{print $3}')"
+  hits="$(grep -lIiE -- "$site_re" \
+            tests/fixtures/jira_responses/issue_status_todo.json \
+            tests/fixtures/jira_responses/issue_status_done.json 2>/dev/null || true)"
+  if [ -n "$hits" ]; then
+    echo "a non-example .atlassian.net host leaked into a feature-010 fixture:" >&2
+    printf '%s\n' "$hits" >&2
+    return 1
+  fi
+  # The parser test fixtures embed no email literal (placeholders only).
+  if grep -qE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' tests/unit/phase_parser.bats; then
+    echo "an email literal leaked into the phase-parser test fixtures" >&2
+    return 1
+  fi
+}
+
 @test "private deny-list, when present, actually contributes patterns" {
   # Guards against a silently-empty deny-list giving false confidence. Skips
   # cleanly in CI where the gitignored file is absent.

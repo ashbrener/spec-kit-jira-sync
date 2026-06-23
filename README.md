@@ -133,8 +133,8 @@ flowchart LR
 |---|---|---|
 | Consumer repository | **Epic** (1 per repo, reused across runs) | label `speckit-repo:<slug>` |
 | Spec (`specs/NNN-feature/`) | **Story** under the repo Epic | label `speckit-spec:NNN` |
-| Lifecycle phase | Story **status** (set via a transition POST) + `phase:*` label | config `phase→status` map |
-| Task phase (`## Phase N`) | **Subtask** of the Story | parent + `task-phase:N` label |
+| Lifecycle phase | Story **status** + `phase:*` label; a **terminal** spec (`ready_to_merge`/`merged`) also cascades **every** phase Subtask to the done status | config `phase→status` map |
+| Task phase (`## Phase <idx>`) | **Subtask** of the Story (header index may be numeric **or** a single letter, separated by `:`/`-`/en-/em-dash) | parent + `task-phase:<idx>` label |
 | Tasks within a phase | **ADF checklist** in the Subtask body | content diff |
 | Clarification / decision sessions | **comments** | marker prefix → at-most-once |
 | ADRs / decision records (`research.md`) | **comments** (one per decision) | marker `speckit-adr:<spec>-<id>` → at-most-once, updated in place on a content change |
@@ -166,6 +166,19 @@ Subtask issues) are on the [roadmap](#status--roadmap).
 > creates its own — no orphans. For a clean slate, prune the old `task-phase:*`
 > Subtasks (or run `--remode`) before re-pushing. See the
 > [CHANGELOG](CHANGELOG.md) for details.
+
+<!-- markdownlint-disable-next-line MD028 -->
+
+> **Merging a spec marks its phases done.** When a spec reaches a terminal
+> lifecycle (`ready_to_merge` or `merged`), the next reconcile transitions
+> **every** phase Subtask under it to the done status — in the default config,
+> no status-rollup needed. Previously a merged Story sat over a column of "To Do"
+> Subtasks; now the whole spec reads complete. The cascade is idempotent (it
+> fires only on a real status change), fail-closed on an unreadable read, and
+> forward-only (it does not un-set children if the lifecycle later regresses).
+> Phase headers are also more forgiving: `## Phase A — Foundations`,
+> `## Phase 1 — Setup`, and `## Phase 10: Polish` all parse — the index may be a
+> number or a single letter, separated by `:`, `-`, or an en-/em-dash.
 
 ### Author attribution (opt-in)
 

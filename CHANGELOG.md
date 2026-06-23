@@ -65,6 +65,38 @@ All notable changes to this project are documented here. The format is based on
   bundled, best-effort-if-on-`PATH`, never a dependency (trufflehog live-verify
   off). Enforces Principle IX (no constitutional amendment).
 
+### Fixed
+
+- **Stranded phase Subtasks on merge** (feature 010) — merging a spec flipped
+  the Story to the merged status but left every phase Subtask sitting in the
+  project default (e.g. "To Do"), because subtask status was touched only by the
+  opt-in checkbox-ratio rollup (off by default). A spec at a **terminal**
+  lifecycle (`ready_to_merge` or `merged`) now cascades **every** bridge-owned
+  phase Subtask to the done status on the next reconcile — always, ungated,
+  regardless of the checkbox ratio (the merge is the authority). The cascade is
+  **idempotent** (fires only on a real status change), **fail-closed** on an
+  unreadable read (exit 3, no partial cascade), **fail-soft** on an unmapped
+  merged status (a warning, run continues), and **forward-only** (it will not
+  un-set children if the lifecycle later regresses — the ratio rollup still
+  governs that when enabled). The decision ("a terminal spec's phases are done")
+  is vendor-neutral in the engine; the transition reuses the sink's existing
+  path — no new sink function, schema, exit code, or constitution amendment.
+  Note the semantics: `ready_to_merge` drives the **children** to the merged
+  status even while the parent Story sits at `ready_to_merge` (different levels,
+  different states — by design).
+
+- **Letter / dash phase headers produced no Subtasks** (feature 010) — the phase
+  parser required a numeric index **and** a trailing colon (`## Phase 1:`), so
+  `## Phase A — Foundations` (letter + em-dash) and even `## Phase 1 — Setup`
+  (numeric, em-dash, no colon) parsed to **zero** Subtasks — a silent,
+  zero-phase board. The `## Phase` header now accepts a **numeric or single
+  ASCII-letter** index and any separator (`:`, `-`, en-dash `–`, em-dash `—`).
+  The phase index is treated as a **string token** end-to-end (the
+  `task-phase:<idx>` identity label, the Subtask title, and the task↔phase join),
+  and a letter-indexed spec also cascades to done on merge. `## Phase N: Name`
+  parses byte-identically to before (no churn for existing specs); `## Phaser:`
+  still does not match.
+
 ## [0.3.0] - 2026-06-12
 
 ### Added

@@ -36,6 +36,7 @@ _audited_functions() {
     reconcile::parent_projected_id \
     reconcile::_repo_epic_key \
     reconcile::rollup_phases \
+    reconcile::cascade_phases \
     reconcile::rollup_repo_epic \
     reconcile::sync_initiative \
     reconcile::compute_orphans \
