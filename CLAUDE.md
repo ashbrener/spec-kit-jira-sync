@@ -48,8 +48,8 @@ internally. This repo is also the independent second consumer that proves
   required `## Phase [0-9]+:` → letter/em-dash headers (`## Phase A — …`) parsed to
   zero subtasks; fix broadens to numeric|letter index + any separator, string-keying
   the index pipeline. No schema/mapping change; no amendment (enforces existing
-  lifecycle-mirror intent; 002 Layer-D subtask-write precedent). Rides v0.4.0.
-  Spec+clarify+plan done. Plan: `specs/010-lifecycle-subtask-cascade/plan.md`
+  lifecycle-mirror intent; 002 Layer-D subtask-write precedent). Merged to main
+  (PR #23); shipped in v0.4.0. Plan: `specs/010-lifecycle-subtask-cascade/plan.md`
 - **009-title-source-ladder** — human-readable issue titles via a deterministic
   source ladder (`Title:` → concise H1 → first `## Summary` sentence → kebab;
   120-char cap; no LLM). Backward-compatible (clean-H1 byte-identical); vendor-neutral.
