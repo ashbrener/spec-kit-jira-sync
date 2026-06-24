@@ -128,22 +128,24 @@ Cutting a release is two decoupled things:
    source tarball at the tag (`…/archive/refs/tags/vX.Y.Z.zip`) — the install
    artifact.
 2. **The community catalog** (`github/spec-kit` → `extensions/catalog.community.json`)
-   is a static, version-pinned entry. It does **not** watch this repo, so each
-   release needs a PR upstream bumping the entry's `version` + `download_url`,
-   merged by a spec-kit maintainer.
+   is a static, version-pinned entry. It does **not** watch this repo. As of
+   mid-2026 the spec-kit maintainers intake catalog adds/bumps through a **GitHub
+   issue** using their [Extension Submission](https://github.com/github/spec-kit/issues/new?template=extension_submission.yml)
+   template — **not** a hand-edited PR to the catalog JSON (direct-JSON PRs are now
+   closed-with-redirect). A maintainer (or their tooling) applies the entry.
 
-Step 2 is automated for you — two ways, pick one:
+Step 2 is automated for you:
 
-- **Recommended (no secret): `scripts/publish-catalog.sh vX.Y.Z`.** Run it locally
-  after tagging. It uses your existing `gh` login (the same auth that already
-  pushes to your fork and opens upstream PRs), syncs the fork, bumps the entry,
-  and opens the PR. **No PAT, no repo secret.**
-- **Optional (hands-off CI): `.github/workflows/catalog-publish.yml`.** Fires on a
-  published release and opens the same PR with zero manual steps — but CI has no
-  access to your personal `gh`, so it needs a one-time repo secret
-  **`CATALOG_PR_TOKEN`** (a PAT that can push to your fork + open a PR upstream).
-  Use this only if you want fully automatic releases and don't mind the token.
+- **`scripts/publish-catalog.sh vX.Y.Z`** (no secret). Run it locally after
+  `gh release create`. It verifies the tag's archive is live (HTTP 200), reads the
+  metadata from `extension.yml`, and **opens the Extension Submission issue**
+  upstream — pre-filled — via your existing `gh` login. **No PAT, no fork, no repo
+  secret.**
 
-Both are **repo-agnostic** — to reuse in a sibling extension, copy the file and
-edit the three values (`CATALOG_ID`, `EXT_REPO`, `FORK`); the copy checklist is in
-each file's header. A maintainer still merges the upstream PR either way.
+It is **repo-agnostic** — to reuse in a sibling extension, copy the file and edit
+the four values at the top (`CATALOG_ID`, `CATALOG_NAME`, `EXT_REPO`, `TAGS`); the
+copy checklist is in the file's header. A maintainer still applies the entry.
+
+> The older `.github/workflows/catalog-publish.yml` (a PAT-based CI variant that
+> opened a *JSON PR*) is **deprecated** by the issue-template process and should
+> not be used for new submissions.
