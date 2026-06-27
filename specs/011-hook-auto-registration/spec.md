@@ -40,20 +40,37 @@ strips) — out of scope here.
 
 ## Clarifications
 
-### Session 2026-06-27 (open decisions — leans recorded, resolve in /speckit-clarify)
+### Session 2026-06-27
 
-Mirror the best-practice decisions the Linear sibling took:
+All forks resolved by their leans (they mirror the Linear sibling and are
+best-practice; none contentious):
 
-- **(a) Which command the hooks fire.** LEAN: all six `after_*` hooks fire
-  **`speckit.jira.push`** (the write/mirror). `status` is read-only and not the point.
-- **(b) Blocking vs non-blocking on a push failure inside a fired hook** (the critical
-  one). LEAN: **non-blocking** — a fired hook NEVER fails or blocks the host
-  `/speckit-*` command. When the push can't run (no creds, no config, Jira
-  unreachable) it surfaces a warning and the lifecycle command still succeeds.
-- **(c) Registration mechanism.** LEAN: **both** — the `extension.yml`
-  `provides.hooks:` block is the source of truth the spec-kit CLI registers at
-  `add` time, AND an idempotent install-side registration is the repair path the
-  future hook self-heal reuses.
+- Q: (a) Which command do the hooks fire? → A: **all six `after_*` hooks fire
+  `speckit.jira.push`** (the write/mirror). `status` is read-only and not the point.
+  Confirmed against the Linear sibling (`after_specify: - command: speckit.linear.push`,
+  `optional: false`).
+- Q: (b) Blocking vs non-blocking on a push failure inside a fired hook? → A:
+  **non-blocking** — a fired hook NEVER fails the host `/speckit-*` command. When the
+  push can't run (no creds, no `jira-config.yml`, Jira unreachable) it surfaces a
+  clean **warning** and the lifecycle command still succeeds.
+- Q: (c) Registration mechanism? → A: **both** — the `extension.yml`
+  `provides.hooks:` block is the source of truth the spec-kit CLI registers at `add`
+  time, AND an idempotent install-side registrar is the parity/repair path the future
+  hook self-heal reuses.
+- Q: (d) How do `optional: false` (Principle VII mandates it) and non-blocking
+  (FR-004) coexist? → A: **By `after_*` timing + warn-not-error.** An `after_*` hook
+  fires *after* the lifecycle command has already completed, so a failing sync can
+  never retroactively fail it; `optional: false` is the **registration** mandate
+  (the hook is non-skippable, per VII), not a "host command fails if the hook fails"
+  rule. The non-blocking property comes from the fired push degrading to a surfaced
+  warning (clean, with remediation) rather than a hard error — never an error halt or
+  a stack trace. (Plan MUST verify the framework's actual `after_*` firing +
+  `optional:false` failure semantics before relying on this.)
+
+> **Deliberately out of 011:** the Linear sibling also auto-fires via **local git
+> hooks** (`post-checkout`/`post-commit`/`post-merge`) to catch branch switches that
+> run no `/speckit-*` command. 011 delivers the core `after_*` spec-kit-command
+> mirror; git-event auto-fire is a possible follow-on, not part of this feature.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -181,8 +198,13 @@ byte-identical `.specify/extensions.yml` (no duplicates, no churn).
 - **FR-004 (Non-blocking auto-sync)**: A fired `after_*` hook MUST run the reconcile
   such that the host `/speckit-*` lifecycle command ALWAYS succeeds — even when the
   push cannot run (missing/unexported `.env`, missing `jira-config.yml`, unreadable
-  Jira). The bridge surfaces a WARNING with remediation (Principle VIII) but NEVER
-  fails or blocks the spec-kit command.
+  Jira). The bridge surfaces a clean WARNING with remediation (Principle VIII) but
+  NEVER fails or blocks the spec-kit command, and never emits a hard error / stack
+  trace. The hook registration stays `optional: false` (Principle VII — the hook is
+  non-skippable); non-blocking is achieved by `after_*` timing (the hook fires after
+  the command completes) plus warn-not-error degradation, not by making the hook
+  optional. (Resolved 2026-06-27 (d); the plan verifies the framework's `optional:false`
+  failure semantics.)
 - **FR-005 (One sync path)**: The hook-fired sync and the on-demand `/speckit-jira-push`
   MUST share one code path and produce identical outcomes (Principle II); auto-sync on
   unchanged state is zero-churn. This feature wires *when* reconcile fires — it adds
@@ -255,10 +277,13 @@ byte-identical `.specify/extensions.yml` (no duplicates, no churn).
 - **A `.pull` command** — the bridge is a one-way mirror (filesystem → Jira); there is
   nothing to pull back.
 
-## Open Questions — for /speckit-clarify
+## Open Questions — RESOLVED (Clarifications, Session 2026-06-27)
 
-The three forks in Clarifications (Session 2026-06-27) carry leans: (a) all six hooks
-fire `speckit.jira.push`; (b) **non-blocking** on a push failure (the critical
-decision — warn, never fail the host command); (c) registration via **both** the
-manifest `provides.hooks` and an idempotent install-side registrar. Resolve by the
-leans (they mirror the Linear sibling) unless one is genuinely contentious.
+All forks are pinned above: (a) all six hooks fire `speckit.jira.push`; (b)
+**non-blocking** (warn, never fail the host command); (c) registration via **both**
+the manifest `provides.hooks` and an idempotent install-side registrar; (d)
+`optional:false` (VII) and non-blocking (FR-004) coexist via `after_*` timing +
+warn-not-error. No `[NEEDS CLARIFICATION]` markers remain. **Plan must verify** the
+framework's `after_*` firing + `optional:false` failure semantics (the FR-004
+mechanism) before implementation. No constitution amendment — this implements
+Principle VII; the only doc fix is the stale "operator-driven, no hooks" wording.
