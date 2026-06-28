@@ -10,6 +10,38 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **The automatic mirror — auto-registered `after_*` hooks** (feature 011) —
+  spec-kit-jira is now the automatic mirror its constitution always specified
+  (Principle VII, *Memory-Just-Works*), closing the gap where the bridge
+  registered **zero** hooks and only synced when the operator remembered to run
+  `/speckit-jira-push`. `extension.yml` now declares all six `after_*` lifecycle
+  hooks (`after_specify`, `after_clarify`, `after_plan`, `after_tasks`,
+  `after_implement`, `after_analyze`) — each firing `speckit.jira.push` with
+  `optional: false` — so the spec-kit CLI auto-registers them at
+  `specify extension add jira` time, and the install ceremony idempotently
+  registers/repairs them in the consumer's `.specify/extensions.yml`
+  (`install::register_after_hooks`, mirroring the Linear sibling's block grammar
+  so a future hook-health detector reuses it). From then on **every `/speckit-*`
+  command auto-mirrors the spec state to Jira** with nothing to remember.
+  **Non-blocking** (Principle VIII): an `after_*` hook fires *after* the lifecycle
+  command completes, and the push run-line now sources `.env` only when present
+  and always runs reconcile, so a missing credential / unbound `jira-config.yml`
+  / unreachable Jira degrades to a clean WARNING — the spec-kit command **always
+  succeeds**, never a hard error. **Idempotent** (a re-run is byte-identical) and
+  **operator-controlled** (an operator-set `enabled: false` is honoured, never
+  re-enabled; other extensions' hook entries are untouched; a malformed
+  `.specify/extensions.yml` yields an informational message, never corruption).
+  A **dogfood gate** renders the hook `condition` as
+  `${SPECKIT_JIRA_DOGFOOD_SAFE:-false}` on the bridge's own checkout so its dev
+  work does not auto-push. Install/config-side only — the vendor-neutral reconcile
+  engine is untouched (003 neutrality gate green), no schema/exit-code change,
+  **no constitution amendment** (this *implements* Principle VII; the only
+  constitutional touch is correcting the stale "operator-driven, no hooks"
+  documentation wording). Foundation for feature 012 (the Linear spec-014 hook
+  self-heal port). Privacy IX gates the new surface (placeholder-only).
+
 ## [0.4.0] - 2026-06-23
 
 ### Added

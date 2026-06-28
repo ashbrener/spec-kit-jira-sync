@@ -259,6 +259,55 @@ _private_patterns() {
   fi
 }
 
+@test "feature-011 hook surface is committed placeholder-only (Privacy IX / C-9)" {
+  # The automatic-mirror surface — the extension.yml provides.hooks block, the
+  # install registrar in src/install.sh, and any tracked .specify/extensions.yml
+  # fixture — is committed to a PUBLIC repo and must carry only neutral
+  # placeholders: command names + neutral prose, no real site/key/id/email. The
+  # dogfood ${SPECKIT_JIRA_DOGFOOD_SAFE:-false} literal is a shell expansion, NOT
+  # a coordinate.
+  cd "$REPO_ROOT"
+  # extension.yml + the new registrar test must be UNDER the git-ls-files scan.
+  local f
+  for f in extension.yml tests/unit/hook_registration.bats tests/unit/manifest_hooks.bats; do
+    git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || {
+      echo "untracked (the privacy guard would not scan it): $f" >&2
+      return 1
+    }
+  done
+  # No non-example .atlassian.net host literal in the hook surface.
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/src/jira_sink.sh"
+  local site_re tok_re hits
+  site_re="$(jira_sink::privacy_shapes | awk -F'\t' '$2=="site"{print $3}')"
+  tok_re="$(jira_sink::privacy_shapes | awk -F'\t' '$2=="api-token"{print $3}')"
+  hits="$(grep -lIiE -- "$site_re" \
+            extension.yml src/install.sh \
+            tests/unit/hook_registration.bats tests/unit/manifest_hooks.bats 2>/dev/null || true)"
+  hits+="$(grep -lIiE -- "$tok_re" \
+            extension.yml src/install.sh \
+            tests/unit/hook_registration.bats tests/unit/manifest_hooks.bats 2>/dev/null || true)"
+  if [ -n "$hits" ]; then
+    echo "a BLOCK-tier Atlassian shape leaked into the feature-011 hook surface:" >&2
+    printf '%s\n' "$hits" >&2
+    return 1
+  fi
+  # Any tracked .specify/extensions.yml fixture must be placeholder-only too
+  # (there are none today — the registrar tests seed inline — but guard for the
+  # future so a committed fixture cannot smuggle a coordinate).
+  local ext_fixtures
+  ext_fixtures="$(git ls-files -- 'tests/fixtures/**/extensions.yml' '**/.specify/extensions.yml' 2>/dev/null || true)"
+  if [ -n "$ext_fixtures" ]; then
+    hits="$(printf '%s\n' "$ext_fixtures" | xargs grep -lIiE -- "$site_re" 2>/dev/null || true)"
+    hits+="$(printf '%s\n' "$ext_fixtures" | xargs grep -lIiE -- "$tok_re" 2>/dev/null || true)"
+    if [ -n "$hits" ]; then
+      echo "a tracked extensions.yml fixture leaked a BLOCK-tier shape:" >&2
+      printf '%s\n' "$hits" >&2
+      return 1
+    fi
+  fi
+}
+
 @test "private deny-list, when present, actually contributes patterns" {
   # Guards against a silently-empty deny-list giving false confidence. Skips
   # cleanly in CI where the gitignored file is absent.
