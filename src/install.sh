@@ -52,6 +52,25 @@ declare -g INSTALL_CONFIG_PATH="${CONFIG_DEFAULT_PATH}"
 # Repeated --phase-status <phase>=<status> overrides, as plain words.
 declare -ga INSTALL_PHASE_OVERRIDES=()
 
+# ---------------------------------------------------------------------------
+# Feature 011 — the automatic mirror (Principle VII). The install ceremony
+# registers the six `after_*` lifecycle hooks into the consumer's
+# `.specify/extensions.yml` so every `/speckit-*` command auto-mirrors the spec
+# state to Jira. INSTALL_AFTER_HOOK_NAMES all fire the same command
+# (`speckit.jira.push`) because reconcile is the single convergent operation.
+# Mirrors the Linear sibling's block grammar exactly so a future hook-health
+# detector (feature 012) and this registrar agree on what "present" means.
+# ---------------------------------------------------------------------------
+readonly INSTALL_EXTENSIONS_YML=".specify/extensions.yml"
+readonly -a INSTALL_AFTER_HOOK_NAMES=(
+    "after_specify"
+    "after_clarify"
+    "after_plan"
+    "after_tasks"
+    "after_implement"
+    "after_analyze"
+)
+
 # Resolved values, keyed by the dotted config key (project_key,
 # issue_types.epic, phase_status.specifying, …). Populated by install::resolve;
 # consumed by the single config::write_binding at the end of install::main (and
@@ -121,6 +140,283 @@ install::guard_source_target() {
     fi
 
     return 0
+}
+
+# =============================================================================
+# Feature 011 — auto-register the six `after_*` hooks (Principle VII).
+#
+# Install/config-side ONLY: this reads the manifest's command name + writes the
+# consumer's `.specify/extensions.yml`. It NEVER touches the vendor-neutral
+# reconcile engine (the 003 neutrality gate is unaffected — install:: is not an
+# audited engine function).
+#
+# YAML manipulation uses grep + a PURE-BASH line-by-line splice (NOT multi-line
+# `awk -v` — BSD awk on macOS rejects a newline-bearing `-v` value with
+# `awk: newline in string`). yq is NOT a required dependency.
+# =============================================================================
+
+# install::_is_dogfood_target  (M1 — the NON-HALTING dogfood detector)
+#
+# Returns 0 (dogfood) iff the install target is the bridge's OWN checkout, ELSE
+# 1. This is a SEPARATE, return-only twin of install::guard_source_target — the
+# guard HALTS (exit 2) on source==target and is wired into install::main BEFORE
+# register_after_hooks, so it would never let the registrar run in the bridge's
+# own tree. The registrar needs to KNOW it is dogfooding (to gate the hook
+# `condition`) without aborting, hence this non-halting detector. The same
+# `INSTALL_SH_DIR/.. vs $(pwd)` `pwd -P` compare, no exit. Tests override the
+# verdict via INSTALL_DOGFOOD_OVERRIDE (mirrors Linear's testable
+# INSTALL_DOGFOOD_DETECTED).
+install::_is_dogfood_target() {
+    # Test/override hook: an explicit 0/1 forces the verdict.
+    if [[ -n "${INSTALL_DOGFOOD_OVERRIDE:-}" ]]; then
+        (( INSTALL_DOGFOOD_OVERRIDE == 1 )) && return 0
+        return 1
+    fi
+    local source_root target_root
+    source_root="$(cd "${INSTALL_SH_DIR}/.." 2>/dev/null && pwd -P)" || return 1
+    target_root="$(pwd -P 2>/dev/null)" || return 1
+    [[ "${source_root}" == "${target_root}" ]] && return 0
+    # Defensive: the target tree carrying the bridge's own manifest is the bridge.
+    if [[ -f "${target_root}/extension.yml" ]] \
+        && grep -q 'id: "jira"' "${target_root}/extension.yml" 2>/dev/null \
+        && [[ -f "${target_root}/src/install.sh" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# install::register_after_hooks  (FR-002, wired into install::main after the
+# binding write). Ensure the consumer file exists (minimal scaffold if absent),
+# then idempotently register each of the six `after_*` hooks.
+install::register_after_hooks() {
+    if [[ ! -f "$INSTALL_EXTENSIONS_YML" ]]; then
+        install::_create_minimal_extensions_yml
+    fi
+
+    # Resilience (FR-009): an unreadable/malformed file must not be corrupted or
+    # halt the host — surface an informational message and return cleanly.
+    if [[ ! -r "$INSTALL_EXTENSIONS_YML" ]]; then
+        install::_log "could not register hooks — verify ${INSTALL_EXTENSIONS_YML} (unreadable). No changes made."
+        return 0
+    fi
+
+    local hook
+    for hook in "${INSTALL_AFTER_HOOK_NAMES[@]}"; do
+        install::_register_one_hook "$hook"
+    done
+}
+
+# install::_create_minimal_extensions_yml — write the minimal consumer file when
+# absent: `installed:` (with jira), `settings: { auto_execute_hooks: true }`
+# (required for the skills to auto-EXECUTE the hook), and an empty `hooks:`.
+install::_create_minimal_extensions_yml() {
+    mkdir -p "$(dirname "$INSTALL_EXTENSIONS_YML")"
+    cat >"$INSTALL_EXTENSIONS_YML" <<'YAML'
+installed:
+- jira
+settings:
+  auto_execute_hooks: true
+hooks:
+YAML
+    install::_log "created ${INSTALL_EXTENSIONS_YML}"
+}
+
+# install::_register_one_hook <hook_name>
+#
+# Idempotently insert the `jira` entry under <hook_name>. Re-registration
+# honours any existing `enabled: false` the operator chose (Principle VII / VIII)
+# — a present entry is PRESERVED untouched.
+install::_register_one_hook() {
+    local hook="$1"
+
+    if install::_hook_already_registered "$hook"; then
+        install::_log "hook ${hook} already registered; preserving existing entry"
+        return 0
+    fi
+
+    local block
+    block="$(install::_render_hook_block "$hook")"
+
+    # Two append paths:
+    #   (a) the `<hook>:` key already exists — append the jira block under it
+    #       (alongside any other extension's entries, untouched).
+    #   (b) the `<hook>:` key is missing — create the section with the block.
+    if grep -qE "^[[:space:]]{2}${hook}:[[:space:]]*$" "$INSTALL_EXTENSIONS_YML"; then
+        install::_append_under_hook "$hook" "$block"
+    else
+        install::_create_hook_section "$hook" "$block"
+    fi
+}
+
+# install::_hook_already_registered <hook_name>
+#
+# Returns 0 iff the named after_* hook already has a `jira` extension entry. The
+# match is anchored on `extension: jira` appearing inside the `^  <hook>:` block
+# (single-line awk vars only — BSD-awk safe).
+install::_hook_already_registered() {
+    local hook="$1"
+    [[ -f "$INSTALL_EXTENSIONS_YML" ]] || return 1
+    awk -v want="$hook" '
+        BEGIN { in_block = 0; found = 0 }
+        $0 ~ "^  " want ":" {
+            in_block = 1
+            next
+        }
+        in_block && /^  [a-zA-Z_]+:[[:space:]]*$/ {
+            in_block = 0
+        }
+        in_block && /extension:[[:space:]]*jira/ {
+            found = 1
+            exit
+        }
+        END { exit (found ? 0 : 1) }
+    ' "$INSTALL_EXTENSIONS_YML"
+}
+
+# install::_render_hook_block <hook_name>
+#
+# Emit the YAML for a single `jira` entry under a hook block. On a DOGFOOD target
+# (install::_is_dogfood_target ⇒ 0), the `condition` is the LITERAL
+# `${SPECKIT_JIRA_DOGFOOD_SAFE:-false}` (host-evaluated at fire time — the
+# bridge's own dev does not auto-push unless the operator opts in); else `null`.
+install::_render_hook_block() {
+    local hook="$1"
+    local description prompt
+    case "$hook" in
+        after_specify)
+            description="Reconcile after /speckit-specify so the new spec Story exists in Jira with the correct initial status."
+            prompt="Reconciling spec.md to Jira..."
+            ;;
+        after_clarify)
+            description="Reconcile after /speckit-clarify so ratified clarifications appear as comments on the spec Story."
+            prompt="Reconciling clarification rounds to Jira comments..."
+            ;;
+        after_plan)
+            description="Reconcile after /speckit-plan so the spec Story advances to the planning status and plan/ADR summaries appear as comments."
+            prompt="Reconciling plan.md to Jira..."
+            ;;
+        after_tasks)
+            description="Reconcile after /speckit-tasks so each lifecycle phase becomes a Jira Subtask of the spec Story with the right checklist."
+            prompt="Reconciling tasks.md to Jira subtasks..."
+            ;;
+        after_implement)
+            description="Reconcile after /speckit-implement so checklist completion and the lifecycle status roll up in Jira."
+            prompt="Reconciling implementation progress to Jira..."
+            ;;
+        after_analyze)
+            description="Reconcile after /speckit-analyze so analyze findings appear as comments on the spec Story."
+            prompt="Reconciling analyze findings to Jira comments..."
+            ;;
+        *)
+            description="Reconcile after /${hook#after_} so Jira stays in sync."
+            prompt="Reconciling to Jira..."
+            ;;
+    esac
+
+    {
+        printf '  - extension: jira\n'
+        printf '    command: speckit.jira.push\n'
+        printf '    enabled: true\n'
+        printf '    optional: false\n'
+        printf '    prompt: %s\n' "$prompt"
+        printf '    description: %s\n' "$description"
+        if install::_is_dogfood_target; then
+            # SC2016 suppressed: the `${SPECKIT_JIRA_DOGFOOD_SAFE:-false}` text is
+            # written VERBATIM into the YAML; the host agent (not us) evaluates it
+            # at hook-fire time. We want literal text, not bash expansion here.
+            # shellcheck disable=SC2016
+            printf '    condition: "${SPECKIT_JIRA_DOGFOOD_SAFE:-false}"\n'
+        else
+            printf '    condition: null\n'
+        fi
+    }
+}
+
+# install::_append_under_hook <hook_name> <block_text>
+#
+# Insert the rendered block immediately after the named hook header, before the
+# next sibling hook or EOF. Preserves any existing entries under the hook (e.g.
+# a speckit-git entry). PURE-BASH line-by-line state machine (BSD awk on macOS
+# rejects multi-line `-v` — the Linear dogfood run surfaced `awk: newline in
+# string`); the awk dependency stays limited to single-line vars elsewhere.
+install::_append_under_hook() {
+    local hook="$1"
+    local block="$2"
+    local tmp
+    tmp="$(mktemp -t spec-kit-jira-ext-yml.XXXXXX)"
+
+    # state="before"  — copy verbatim until the hook header.
+    # state="in_hook" — buffer the hook's child lines until the next sibling
+    #                   header (two-space indent + key + colon) or EOF, then
+    #                   flush the buffer + the new block.
+    # state="after"   — copy the rest verbatim.
+    local state="before"
+    local -a block_buf=()
+    local emitted=0
+    local line
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$state" == "before" ]]; then
+            if [[ "$line" =~ ^[[:space:]]{2}${hook}:[[:space:]]*$ ]]; then
+                printf '%s\n' "$line" >>"$tmp"
+                state="in_hook"
+                block_buf=()
+                continue
+            fi
+            printf '%s\n' "$line" >>"$tmp"
+            continue
+        fi
+        if [[ "$state" == "in_hook" ]]; then
+            if [[ "$line" =~ ^\ {2}[a-zA-Z_]+:[[:space:]]*$ ]]; then
+                local buf_line
+                for buf_line in "${block_buf[@]+"${block_buf[@]}"}"; do
+                    printf '%s\n' "$buf_line" >>"$tmp"
+                done
+                printf '%s\n' "$block" >>"$tmp"
+                emitted=1
+                printf '%s\n' "$line" >>"$tmp"
+                state="after"
+                continue
+            fi
+            block_buf+=("$line")
+            continue
+        fi
+        printf '%s\n' "$line" >>"$tmp"
+    done < "$INSTALL_EXTENSIONS_YML"
+
+    # Drained the whole file still inside the hook block — flush + emit at EOF.
+    if [[ "$state" == "in_hook" ]] && (( emitted == 0 )); then
+        local buf_line
+        for buf_line in "${block_buf[@]+"${block_buf[@]}"}"; do
+            printf '%s\n' "$buf_line" >>"$tmp"
+        done
+        printf '%s\n' "$block" >>"$tmp"
+    fi
+
+    mv "$tmp" "$INSTALL_EXTENSIONS_YML"
+}
+
+# install::_create_hook_section <hook_name> <block_text>
+#
+# Append a brand-new `  <hook>:` section (+ the block) to the tail of the file.
+# Used when the host file has no entry for the hook at all. Adds the `hooks:`
+# key first when missing.
+install::_create_hook_section() {
+    local hook="$1"
+    local block="$2"
+    # Read the hooks-key presence BEFORE opening the append redirect so the
+    # read+write of one file in a single pipeline (SC2094) stays clean.
+    local needs_hooks_header=0
+    if ! grep -qE '^hooks:[[:space:]]*$' "$INSTALL_EXTENSIONS_YML"; then
+        needs_hooks_header=1
+    fi
+    {
+        if (( needs_hooks_header == 1 )); then
+            printf 'hooks:\n'
+        fi
+        printf '  %s:\n' "$hook"
+        printf '%s\n' "$block"
+    } >>"$INSTALL_EXTENSIONS_YML"
 }
 
 # ---------------------------------------------------------------------------
@@ -478,7 +774,15 @@ install::main() {
     install::_log "✓ wrote ${INSTALL_CONFIG_PATH} for project ${INSTALL_PROJECT}"
     install::_log "  resolved: issue types + 6 phase→status ids${INSTALL_RESOLVED[story_points_field_id]:+ + story-points field}"
 
-    # 6. FR-013: offer / run seed. The script-side honors --with-seed (runs seed
+    # 6. FR-002 / Principle VII: auto-register the six after_* hooks so every
+    #    /speckit-* lifecycle command auto-mirrors to Jira. Install/config-side
+    #    only (writes the consumer's .specify/extensions.yml); the reconcile
+    #    engine is untouched. Idempotent (byte-identical re-run); honours an
+    #    operator enabled:false. This runs AFTER the binding write.
+    install::register_after_hooks
+    install::_log "✓ registered after_* hooks in ${INSTALL_EXTENSIONS_YML} — /speckit-* commands now auto-mirror to Jira"
+
+    # 7. FR-013: offer / run seed. The script-side honors --with-seed (runs seed
     #    in-process); the interactive offer lives in the command body.
     if (( INSTALL_RUN_SEED == 1 )); then
         if [[ -r "${SEED_SH_PATH:-${INSTALL_SH_DIR}/seed.sh}" ]]; then

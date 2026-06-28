@@ -33,22 +33,22 @@ Tick `[ ]`→`[X]` as completed.
 
 ### Tests first — `tests/unit/hook_registration.bats` (pure-fs)
 
-- [ ] T003 [US1] Test (C-2): `install::register_after_hooks` on an ABSENT `.specify/extensions.yml` (in a `mktemp -d`) ⇒ the file is created with `settings: { auto_execute_hooks: true }`, `installed:` includes `jira`, and all six `after_*` blocks each carry an `extension: jira` entry (`command: speckit.jira.push`, `optional: false`).
-- [ ] T004 [US3] Test (C-3, idempotent): run the registrar twice ⇒ the second `.specify/extensions.yml` is **byte-identical** to the first (`cmp` clean — no duplicate entries, no reordering, no churn).
-- [ ] T005 [US3] Test (C-4, enabled:false): pre-seed one hook's `jira` entry with `enabled: false`, run the registrar ⇒ that entry stays `enabled: false` (never re-enabled), the others are registered.
-- [ ] T006 [US3] Test (C-5, coexistence): pre-seed `after_specify:` with an `- extension: speckit-git` entry, run the registrar ⇒ the `speckit-git` entry is untouched and a `- extension: jira` entry is added alongside under the same hook.
-- [ ] T007 [US3] Test (C-6, malformed): a malformed/unreadable `.specify/extensions.yml` ⇒ the registrar surfaces an informational message and returns WITHOUT corrupting the file (assert the file bytes are unchanged; no partial write; no non-zero halt of the host).
-- [ ] T008 [US1] Test (C-7, dogfood): with the install target = the bridge's own checkout (source==target), the rendered hook block has `condition: "${SPECKIT_JIRA_DOGFOOD_SAFE:-false}"`; with a normal target, `condition: null`.
+- [X] T003 [US1] Test (C-2): `install::register_after_hooks` on an ABSENT `.specify/extensions.yml` (in a `mktemp -d`) ⇒ the file is created with `settings: { auto_execute_hooks: true }`, `installed:` includes `jira`, and all six `after_*` blocks each carry an `extension: jira` entry (`command: speckit.jira.push`, `optional: false`).
+- [X] T004 [US3] Test (C-3, idempotent): run the registrar twice ⇒ the second `.specify/extensions.yml` is **byte-identical** to the first (`cmp` clean — no duplicate entries, no reordering, no churn).
+- [X] T005 [US3] Test (C-4, enabled:false): pre-seed one hook's `jira` entry with `enabled: false`, run the registrar ⇒ that entry stays `enabled: false` (never re-enabled), the others are registered.
+- [X] T006 [US3] Test (C-5, coexistence): pre-seed `after_specify:` with an `- extension: speckit-git` entry, run the registrar ⇒ the `speckit-git` entry is untouched and a `- extension: jira` entry is added alongside under the same hook.
+- [X] T007 [US3] Test (C-6, malformed): a malformed/unreadable `.specify/extensions.yml` ⇒ the registrar surfaces an informational message and returns WITHOUT corrupting the file (assert the file bytes are unchanged; no partial write; no non-zero halt of the host).
+- [X] T008 [US1] Test (C-7, dogfood): with the install target = the bridge's own checkout (source==target), the rendered hook block has `condition: "${SPECKIT_JIRA_DOGFOOD_SAFE:-false}"`; with a normal target, `condition: null`.
 
 ### Implementation — `src/install.sh`
 
-- [ ] T009 [US1] Add module constants: `INSTALL_EXTENSIONS_YML=".specify/extensions.yml"` and `INSTALL_AFTER_HOOK_NAMES=(after_specify after_clarify after_plan after_tasks after_implement after_analyze)`.
-- [ ] T010 [US1] Implement `install::_create_minimal_extensions_yml` — write `installed:`/`settings: { auto_execute_hooks: true }`/`hooks:` when the file is absent (mirror Linear's, swap `linear`→`jira`).
-- [ ] T011 [US1] Implement `install::_render_hook_block <hook>` — emit `- extension: jira`, `command: speckit.jira.push`, `enabled: true`, `optional: false`, the per-phase `prompt`/`description`, and `condition`: `null` normally, or the LITERAL `${SPECKIT_JIRA_DOGFOOD_SAFE:-false}` on a dogfood target (reuse 008's source==target detection; `# shellcheck disable=SC2016` on that `printf`).
-- [ ] T012 [US3] Implement `install::_hook_already_registered <hook>` — awk over the `^  <hook>:` block, match `extension:[[:space:]]*jira` inside it (rc 0 = present).
-- [ ] T013 [US3] Implement `install::_append_under_hook` / `install::_create_hook_section` — **pure-bash line-by-line state machines** that splice the multi-line rendered block (NOT `awk -v block=<multiline>` — BSD awk macOS rejects it). Never duplicate, never reorder, never disturb other extensions' entries, never write a partial file.
-- [ ] T014 [US3] Implement `install::_register_one_hook <hook>` — present ⇒ preserve (honour `enabled:false`) + log + return 0; else render + append via the two paths (`_append_under_hook` if `^  <hook>:` exists, else `_create_hook_section`).
-- [ ] T015 [US1] Implement `install::register_after_hooks` — ensure the file (`_create_minimal_extensions_yml` if absent), then loop `INSTALL_AFTER_HOOK_NAMES` → `_register_one_hook`. Wire the call into `install::main` AFTER the binding write (`config::write_binding`).
+- [X] T009 [US1] Add module constants: `INSTALL_EXTENSIONS_YML=".specify/extensions.yml"` and `INSTALL_AFTER_HOOK_NAMES=(after_specify after_clarify after_plan after_tasks after_implement after_analyze)`.
+- [X] T010 [US1] Implement `install::_create_minimal_extensions_yml` — write `installed:`/`settings: { auto_execute_hooks: true }`/`hooks:` when the file is absent (mirror Linear's, swap `linear`→`jira`).
+- [X] T011 [US1] Implement `install::_render_hook_block <hook>` — emit `- extension: jira`, `command: speckit.jira.push`, `enabled: true`, `optional: false`, the per-phase `prompt`/`description`, and `condition`: `null` normally, or the LITERAL `${SPECKIT_JIRA_DOGFOOD_SAFE:-false}` on a dogfood target (reuse 008's source==target detection; `# shellcheck disable=SC2016` on that `printf`).
+- [X] T012 [US3] Implement `install::_hook_already_registered <hook>` — awk over the `^  <hook>:` block, match `extension:[[:space:]]*jira` inside it (rc 0 = present).
+- [X] T013 [US3] Implement `install::_append_under_hook` / `install::_create_hook_section` — **pure-bash line-by-line state machines** that splice the multi-line rendered block (NOT `awk -v block=<multiline>` — BSD awk macOS rejects it). Never duplicate, never reorder, never disturb other extensions' entries, never write a partial file.
+- [X] T014 [US3] Implement `install::_register_one_hook <hook>` — present ⇒ preserve (honour `enabled:false`) + log + return 0; else render + append via the two paths (`_append_under_hook` if `^  <hook>:` exists, else `_create_hook_section`).
+- [X] T015 [US1] Implement `install::register_after_hooks` — ensure the file (`_create_minimal_extensions_yml` if absent), then loop `INSTALL_AFTER_HOOK_NAMES` → `_register_one_hook`. Wire the call into `install::main` AFTER the binding write (`config::write_binding`).
 
 **Checkpoint**: `bats tests/unit/hook_registration.bats` green; `shellcheck --severity=style src/*.sh` clean.
 
@@ -56,7 +56,7 @@ Tick `[ ]`→`[X]` as completed.
 
 ## Phase 3: Non-blocking push (US2 — a fired hook never breaks the host command)
 
-- [ ] T016 [US2] Test (C-8) in `tests/unit/hook_registration.bats` (or `tests/unit/push_safety.bats`): extract the one-liner from `commands/jira-push.md` and run it with `.env` PRESENT and ABSENT (stub `src/reconcile.sh` to a no-op that records it ran) ⇒ reconcile is reached in BOTH cases (no `&&`-chain break on a missing `.env`).
+- [X] T016 [US2] Test (C-8) in `tests/unit/hook_registration.bats` (or `tests/unit/push_safety.bats`): extract the one-liner from `commands/jira-push.md` and run it with `.env` PRESENT and ABSENT (stub `src/reconcile.sh` to a no-op that records it ran) ⇒ reconcile is reached in BOTH cases (no `&&`-chain break on a missing `.env`).
 - [ ] T017 [US2] Harden the run-line in `commands/jira-push.md` AND `.claude/commands/speckit-jira-push.md`: replace `… && set -a && source .env && set +a && bash src/reconcile.sh …` with `cd "$(git rev-parse --show-toplevel)" && { [ -f .env ] && { set -a; source .env; set +a; }; } ; bash src/reconcile.sh <FLAGS>`. Update the "report back" guidance so a hook-fired failure reads as a gentle WARNING (no creds → run `/speckit-jira-install`; exit 3 → check the token), never alarming (FR-004).
 
 **Checkpoint**: a missing `.env` no longer hard-fails the push; reconcile's clean exit-2/3 message is reached.
