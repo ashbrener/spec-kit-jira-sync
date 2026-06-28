@@ -20,8 +20,8 @@ Tick `[ ]`→`[X]` as completed.
 
 ## Phase 1: Manifest (US1 — the CLI-registered source of truth)
 
-- [ ] T001 [US1] Test (C-1) in `tests/unit/manifest_hooks.bats` (new): parse `extension.yml` and assert `provides.hooks` declares all six `after_*` hooks (`after_specify`, `after_clarify`, `after_plan`, `after_tasks`, `after_implement`, `after_analyze`), each with `command: speckit.jira.push` and `optional: false`. (Fails until T002.)
-- [ ] T002 [US1] Add the `provides.hooks:` block to `extension.yml`: the six `after_*` hooks, each `- command: "speckit.jira.push"`, `optional: false`, `enabled: true`, with a jira-flavoured per-phase `description` + `prompt` (e.g. after_specify → "Reconcile after /speckit-specify so the spec Story exists in Jira with the right initial status."). No `before_*`. `extension.id` stays `jira`. Correct the stale "registers NO hooks — reconcile is operator-driven" header/`provides` comments to describe the auto-mirror.
+- [X] T001 [US1] Test (C-1) in `tests/unit/manifest_hooks.bats` (new): parse `extension.yml` and assert `provides.hooks` declares all six `after_*` hooks (`after_specify`, `after_clarify`, `after_plan`, `after_tasks`, `after_implement`, `after_analyze`), each with `command: speckit.jira.push` and `optional: false`. (Fails until T002.)
+- [X] T002 [US1] Add the `provides.hooks:` block to `extension.yml`: the six `after_*` hooks, each `- command: "speckit.jira.push"`, `optional: false`, `enabled: true`, with a jira-flavoured per-phase `description` + `prompt` (e.g. after_specify → "Reconcile after /speckit-specify so the spec Story exists in Jira with the right initial status."). No `before_*`. `extension.id` stays `jira`. Correct the stale "registers NO hooks — reconcile is operator-driven" header/`provides` comments to describe the auto-mirror.
 
 **Checkpoint**: `bats tests/unit/manifest_hooks.bats` green; `yamllint -d relaxed extension.yml` clean.
 

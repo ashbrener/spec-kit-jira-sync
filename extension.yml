@@ -10,11 +10,12 @@
 # command under `.claude/skills/spec-kit-jira-<sub>/`.
 #
 # Field shape mirrors the sibling extension `spec-kit-linear-sync`
-# (extension.yml) exactly for every field the framework cares about. The
-# jira-sync surface is intentionally narrower: this bridge ships the two
-# on-demand reconcile commands (push + status) and registers no hooks — the
-# operator drives reconcile explicitly. Informational fields (`config:`) are
-# still listed so operators reading the manifest understand the config seam.
+# (extension.yml) exactly for every field the framework cares about. This bridge
+# is the AUTOMATIC mirror its constitution always specified (Principle VII): it
+# ships the reconcile commands (push/status/install/seed) AND auto-registers the
+# six `after_*` lifecycle hooks below, so every `/speckit-*` command mirrors the
+# spec state to Jira with nothing to remember. Informational fields (`config:`)
+# are still listed so operators reading the manifest understand the config seam.
 #
 # Privacy (constitution Principle IX): this manifest is committed to a PUBLIC
 # repo and MUST stay free of real Jira coordinates/PII — no site, project key,
@@ -81,9 +82,11 @@ requires:
 
 # ---------------------------------------------------------------------------
 # `provides:` — what this extension contributes to the consumer repo.
-# Must contain at least one of `commands` or `hooks`. This bridge ships two
-# on-demand commands and registers NO hooks: reconcile is operator-driven so
-# the board is never mutated as a silent side effect of a lifecycle command.
+# Must contain at least one of `commands` or `hooks`. This bridge ships the
+# reconcile commands AND auto-registers the six `after_*` lifecycle hooks (see
+# `hooks:` below): every `/speckit-*` command auto-mirrors the spec state to
+# Jira (Principle VII — Memory-Just-Works). The on-demand commands remain as the
+# recovery / escape-hatch path; the automatic mirror is the primary UX.
 # ---------------------------------------------------------------------------
 provides:
 
@@ -131,6 +134,85 @@ provides:
     - name: "speckit.jira.seed"
       file: "commands/jira-seed.md"
       description: "Validate the phase:* / task-phase:N labels and confirm every lifecycle status is reachable on the project's workflow. Never mutates the workflow; idempotent; fail-closed (exit 2)."
+
+  # -------------------------------------------------------------------------
+  # `hooks:` — auto-registered into the consumer's `.specify/extensions.yml`
+  # by the CLI at `specify extension add jira` time (and idempotently
+  # repaired by the install ceremony's `install::register_after_hooks`, the
+  # parity/self-heal path).
+  #
+  # Per FR-001 / Principle VII, all six relevant `after_*` hooks are registered
+  # with `optional: false` — every `/speckit-*` lifecycle command mirrors the
+  # spec state to Jira without an explicit push. `optional: false` is the
+  # REGISTRATION mandate (the hook is non-skippable); it does NOT mean the host
+  # command fails if the sync fails. An `after_*` hook fires AFTER the lifecycle
+  # command has already completed, so a sync that can't run (no creds, no
+  # jira-config.yml, Jira unreachable) degrades to a clean WARNING and never
+  # fails or blocks the spec-kit command (Principle VIII; FR-004).
+  #
+  # An operator may turn a single hook off by setting `enabled: false` in their
+  # consumer file; the install registrar honours that and never re-enables it.
+  #
+  # NO `before_*` hooks: this extension never pre-empts a lifecycle step — it
+  # only mirrors AFTER each transition. All six point at the same command
+  # (`speckit.jira.push`) because reconcile is the single convergent operation
+  # (one sync path; idempotent; zero-churn on unchanged state).
+  # -------------------------------------------------------------------------
+  hooks:
+
+    # After /speckit-specify — the spec Story is created in Jira at its initial
+    # status (the board entry for the new spec appears).
+    after_specify:
+      - command: "speckit.jira.push"
+        description: "Reconcile after /speckit-specify so the new spec Story exists in Jira with the correct initial status."
+        prompt: "Reconciling spec.md to Jira..."
+        optional: false
+        enabled: true
+
+    # After /speckit-clarify — ratified Q/A appears as comments on the spec
+    # Story; no status change.
+    after_clarify:
+      - command: "speckit.jira.push"
+        description: "Reconcile after /speckit-clarify so ratified clarifications appear as comments on the spec Story."
+        prompt: "Reconciling clarification rounds to Jira comments..."
+        optional: false
+        enabled: true
+
+    # After /speckit-plan — the spec Story advances to the planning status and
+    # plan summaries / ADR decisions mirror as comments.
+    after_plan:
+      - command: "speckit.jira.push"
+        description: "Reconcile after /speckit-plan so the spec Story advances to the planning status and plan/ADR summaries appear as comments."
+        prompt: "Reconciling plan.md to Jira..."
+        optional: false
+        enabled: true
+
+    # After /speckit-tasks — each lifecycle phase becomes a Subtask of the spec
+    # Story with the right checklist.
+    after_tasks:
+      - command: "speckit.jira.push"
+        description: "Reconcile after /speckit-tasks so each lifecycle phase becomes a Jira Subtask of the spec Story with the right checklist."
+        prompt: "Reconciling tasks.md to Jira subtasks..."
+        optional: false
+        enabled: true
+
+    # After /speckit-implement — checklist completion state and the lifecycle
+    # status roll up in Jira.
+    after_implement:
+      - command: "speckit.jira.push"
+        description: "Reconcile after /speckit-implement so checklist completion and the lifecycle status roll up in Jira."
+        prompt: "Reconciling implementation progress to Jira..."
+        optional: false
+        enabled: true
+
+    # After /speckit-analyze — analyze findings mirror as comments on the spec
+    # Story.
+    after_analyze:
+      - command: "speckit.jira.push"
+        description: "Reconcile after /speckit-analyze so analyze findings appear as comments on the spec Story."
+        prompt: "Reconciling analyze findings to Jira comments..."
+        optional: false
+        enabled: true
 
   # -------------------------------------------------------------------------
   # `config:` — INFORMATIONAL. The CLI does NOT auto-scaffold this file on
