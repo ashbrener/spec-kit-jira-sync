@@ -57,7 +57,7 @@ Tick `[ ]`→`[X]` as completed.
 ## Phase 3: Non-blocking push (US2 — a fired hook never breaks the host command)
 
 - [X] T016 [US2] Test (C-8) in `tests/unit/hook_registration.bats` (or `tests/unit/push_safety.bats`): extract the one-liner from `commands/jira-push.md` and run it with `.env` PRESENT and ABSENT (stub `src/reconcile.sh` to a no-op that records it ran) ⇒ reconcile is reached in BOTH cases (no `&&`-chain break on a missing `.env`).
-- [ ] T017 [US2] Harden the run-line in `commands/jira-push.md` AND `.claude/commands/speckit-jira-push.md`: replace `… && set -a && source .env && set +a && bash src/reconcile.sh …` with `cd "$(git rev-parse --show-toplevel)" && { [ -f .env ] && { set -a; source .env; set +a; }; } ; bash src/reconcile.sh <FLAGS>`. Update the "report back" guidance so a hook-fired failure reads as a gentle WARNING (no creds → run `/speckit-jira-install`; exit 3 → check the token), never alarming (FR-004).
+- [X] T017 [US2] Harden the run-line in `commands/jira-push.md` AND `.claude/commands/speckit-jira-push.md`: replace `… && set -a && source .env && set +a && bash src/reconcile.sh …` with `cd "$(git rev-parse --show-toplevel)" && { [ -f .env ] && { set -a; source .env; set +a; }; } ; bash src/reconcile.sh <FLAGS>`. Update the "report back" guidance so a hook-fired failure reads as a gentle WARNING (no creds → run `/speckit-jira-install`; exit 3 → check the token), never alarming (FR-004).
 
 **Checkpoint**: a missing `.env` no longer hard-fails the push; reconcile's clean exit-2/3 message is reached.
 
