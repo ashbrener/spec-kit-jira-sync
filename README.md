@@ -45,6 +45,38 @@ three properties that fall out of that design are the whole pitch:
 
 ---
 
+## The automatic mirror
+
+You don't run a sync command. After you install the bridge, **every spec-kit
+lifecycle command auto-mirrors to Jira** — `/speckit-specify`, `.clarify`,
+`.plan`, `.tasks`, `.implement`, `.analyze`. The board stays current as a side
+effect of normal spec-kit work, with nothing to remember (Principle VII —
+*Memory-Just-Works*). A bridge whose primary UI is "remember to run sync" drifts
+and gets abandoned; auto-firing on every transition is what earns the bridge its
+toolchain slot.
+
+How it works: install registers the six `after_*` hooks into your
+`.specify/extensions.yml`, each firing `speckit.jira.push` with
+`optional: false`. An `after_*` hook fires **after** the lifecycle command has
+already completed, so the mirror can never retroactively fail your command:
+
+- **Non-blocking.** If the sync can't run (no `.env` creds, no `jira-config.yml`,
+  Jira unreachable) the lifecycle command **still succeeds** and the bridge
+  surfaces a single clean WARNING with the fix — never a hard error or a blocker
+  (Principle VIII).
+- **Idempotent.** Each fire is an independent full reconcile; an unchanged corpus
+  produces **zero** writes, so firing on every command is safe.
+- **Operator-controlled.** Set a hook `enabled: false` in your
+  `.specify/extensions.yml` and the bridge honours it — reinstall never silently
+  re-enables a hook you turned off, never duplicates one, and a re-run is
+  byte-identical.
+
+The on-demand commands (`push` / `status` / `install` / `seed`) remain as the
+[recovery / escape-hatch path](#recovery--on-demand-commands) — for forcing a
+sync, previewing drift, binding the repo, or validating the workflow by hand.
+
+---
+
 ## How it works
 
 The pipeline is deliberately split into a **vendor-neutral engine** and a
@@ -361,13 +393,15 @@ specify extension add jira-sync
 > `.specify/extensions/jira/` and its commands are namespaced `speckit.jira.*`.
 
 Install copies the bridge into your repo's `.specify/extensions/jira/`,
-registers its two on-demand commands (`speckit.jira.push`,
-`speckit.jira.status`), and — if your project was initialised with
-`--ai-skills` — generates a `SKILL.md` per command. Unlike the
-[Linear sibling](https://github.com/ashbrener/spec-kit-linear-sync), this bridge
-registers **no `after_*` hooks**: reconcile is operator-driven, so your board is
-never mutated as a side effect of a lifecycle command — you run
-`/speckit-jira-push` (or `src/reconcile.sh`) when you want to sync.
+registers its reconcile commands (`speckit.jira.push`, `speckit.jira.status`,
+`speckit.jira.install`, `speckit.jira.seed`), and — if your project was
+initialised with `--ai-skills` — generates a `SKILL.md` per command. Like the
+[Linear sibling](https://github.com/ashbrener/spec-kit-linear-sync), it also
+**auto-registers the six `after_*` lifecycle hooks** into your
+`.specify/extensions.yml`, so every `/speckit-*` command mirrors the spec state
+to Jira automatically — the [automatic mirror](#the-automatic-mirror) is the
+primary path (Principle VII). The on-demand `/speckit-jira-push` is the
+escape-hatch for when you want to force a sync by hand.
 
 Install does **not** scaffold your credentials. After installing, add your
 gitignored `.env` (below), then run **`/speckit-jira-install`** to resolve the
@@ -443,21 +477,25 @@ reconcile.sh [--spec NNN | --all] [--dry-run] [--on-drift=proceed|abort]
 | `--quiet` | Suppress per-mutation logging; the summary still prints. |
 | `--config PATH` | Override the gitignored `jira-config.yml` location. |
 
-### In-session slash commands
+### Recovery / on-demand commands
 
-If you're driving from inside the agent harness, two slash commands run the
-engine without dropping to a terminal:
+The [automatic mirror](#the-automatic-mirror) is the primary path — these
+commands are the **escape-hatch**: force a sync, preview drift, (re)bind the
+repo, or validate the workflow by hand. If you're driving from inside the agent
+harness, the slash commands run the engine without dropping to a terminal:
 
 | Command | Maps to | What it does |
 |---|---|---|
-| `/speckit-jira-push` | `reconcile.sh [--all\|--spec NNN] [--dry-run] [--on-drift=abort\|proceed]` | **Write** path — reconciles specs → Jira. |
+| `/speckit-jira-push` | `reconcile.sh [--all\|--spec NNN] [--dry-run] [--on-drift=abort\|proceed]` | **Write** path — force a reconcile (the same path the `after_*` hooks fire). |
 | `/speckit-jira-status` | `reconcile.sh --dry-run` | **Read-only** preview — plans every write, issues none. |
+| `/speckit-jira-install` | the install ceremony | Resolve + write the gitignored binding; also (re)registers the `after_*` hooks. |
+| `/speckit-jira-seed` | the seed gate | Validate the labels + confirm every lifecycle status is reachable. |
 
-`/speckit-jira-push` is the write path; `/speckit-jira-status` is the
-read-only drift/sync preview (it computes the same diff a live push would
-perform, then stops). There is intentionally no `pull`: the filesystem is the
-single source of truth and Jira is a unidirectional, read-only mirror, so there
-is nothing to pull back. A read-only drift report may land later.
+`/speckit-jira-push` is the write path the hooks also fire;
+`/speckit-jira-status` is the read-only drift/sync preview (it computes the same
+diff a live push would perform, then stops). There is intentionally no `pull`:
+the filesystem is the single source of truth and Jira is a unidirectional,
+read-only mirror, so there is nothing to pull back.
 
 ### Exit codes (monotonic escalation)
 

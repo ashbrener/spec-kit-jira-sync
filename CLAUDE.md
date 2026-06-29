@@ -38,7 +38,19 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **010-lifecycle-subtask-cascade** (active) — board-correctness bug fix (dogfound;
+- **011-hook-auto-registration** (active) — make sk-jira an AUTOMATIC mirror
+  (implement Principle VII, which the bridge never built — it registers ZERO hooks,
+  so the board only syncs on a manual `/speckit-jira-push`). Declare the six after_*
+  hooks in `extension.yml provides.hooks` → `speckit.jira.push` (optional:false; CLI
+  registers on add) + an idempotent install-side `install::register_after_hooks`
+  (mirrors the Linear sibling; honours enabled:false; dogfood-gated `condition`).
+  Non-blocking (structural — the skill fires the hook AFTER the command's work);
+  harden the push body so a no-creds auto-fire degrades to a clean warning. Docs flip
+  (auto-sync first). Install/config-side — engine untouched (003 green); Privacy IX;
+  NO amendment (implements VII; fixes the stale "no hooks" wording). Foundation for
+  012 (the Linear spec-014 hook self-heal port). Spec+clarify+plan done.
+  Plan: `specs/011-hook-auto-registration/plan.md`
+- **010-lifecycle-subtask-cascade** — board-correctness bug fix (dogfound;
   same two bugs as the Linear sibling). (1) Merging a spec strands its phase
   Subtasks in To Do — lifecycle drives only the Story; subtask status only via the
   opt-in ratio rollup (off by default). Fix: a terminal-lifecycle cascade
