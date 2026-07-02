@@ -128,12 +128,12 @@ still completes and keeps its exit disposition.
 `main` → exactly one warning names the absent hooks + `/speckit-jira-install`, and
 the reconcile's own exit is unchanged.
 
-- [ ] T012 [US1] Write `tests/unit/reconcile_hookcheck.bats` (RED) — the push
+- [X] T012 [US1] Write `tests/unit/reconcile_hookcheck.bats` (RED) — the push
   branch (C-10/C-11): with `HOOKCHECK_EXTENSIONS_YML` pointed at a partial fixture
   and `DRY_RUN=0`, `hookcheck::reconcile_check` emits the `warned` row (named);
   latched to once; non-blocking — it neither calls `summary::add error` nor changes
   `RECONCILE_EXIT_CODE`.
-- [ ] T013 [US1] Wire the module into `src/reconcile.sh`: add `source
+- [X] T013 [US1] Wire the module into `src/reconcile.sh`: add `source
   "${SCRIPT_DIR}/hookcheck.sh"` beside the other source lines; add
   `hookcheck::reconcile_check || true` in `reconcile::main` immediately BEFORE the
   final `summary::emit` (~line 3066). Implement `hookcheck::reconcile_check` to
@@ -152,12 +152,12 @@ first-class line in every state and ALWAYS exits 0.
 **Independent test**: all present → "all present"; some absent → names the missing;
 every case exits 0.
 
-- [ ] T014 [US2] Extend `tests/unit/reconcile_hookcheck.bats` (RED) — the dry-run
+- [X] T014 [US2] Extend `tests/unit/reconcile_hookcheck.bats` (RED) — the dry-run
   branch (C-10/C-11): with `DRY_RUN=1`, `hookcheck::reconcile_check` emits the
   first-class status line via `summary::add info "$(hookcheck::status_line …)"` in
   all states (present/partial/none/unverifiable/not_installed), and the run stays
   exit 0 (status health never changes the exit code).
-- [ ] T015 [US2] Complete the `${DRY_RUN:-0}` branch in
+- [X] T015 [US2] Complete the `${DRY_RUN:-0}` branch in
   `hookcheck::reconcile_check` (in `src/hookcheck.sh`): dry-run → `summary::add
   info "$(hookcheck::status_line "$HOOKCHECK_OVERALL" "${HOOKCHECK_MISSING[@]}" --
   "${HOOKCHECK_DISABLED[@]}")"`. Make T014 pass. Confirm status exit-0 invariant.
@@ -176,12 +176,12 @@ reusing 011's idempotent registrar; non-interactive never prompts or mutates.
 the file); `n`/empty → untouched; non-interactive → warn-only, no mutation.
 (Depends on Phase 1 include-guards.)
 
-- [ ] T016 [US3] Extend `tests/unit/reconcile_hookcheck.bats` (RED): both branches
+- [X] T016 [US3] Extend `tests/unit/reconcile_hookcheck.bats` (RED): both branches
   call `hookcheck::offer_selfheal` after the warn/status-line; forced-interactive +
   `y` (real registrar, guarded source) mutates the fixture to re-register all
   missing; non-interactive leaves it untouched; the offer never changes
   `RECONCILE_EXIT_CODE`.
-- [ ] T017 [US3] Confirm `hookcheck::reconcile_check` calls `hookcheck::offer_selfheal
+- [X] T017 [US3] Confirm `hookcheck::reconcile_check` calls `hookcheck::offer_selfheal
   "$HOOKCHECK_OVERALL" "${HOOKCHECK_MISSING[@]}"` on BOTH branches (already sketched
   in T010); verify the guarded `_ensure_install_sourced` → `install::register_after_hooks`
   path works end-to-end against the Phase-1 guards (no readonly crash). Make T016 pass.

@@ -85,6 +85,12 @@ source "${SCRIPT_DIR}/parser.sh"
 source "${SCRIPT_DIR}/workstate.sh"
 # shellcheck source=./jira_sink.sh disable=SC1091
 source "${SCRIPT_DIR}/jira_sink.sh"
+# Hook self-healing (feature 012). Vendor-specific detect/warn/status/heal for
+# the auto-sync after_* hooks — all jira vocabulary stays inside this module so
+# the engine path remains vendor-neutral (003 gate). Sourced last; it lazily
+# sources install.sh only on a consented self-heal (hence the Phase-1 guards).
+# shellcheck source=./hookcheck.sh disable=SC1091
+source "${SCRIPT_DIR}/hookcheck.sh"
 
 # -----------------------------------------------------------------------------
 # Module constants
@@ -112,6 +118,12 @@ declare -g _RECONCILE_DIAGRAMS_WARNED=0
 
 # Overview-block "spec.md has no ## Overview section" warning latch — one-shot.
 declare -g _RECONCILE_OVERVIEW_WARNED=0
+
+# Auto-sync hook-health warning latch (feature 012) — one warning per reconcile
+# run. hookcheck::warn_once flips this to 1 the first time it fires the
+# "missing auto-sync hooks" warning; a second reconcile_check in the same run is
+# then silent. Declared here beside the other one-shot latches.
+declare -g _RECONCILE_HOOKS_WARNED=0
 
 # Project Status accumulator. Each per-spec process_spec call appends one row
 # (newline-separated): `<lifecycle_phase>\t<last_touched_epoch>`.
@@ -3061,6 +3073,17 @@ reconcile::main() {
     # the loop: probe-then-create-or-degrade above the repo Epic. Self-gates on
     # mapping.initiative.enabled.
     reconcile::sync_initiative
+
+    # Step 4.7 — auto-sync hook self-check (feature 012). Report/warn/heal the
+    # bridge's own after_* hooks BEFORE the summary is emitted, so the health
+    # line (dry-run) or the missing-hooks warning (push) lands in the same
+    # structured summary. Covers the primary case: jira-config.yml present but
+    # the hooks stripped by `specify extension add jira --from <zip> --force`.
+    # (A fully-unbound repo with NO jira-config.yml reports the config error
+    # earlier in load_config instead — same /speckit-jira-install fix.) Guarded
+    # with `|| true`: hook health is informational and MUST NOT change the exit
+    # disposition (never touches RECONCILE_EXIT_CODE).
+    hookcheck::reconcile_check || true
 
     # Step 5 — summary emission (Principle VIII).
     summary::emit
