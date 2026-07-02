@@ -497,6 +497,20 @@ diff a live push would perform, then stops). There is intentionally no `pull`:
 the filesystem is the single source of truth and Jira is a unidirectional,
 read-only mirror, so there is nothing to pull back.
 
+#### If auto-sync stops firing: hook self-healing
+
+Reinstalling or upgrading the extension with
+`specify extension add jira --from <zip> --force` **silently strips the six
+`after_*` auto-sync hooks** from your `.specify/extensions.yml` — auto-sync then
+stops firing and the board can drift unnoticed. The bridge now **self-reports**
+this: every `/speckit-jira-push` warns (once) when hooks are missing and names
+them, `/speckit-jira-status` shows a first-class *Auto-sync hooks* health line
+in every state, and — at a real terminal — either surfaces a single `y/N` prompt
+to re-register all of them at once. The one-line fix in any case is to re-run
+**`/speckit-jira-install`**, which idempotently restores the hooks (preserving
+any you deliberately set `enabled: false`). The check is non-blocking and never
+writes to Jira.
+
 ### Exit codes (monotonic escalation)
 
 | Code | Meaning |

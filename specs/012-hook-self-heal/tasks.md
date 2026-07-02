@@ -192,21 +192,21 @@ the file); `n`/empty → untouched; non-interactive → warn-only, no mutation.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T018 [P] Verify `tests/unit/engine_vendor_neutral.bats` stays GREEN (C-12):
+- [X] T018 [P] Verify `tests/unit/engine_vendor_neutral.bats` stays GREEN (C-12):
   `hookcheck::*` + `reconcile::main` are outside the audited `reconcile::*` list;
   confirm NO vendor token was added to any enumerated engine function.
-- [ ] T019 [P] Extend `tests/unit/no-real-identifiers.bats` (C-9) to scan the new
+- [X] T019 [P] Extend `tests/unit/no-real-identifiers.bats` (C-9) to scan the new
   `tests/fixtures/extensions/*` fixtures (if any materialised) +
   `tests/helpers/hookcheck_fixtures.bash` + `src/hookcheck.sh` — placeholder-only,
   no real coordinate. Run it GREEN.
-- [ ] T020 [P] Docs (FR-012): add a crisp note to the README recovery section +
+- [X] T020 [P] Docs (FR-012): add a crisp note to the README recovery section +
   `commands/jira-push.md` (and the `.claude/commands/` twin) that `specify
   extension add jira --from <zip> --force` strips the `after_*` hooks, and the
   restore path is `/speckit-jira-install` (or the interactive self-heal offer).
-- [ ] T021 [P] Add a `CHANGELOG.md` `[Unreleased]` → Added line: "hook
+- [X] T021 [P] Add a `CHANGELOG.md` `[Unreleased]` → Added line: "hook
   self-healing — the bridge self-reports stripped auto-sync hooks and offers a
   consented one-step re-register (spec 012)".
-- [ ] T022 Full CI gate locally: `shellcheck --severity=style src/*.sh` (incl.
+- [X] T022 Full CI gate locally: `shellcheck --severity=style src/*.sh` (incl.
   `hookcheck.sh`), `yamllint -d relaxed` (extension.yml + ci.yml), `npx
   markdownlint-cli2 "specs/**/*.md" "*.md"`, and the FULL `bats --recursive
   tests/unit` (BSD-awk-safe; macOS + Linux parity). All green.

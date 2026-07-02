@@ -12,6 +12,16 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Hook self-healing** (feature 012) — the bridge self-reports stripped
+  auto-sync hooks and offers a consented one-step re-register. Reinstalling with
+  `specify extension add jira --from <zip> --force` silently strips the six
+  `after_*` hooks; now every `/speckit-jira-push` warns (once) when they are
+  missing, `/speckit-jira-status` shows a first-class *Auto-sync hooks* health
+  line in every state (always exit 0), and — at a real terminal — a single
+  `y/N` re-registers all missing hooks at once via the idempotent
+  `/speckit-jira-install` registrar (preserving any `enabled: false`).
+  Non-blocking, consent-only mutation, never writes to Jira; cross-sink parity
+  with the Linear sibling's spec-014.
 - **The automatic mirror — auto-registered `after_*` hooks** (feature 011) —
   spec-kit-jira is now the automatic mirror its constitution always specified
   (Principle VII, *Memory-Just-Works*), closing the gap where the bridge

@@ -308,6 +308,53 @@ _private_patterns() {
   fi
 }
 
+@test "feature-012 hookcheck surface + fixtures are committed placeholder-only (Privacy IX / C-9)" {
+  # The hook-self-heal surface — src/hookcheck.sh, the fixtures helper, and the
+  # new bats suites — is committed to a PUBLIC repo and must carry only neutral
+  # placeholders: the extension id `jira`, command names, and fabricated
+  # prompts. No real site/key/id/email/name/token.
+  cd "$REPO_ROOT"
+  local f
+  for f in \
+    src/hookcheck.sh \
+    tests/helpers/hookcheck_fixtures.bash \
+    tests/unit/hookcheck.bats \
+    tests/unit/hookcheck_selfheal.bats \
+    tests/unit/reconcile_hookcheck.bats \
+    tests/unit/include_guards.bats; do
+    git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || {
+      echo "untracked (the privacy guard would not scan it): $f" >&2
+      return 1
+    }
+  done
+  # No BLOCK-tier Atlassian shape (non-example .atlassian.net host or ATATT
+  # token) in any committed 012 file.
+  # shellcheck source=/dev/null
+  source "$REPO_ROOT/src/jira_sink.sh"
+  local site_re tok_re hits
+  site_re="$(jira_sink::privacy_shapes | awk -F'\t' '$2=="site"{print $3}')"
+  tok_re="$(jira_sink::privacy_shapes | awk -F'\t' '$2=="api-token"{print $3}')"
+  hits="$(grep -lIiE -- "$site_re" \
+            src/hookcheck.sh tests/helpers/hookcheck_fixtures.bash \
+            tests/unit/hookcheck.bats tests/unit/hookcheck_selfheal.bats \
+            tests/unit/reconcile_hookcheck.bats tests/unit/include_guards.bats 2>/dev/null || true)"
+  hits+="$(grep -lIiE -- "$tok_re" \
+            src/hookcheck.sh tests/helpers/hookcheck_fixtures.bash \
+            tests/unit/hookcheck.bats tests/unit/hookcheck_selfheal.bats \
+            tests/unit/reconcile_hookcheck.bats tests/unit/include_guards.bats 2>/dev/null || true)"
+  if [ -n "$hits" ]; then
+    echo "a BLOCK-tier Atlassian shape leaked into the feature-012 surface:" >&2
+    printf '%s\n' "$hits" >&2
+    return 1
+  fi
+  # No email literal in the fixtures helper or module (placeholders only).
+  if grep -qE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' \
+       src/hookcheck.sh tests/helpers/hookcheck_fixtures.bash; then
+    echo "an email literal leaked into the feature-012 hookcheck surface" >&2
+    return 1
+  fi
+}
+
 @test "private deny-list, when present, actually contributes patterns" {
   # Guards against a silently-empty deny-list giving false confidence. Skips
   # cleanly in CI where the gitignored file is absent.
