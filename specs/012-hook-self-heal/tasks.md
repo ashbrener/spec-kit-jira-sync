@@ -68,12 +68,12 @@ crash without include-guards. This phase MUST complete before Phase 5 (US3).
 **Purpose**: the shared detect/classify/warn/status/heal module. One file serves
 all three stories. TDD — write the fixtures helper + failing tests, then the module.
 
-- [ ] T007 [P] Write `tests/helpers/hookcheck_fixtures.bash` — placeholder-only
+- [X] T007 [P] Write `tests/helpers/hookcheck_fixtures.bash` — placeholder-only
   `.specify/extensions.yml` fixture builders (all-present / partial / none /
   disabled / git-sibling / no-`hooks:`-key / malformed), mirroring Linear's helper.
   NO real Jira coordinate (extension id `jira`, command `speckit.jira.push`,
   placeholder prompts only).
-- [ ] T008 [P] Write `tests/unit/hookcheck.bats` (RED) — the detect/report surface,
+- [X] T008 [P] Write `tests/unit/hookcheck.bats` (RED) — the detect/report surface,
   mirroring Linear's 16 cases adapted to `jira`:
   - **C-2 classify**: registered-enabled → `present`; `enabled:false` → `disabled`;
     no `jira` entry → `absent`; a git sibling's `enabled:false` does NOT make jira
@@ -87,7 +87,7 @@ all three stories. TDD — write the fixtures helper + failing tests, then the m
     "could not verify".
   - **VR-10 pin**: `HOOKCHECK_AFTER_HOOK_NAMES` is identical to install's
     `INSTALL_AFTER_HOOK_NAMES`.
-- [ ] T009 [P] Write `tests/unit/hookcheck_selfheal.bats` (RED) — warn + consent,
+- [X] T009 [P] Write `tests/unit/hookcheck_selfheal.bats` (RED) — warn + consent,
   mirroring Linear's 9 cases adapted to `jira`:
   - **C-4 warn_once**: emits ONE `summary::add warned` (named) for partial; latched
     — a second call in the same run is silent; `present`/`not_installed` emit
@@ -99,7 +99,7 @@ all three stories. TDD — write the fixtures helper + failing tests, then the m
     `enabled:false` preserved through a heal.
   - **C-7 `_ensure_install_sourced`**: no-ops when a stub
     `install::register_after_hooks` is predefined (avoids the heavy source).
-- [ ] T010 Create `src/hookcheck.sh` (GREEN) — port Linear's module verbatim, only
+- [X] T010 Create `src/hookcheck.sh` (GREEN) — port Linear's module verbatim, only
   vendor tokens changed. Include-guard `_HOOKCHECK_SH_LOADED`; `readonly -a
   HOOKCHECK_AFTER_HOOK_NAMES` (the six, == install's); `HOOKCHECK_EXTENSIONS_YML`
   default `.specify/extensions.yml`; globals `HOOKCHECK_OVERALL/_MISSING[]/_DISABLED[]`.
@@ -111,7 +111,7 @@ all three stories. TDD — write the fixtures helper + failing tests, then the m
   is already defined), `offer_selfheal`, `reconcile_check`. The `classify` awk walk
   mirrors 011's `install::_hook_already_registered` grammar (FR-007). Make T008 +
   T009 pass.
-- [ ] T011 `shellcheck --severity=style src/hookcheck.sh` clean; run T008 + T009
+- [X] T011 `shellcheck --severity=style src/hookcheck.sh` clean; run T008 + T009
   GREEN. (BSD-awk-safe — no multi-line `awk -v`.)
 
 **Checkpoint**: the module detects, reports, warns, and (interactively) heals in
