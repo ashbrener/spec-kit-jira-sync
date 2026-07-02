@@ -53,6 +53,14 @@ parity:
   wires once into `reconcile::main`; in `--dry-run` (status) it emits the
   first-class health line (all-present / partial+names / none) + offer; in a real
   push it emits the warn-once-if-missing + offer. One wiring, both surfaces.
+- Q: (jira-specific) The slash commands run `reconcile.sh` via the agent's Bash
+  tool, which has **no controlling TTY** — so when does the y/N self-heal (US3)
+  actually fire? → A: **Real controlling TTY only (Linear parity).** The consent
+  offer fires only when an operator runs `reconcile.sh` / `--dry-run` **directly in
+  a terminal** (the `/dev/tty` check, with `HOOKCHECK_*`-style test seams). The
+  slash-command and hook-fired paths have no TTY → **warn-only**, with the
+  `/speckit-jira-install` remediation as the fix. This keeps US3 honestly testable
+  and matches FR-009's "no TTY → warn-only, mutate nothing".
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -179,11 +187,14 @@ Non-interactive + hooks missing → no prompt, no mutation, just the warning.
   `.specify/extensions.yml`, make **no Jira writes**, and add no new dependency. A
   malformed/unreadable file degrades to "could not verify" (informational), never a
   halt; an absent file is `not_installed` (no nag).
-- **FR-009**: On detecting missing hooks in an **interactive** session, the bridge
-  MUST OFFER to re-register them in place (explicit operator y/N consent, default
-  No), reusing feature 011's idempotent `install::register_after_hooks`; a
-  **non-interactive** run (no TTY / CI / hook-fired) MUST be warn-only and mutate
-  nothing.
+- **FR-009**: On detecting missing hooks in an **interactive** session — defined as
+  a **real controlling TTY** (`/dev/tty`), i.e. an operator running `reconcile.sh`
+  directly in a terminal — the bridge MUST OFFER to re-register them in place
+  (explicit operator y/N consent, default No), reusing feature 011's idempotent
+  `install::register_after_hooks`. A **non-interactive** run (no controlling TTY —
+  including the slash-command path run via the agent's Bash tool, CI, and
+  hook-fired reconciles) MUST be warn-only and mutate nothing; its remediation is
+  `/speckit-jira-install`.
 - **FR-010**: On consent, the repair re-registers **all** missing `after_*` hooks
   at once (a single y/N, not one prompt per hook), preserving any `enabled: false`.
 - **FR-011**: The warning MUST fire at most once per reconcile run (latched/deduped
@@ -232,9 +243,12 @@ Non-interactive + hooks missing → no prompt, no mutation, just the warning.
 - **`speckit.jira.status` = `reconcile --dry-run`** (jira has no `src/status.sh`),
   so one per-run check wired into `reconcile::main` covers both surfaces, branching
   on dry-run for the status report line vs the push warning.
-- **Interactivity is detectable** via a TTY check (`/dev/tty`), with test overrides
-  (mirroring Linear's `HOOKCHECK_TTY`/`HOOKCHECK_FORCE_INTERACTIVE` seams) so the
-  consent path is unit-testable offline.
+- **Interactivity is detectable** via a controlling-TTY check (`/dev/tty`), with
+  test overrides (mirroring Linear's `HOOKCHECK_TTY`/`HOOKCHECK_FORCE_INTERACTIVE`
+  seams) so the consent path is unit-testable offline. The slash commands run
+  `reconcile.sh` via the agent's Bash tool (no controlling TTY), so the y/N
+  self-heal fires only for an operator running `reconcile.sh` **directly in a
+  terminal**; the slash/hook path is warn-only (remediation `/speckit-jira-install`).
 - **The detection/heal module is jira-aware but engine-neutral-safe** — it reads
   `.specify/extensions.yml` (config-side), knows the `jira` extension id +
   `speckit.jira.push` command, and is NOT part of the audited reconcile engine
