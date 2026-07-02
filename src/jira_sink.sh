@@ -44,6 +44,11 @@
 # (which already sets the shell options) and by the contract bats suites. A
 # nested `set -e` would change the caller's option state on source.
 
+# Idempotent include-guard (012) — safe to source twice (the consented
+# self-heal sources install.sh, which re-sources shared libs transitively).
+[[ -n "${_JIRA_SINK_SH_LOADED:-}" ]] && return 0
+readonly _JIRA_SINK_SH_LOADED=1
+
 # shellcheck source=./jira_rest.sh disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/jira_rest.sh"
 # shellcheck source=./adf.sh disable=SC1091

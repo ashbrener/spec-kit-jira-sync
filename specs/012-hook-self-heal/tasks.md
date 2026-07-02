@@ -36,25 +36,25 @@ which re-sources `config.sh` + `jira_rest.sh` (both carry `readonly`) after
 `reconcile.sh` already loaded `config.sh`/`summary.sh` → a `readonly` double-declare
 crash without include-guards. This phase MUST complete before Phase 5 (US3).
 
-- [ ] T001 [P] Write `tests/unit/include_guards.bats` (RED): sourcing each shared
+- [X] T001 [P] Write `tests/unit/include_guards.bats` (RED): sourcing each shared
   lib twice in one shell is a clean no-op (no "readonly: already declared" / no
   non-zero rc); plus an assertion that `source src/config.sh; source
   src/summary.sh; source src/install.sh` (install.sh AFTER reconcile's libs)
   succeeds — the exact heal-time source order.
-- [ ] T002 [P] Add the include-guard idiom
+- [X] T002 [P] Add the include-guard idiom
   (`[[ -n "${_CONFIG_SH_LOADED:-}" ]] && return 0; readonly _CONFIG_SH_LOADED=1`,
   right after the shebang/`set` line, before the first `readonly`) to `src/config.sh`.
-- [ ] T003 [P] Add the include-guard (`_JIRA_REST_SH_LOADED`) to `src/jira_rest.sh`.
-- [ ] T004 [P] Add the include-guard (`_INSTALL_SH_LOADED`) to `src/install.sh`
+- [X] T003 [P] Add the include-guard (`_JIRA_REST_SH_LOADED`) to `src/jira_rest.sh`.
+- [X] T004 [P] Add the include-guard (`_INSTALL_SH_LOADED`) to `src/install.sh`
   (after its `set` line, before its `source` block + first `readonly`).
-- [ ] T005 [P] Add the include-guard uniformly to the remaining shared libs:
+- [X] T005 [P] Add the include-guard uniformly to the remaining shared libs:
   `_SUMMARY_SH_LOADED` (`src/summary.sh`), `_GIT_HELPERS_SH_LOADED`
   (`src/git_helpers.sh`), `_PARSER_SH_LOADED` (`src/parser.sh`),
   `_WORKSTATE_SH_LOADED` (`src/workstate.sh`), `_JIRA_SINK_SH_LOADED`
   (`src/jira_sink.sh`), `_PRIVACY_GUARD_SH_LOADED` (`src/privacy_guard.sh`),
   `_ADF_SH_LOADED` (`src/adf.sh`). Do NOT touch `src/reconcile.sh` (entrypoint —
   nothing sources it).
-- [ ] T006 Run `tests/unit/include_guards.bats` (GREEN) + `shellcheck
+- [X] T006 Run `tests/unit/include_guards.bats` (GREEN) + `shellcheck
   --severity=style src/*.sh` clean; confirm the full existing bats suite still
   passes (guards are transparent to single-source callers).
 

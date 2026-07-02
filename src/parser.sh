@@ -32,6 +32,11 @@
 # module (Principle VIII Rule 1: observable failure surfaces stay at
 # the entry point, not in every library).
 
+# Idempotent include-guard (012) — safe to source twice (the consented
+# self-heal sources install.sh, which re-sources shared libs).
+[[ -n "${_PARSER_SH_LOADED:-}" ]] && return 0
+readonly _PARSER_SH_LOADED=1
+
 # ---------------------------------------------------------------------------
 # parser::feature_number <spec_dir>
 #

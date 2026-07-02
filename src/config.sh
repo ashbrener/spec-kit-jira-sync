@@ -58,6 +58,11 @@
 # re-reading the file.
 # ---------------------------------------------------------------------------
 
+# Idempotent include-guard (012) — safe to source twice (the consented
+# self-heal sources install.sh, which re-sources this lib).
+[[ -n "${_CONFIG_SH_LOADED:-}" ]] && return 0
+readonly _CONFIG_SH_LOADED=1
+
 declare -gA CONFIG_VALUES=()
 declare -g CONFIG_LOADED_PATH=""
 

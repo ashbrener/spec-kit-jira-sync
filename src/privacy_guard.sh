@@ -33,6 +33,11 @@
 # the bats suites. It depends on nothing but `git` + `grep`.
 # =============================================================================
 
+# Idempotent include-guard (012) — safe to source twice (the consented
+# self-heal sources install.sh, which re-sources shared libs).
+[[ -n "${_PRIVACY_GUARD_SH_LOADED:-}" ]] && return 0
+readonly _PRIVACY_GUARD_SH_LOADED=1
+
 # -----------------------------------------------------------------------------
 # privacy_guard::assert_git
 #   rc 0 iff the cwd is inside a git work-tree (an enumerable tracked tree),
