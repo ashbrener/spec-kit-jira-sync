@@ -38,17 +38,32 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **011-hook-auto-registration** (active) — make sk-jira an AUTOMATIC mirror
-  (implement Principle VII, which the bridge never built — it registers ZERO hooks,
-  so the board only syncs on a manual `/speckit-jira-push`). Declare the six after_*
-  hooks in `extension.yml provides.hooks` → `speckit.jira.push` (optional:false; CLI
-  registers on add) + an idempotent install-side `install::register_after_hooks`
-  (mirrors the Linear sibling; honours enabled:false; dogfood-gated `condition`).
-  Non-blocking (structural — the skill fires the hook AFTER the command's work);
-  harden the push body so a no-creds auto-fire degrades to a clean warning. Docs flip
-  (auto-sync first). Install/config-side — engine untouched (003 green); Privacy IX;
-  NO amendment (implements VII; fixes the stale "no hooks" wording). Foundation for
-  012 (the Linear spec-014 hook self-heal port). Spec+clarify+plan done.
+- **012-hook-self-heal** (active) — the second half of the auto-mirror story
+  (011=register / 012=keep-registered): detect + repair the six after_* hooks when
+  `specify extension add jira --from <zip> --force` silently strips them. Direct
+  port of the Linear sibling's shipped spec-014. NEW `src/hookcheck.sh`
+  (`hookcheck::{classify,assess_into,warn_once,status_line,offer_selfheal,reconcile_check}`)
+  mirrors Linear verbatim; only vendor tokens change. classify present|disabled|absent
+  (only absent=missing; honours enabled:false); ONE per-run check wired into
+  `reconcile::main` branching on `DRY_RUN` (status → first-class health line; push →
+  warn-once latched) — both offer a consented self-heal. Interactivity = REAL
+  controlling TTY only (clarified): slash-command/hook-fired/CI = warn-only
+  (remediation `/speckit-jira-install`); the y/N heal reuses 011's idempotent
+  `install::register_after_hooks`. Plan flags the include-guard task: add idempotent
+  guards to the shared libs so the heal can source install.sh without readonly
+  double-declare. Sink/config-side — engine untouched (003 green; hookcheck:: +
+  reconcile::main are un-audited); NO schema/exit-code change; Privacy IX; NO
+  amendment (enforces VII/VIII). Spec+clarify+plan done.
+  Plan: `specs/012-hook-self-heal/plan.md`
+- **011-hook-auto-registration** — made sk-jira an AUTOMATIC mirror (implemented
+  Principle VII, which the bridge never built — it registered ZERO hooks). Declares
+  the six after_* hooks in `extension.yml provides.hooks` → `speckit.jira.push`
+  (optional:false; CLI registers on add) + an idempotent install-side
+  `install::register_after_hooks` (mirrors the Linear sibling; honours enabled:false;
+  dogfood-gated `condition`). Non-blocking (structural — the skill fires the hook
+  AFTER the command's work); hardened push body so a no-creds auto-fire degrades to a
+  clean warning. Docs flip (auto-sync first). Engine untouched (003 green); Privacy
+  IX; NO amendment. Merged to main (PR #26). Foundation for 012.
   Plan: `specs/011-hook-auto-registration/plan.md`
 - **010-lifecycle-subtask-cascade** — board-correctness bug fix (dogfound;
   same two bugs as the Linear sibling). (1) Merging a spec strands its phase

@@ -30,6 +30,11 @@
 # calling shell (Principle VIII Rule 1). Entry-point scripts own their own
 # shell options before sourcing this module.
 
+# Idempotent include-guard (012) — safe to source twice (the consented
+# self-heal sources install.sh, which re-sources shared libs).
+[[ -n "${_WORKSTATE_SH_LOADED:-}" ]] && return 0
+readonly _WORKSTATE_SH_LOADED=1
+
 # Resolve this module's own directory so we can source siblings regardless of
 # the caller's CWD (agent worktrees reset CWD between calls).
 _WORKSTATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

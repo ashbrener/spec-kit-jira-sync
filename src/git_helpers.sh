@@ -30,6 +30,11 @@
 
 set -euo pipefail
 
+# Idempotent include-guard (012) — safe to source twice (the consented
+# self-heal sources install.sh, which re-sources shared libs).
+[[ -n "${_GIT_HELPERS_SH_LOADED:-}" ]] && return 0
+readonly _GIT_HELPERS_SH_LOADED=1
+
 # ---------------------------------------------------------------------------
 # Cache the absolute path to `git` at module-source time. The test harness in
 # tests/unit/git_helpers.bats forces the git-only fallback path of pr_state by

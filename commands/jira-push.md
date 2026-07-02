@@ -70,3 +70,16 @@ clean exit-2/3 warning instead of a broken `&&` chain.
 This is the Jira-REST reconcile engine — the Atlassian MCP is not involved (the
 sync is direct REST by design). The filesystem is the source of truth; Jira is a
 read-only mirror.
+
+## Auto-sync hook health (self-healing)
+
+The reconcile now self-reports the health of its own six `after_*` auto-sync
+hooks (feature 012). Reinstalling with
+`specify extension add jira --from <zip> --force` **silently strips** those
+hooks from `.specify/extensions.yml`, so auto-sync stops firing. When hooks are
+missing, this push emits **one** named WARNING (`… auto-sync hook(s) not
+registered … run /speckit-jira-install to restore auto-sync`); at a real
+terminal it also offers a single `y/N` to re-register them all at once. The
+restore path is **`/speckit-jira-install`** (or accept the interactive offer).
+The check is non-blocking and never mutates Jira — relay the warning as-is
+without alarm.

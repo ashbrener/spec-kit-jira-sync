@@ -24,6 +24,11 @@
 # Safe under `set -euo pipefail`. shellcheck-clean (--severity=style).
 # =============================================================================
 
+# Idempotent include-guard (012) — safe to source twice (the consented
+# self-heal sources install.sh, which re-sources this lib).
+[[ -n "${_JIRA_REST_SH_LOADED:-}" ]] && return 0
+readonly _JIRA_REST_SH_LOADED=1
+
 # ----------------------------------------------------------------------------
 # Return codes (callers branch on these).
 # ----------------------------------------------------------------------------

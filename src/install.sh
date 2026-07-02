@@ -28,6 +28,13 @@
 # mutate the caller's shell options. shellcheck-clean (--severity=style).
 # =============================================================================
 
+# Idempotent include-guard (012) — safe to source twice. The consented
+# self-heal (hookcheck::offer_selfheal) sources this file after reconcile.sh
+# already loaded config.sh/summary.sh; the guard here (before the source block
+# below) makes that re-entry a clean no-op.
+[[ -n "${_INSTALL_SH_LOADED:-}" ]] && return 0
+readonly _INSTALL_SH_LOADED=1
+
 INSTALL_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=./jira_rest.sh disable=SC1091

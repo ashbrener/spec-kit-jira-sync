@@ -24,6 +24,11 @@
 # Placeholders only — no real data appears here (Principle IX).
 # =============================================================================
 
+# Idempotent include-guard (012) — safe to source twice (the consented
+# self-heal sources install.sh, which re-sources shared libs transitively).
+[[ -n "${_ADF_SH_LOADED:-}" ]] && return 0
+readonly _ADF_SH_LOADED=1
+
 # ----------------------------------------------------------------------------
 # adf::_inline <text>
 #
