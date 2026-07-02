@@ -210,7 +210,7 @@ the file); `n`/empty → untouched; non-interactive → warn-only, no mutation.
   `hookcheck.sh`), `yamllint -d relaxed` (extension.yml + ci.yml), `npx
   markdownlint-cli2 "specs/**/*.md" "*.md"`, and the FULL `bats --recursive
   tests/unit` (BSD-awk-safe; macOS + Linux parity). All green.
-- [ ] T023 Open a PR into `main` from `012-hook-self-heal` (do NOT merge — the
+- [X] T023 Open a PR into `main` from `012-hook-self-heal` (do NOT merge — the
   operator merges). Body: the strip→detect→heal story, cross-sink parity with
   Linear spec-014, the guarantees (non-blocking, consent-only mutation, no Jira
   write, status exit-0), and the neutrality/privacy gates green.
