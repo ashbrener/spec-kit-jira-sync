@@ -3,12 +3,21 @@
 All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-> **In active development — not yet released.** This is a pre-release project; no
-> versions are tagged yet and the API may change. See the
-> [README](README.md) for current status and the
+> **In active development.** This is a pre-1.0 project — releases are tagged
+> from `v0.2.0` onward, and the API may still change between minor versions.
+> See the [README](README.md) for current status and the
 > [contribution guide](CONTRIBUTING.md) for local CI parity.
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-08-12
+
+The automatic mirror — and a bridge that notices when it stops mirroring.
+Feature 011 makes spec-kit-jira auto-sync on every `/speckit-*` lifecycle
+command (Principle VII, finally implemented); feature 012 makes it self-report,
+and offer to repair, when a `--force` reinstall silently strips those hooks.
+Install/config-side only: the vendor-neutral reconcile engine is untouched, no
+schema or exit-code change, and no constitution amendment was required.
 
 ### Added
 
@@ -322,7 +331,9 @@ slate instead, an operator may prune the old `task-phase:*` Subtasks (or run
 - Parser phase normalization corrected in the producer half.
 - POST idempotency and feature-pin handling hardened in the foundational sink.
 
-[Unreleased]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ashbrener/spec-kit-jira-sync/releases/tag/v0.2.0

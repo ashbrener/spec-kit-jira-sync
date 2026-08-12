@@ -48,12 +48,14 @@ extension:
   # Human-readable name surfaced in `specify extension list` and the catalog.
   name: "spec-kit-jira-sync"
 
-  # PEP 440 version. v0.4.0 adds feature 006 (consumer-side privacy guard), 008
-  # (install + seed ceremony), 009 (human-readable title source ladder), and 010
-  # (lifecycle→subtask cascade + flexible phase headers) on top of the v0.3.0
-  # baseline (001 core bridge + 002 mapping + 003 engine + 004 re-mode + 005 ADR
-  # + 007 attribution).
-  version: "0.4.0"
+  # PEP 440 version. v0.5.0 adds feature 011 (auto-registered `after_*` hooks —
+  # the automatic mirror, implementing Principle VII) and feature 012 (hook
+  # self-healing — detect + consented repair of stripped auto-sync hooks) on top
+  # of the v0.4.0 baseline (006 privacy guard + 008 install/seed ceremony + 009
+  # title source ladder + 010 lifecycle→subtask cascade, over the v0.3.0 core:
+  # 001 bridge + 002 mapping + 003 engine + 004 re-mode + 005 ADR + 007
+  # attribution).
+  version: "0.5.0"
 
   # One-line description — matches the catalog entry + README cover.
   description: "An idempotent, drift-aware, fail-closed reconcile engine that mirrors spec-kit specs into Jira (Epic per repo, Story per spec, Subtask per phase)."
