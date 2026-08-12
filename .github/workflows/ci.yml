@@ -297,6 +297,28 @@ jobs:
           brew list jq >/dev/null 2>&1 || brew install jq
           jq --version
 
+      # ----- Install PyYAML (test-only dependency, both OSes) ----------------
+      # tests/unit/manifest_hooks.bats validates the committed extension.yml
+      # with a REAL YAML parser rather than the bridge's own awk reader — a
+      # manifest-contract test that re-used the implementation's parser would
+      # be circular. PyYAML is therefore a *test* dependency; the runtime
+      # itself still depends only on bash/awk/grep/jq (no new runtime dep).
+      #
+      # ubuntu-latest's system python3 happens to ship PyYAML, but the
+      # macos-latest image's does not — which made those four tests fail on
+      # macOS only. Install it explicitly on both so the matrix is
+      # deterministic instead of relying on runner-image contents.
+      - name: Install PyYAML (test dependency)
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null && { echo "PyYAML already present"; exit 0; }
+          # --break-system-packages is required on PEP 668 "externally managed"
+          # interpreters (newer runner images); harmless where unsupported, so
+          # fall back to a plain --user install.
+          python3 -m pip install --user --break-system-packages pyyaml \
+            || python3 -m pip install --user pyyaml
+          python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
+
       # ----- Install bats-core (cached, both OSes) ---------------------------
       # bats-core is a small set of bash scripts, so a tarball install + cache
       # is faster than a package install and avoids version drift between
