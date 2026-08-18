@@ -55,20 +55,20 @@ are one value, so the updater resolves to this bridge.
 **Independent test**: manifest `extension.id` == the catalog id we publish
 (`jira-sync`), and every command sits under `speckit.jira-sync.`.
 
-- [ ] T004 [US1] Update `extension.yml`: `id: "jira"` → `"jira-sync"`; the four
+- [X] T004 [US1] Update `extension.yml`: `id: "jira"` → `"jira-sync"`; the four
   command names → `speckit.jira-sync.{push,status,install,seed}`; all six
   `provides.hooks` `command:` refs → `speckit.jira-sync.push`; the four `file:`
   paths → the renamed files (T005); and rewrite the header comment that documents
   the id/catalog mismatch — it describes the bug this feature removes.
-- [ ] T005 [US1] `git mv` the manifest command files (preserve history):
+- [X] T005 [US1] `git mv` the manifest command files (preserve history):
   `commands/jira-{push,status,install,seed}.md` →
   `commands/jira-sync-{push,status,install,seed}.md`; update each file's
   frontmatter `name:` and every internal command reference.
-- [ ] T006 [P] [US1] `git mv` the dev-layout twins:
+- [X] T006 [P] [US1] `git mv` the dev-layout twins:
   `.claude/commands/speckit-jira-{push,status,install,seed}.md` →
   `.claude/commands/speckit-jira-sync-{push,status,install,seed}.md`; update
   frontmatter, internal references, and the reconcile run-line in each.
-- [ ] T007 [US1] Update `tests/unit/manifest_hooks.bats` for the new command names
+- [X] T007 [US1] Update `tests/unit/manifest_hooks.bats` for the new command names
   (keep the PyYAML parse — a manifest-contract test must not reuse the bridge's own
   reader). T001's manifest assertions now go GREEN.
 

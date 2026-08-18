@@ -1,5 +1,5 @@
 ---
-name: speckit.jira.status
+name: speckit.jira-sync.status
 description: Read-only sync status / drift preview — disk vs Jira; runs reconcile in --dry-run and never mutates
 arguments:
   - name: all
@@ -10,7 +10,7 @@ arguments:
     optional: true
 ---
 
-# `/speckit.jira.status`
+# `/speckit.jira-sync.status`
 
 ## Summary
 

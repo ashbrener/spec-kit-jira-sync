@@ -155,8 +155,8 @@ _private_patterns() {
   cd "$REPO_ROOT"
   local f
   for f in \
-    commands/jira-install.md commands/jira-seed.md \
-    .claude/commands/speckit-jira-install.md .claude/commands/speckit-jira-seed.md \
+    commands/jira-sync-install.md commands/jira-sync-seed.md \
+    .claude/commands/speckit-jira-sync-install.md .claude/commands/speckit-jira-sync-seed.md \
     src/install.sh src/seed.sh; do
     git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || {
       echo "untracked (the privacy guard would not scan it): $f" >&2
@@ -169,9 +169,9 @@ _private_patterns() {
   local site_re hits
   site_re="$(jira_sink::privacy_shapes | awk -F'\t' '$2=="site"{print $3}')"
   hits="$(grep -lIiE -- "$site_re" \
-            commands/jira-install.md commands/jira-seed.md \
-            .claude/commands/speckit-jira-install.md \
-            .claude/commands/speckit-jira-seed.md \
+            commands/jira-sync-install.md commands/jira-sync-seed.md \
+            .claude/commands/speckit-jira-sync-install.md \
+            .claude/commands/speckit-jira-sync-seed.md \
             src/install.sh src/seed.sh 2>/dev/null || true)"
   if [ -n "$hits" ]; then
     echo "a non-example .atlassian.net host leaked into a committed 008 file:" >&2

@@ -5,7 +5,7 @@
 #
 # The committed extension.yml manifest is the CLI-registered source of truth for
 # the automatic mirror (Principle VII). It MUST declare all six `after_*` hooks,
-# each firing `speckit.jira.push` with `optional: false`, `enabled: true`, and
+# each firing `speckit.jira-sync.push` with `optional: false`, `enabled: true`, and
 # NO `before_*` hook (the bridge never pre-empts a lifecycle step).
 #
 # Pure-filesystem; parses the real YAML (PyYAML) — no Jira, no curl-shim.
@@ -35,12 +35,12 @@ for name, entries in hooks.items():
 PY
 }
 
-@test "C-1: extension.yml declares all six after_* hooks → speckit.jira.push" {
+@test "C-1: extension.yml declares all six after_* hooks → speckit.jira-sync.push" {
   run _dump_hooks
   [ "$status" -eq 0 ]
   local hook
   for hook in after_specify after_clarify after_plan after_tasks after_implement after_analyze; do
-    echo "$output" | grep -qE "^${hook}	speckit\.jira\.push	" || {
+    echo "$output" | grep -qE "^${hook}	speckit\.jira-sync\.push	" || {
       echo "missing/incorrect hook entry for ${hook}:" >&2
       echo "$output" >&2
       return 1
@@ -52,7 +52,7 @@ PY
   run _dump_hooks
   [ "$status" -eq 0 ]
   # No line may declare the hook command as optional: True.
-  if echo "$output" | grep -qE '	speckit\.jira\.push	True	'; then
+  if echo "$output" | grep -qE '	speckit\.jira-sync\.push	True	'; then
     echo "a hook is optional: true (must be false per Principle VII):" >&2
     echo "$output" >&2
     return 1
@@ -88,7 +88,7 @@ PY
   fi
 }
 
-@test "C-1: extension.id stays jira" {
+@test "C-1: extension.id stays jira-sync (feature 013 — one name, everywhere)" {
   run python3 - "$MANIFEST" <<'PY'
 import sys, yaml
 with open(sys.argv[1]) as f:
@@ -96,5 +96,5 @@ with open(sys.argv[1]) as f:
 print((doc.get("extension") or {}).get("id"))
 PY
   [ "$status" -eq 0 ]
-  [ "$output" = "jira" ]
+  [ "$output" = "jira-sync" ]
 }

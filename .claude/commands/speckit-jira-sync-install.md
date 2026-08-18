@@ -5,7 +5,7 @@ allowed-tools: Bash
 ---
 
 Resolve this **spec-kit-jira-sync** consumer repo's Jira binding and write the
-gitignored `.specify/extensions/jira/jira-config.yml` yourself — ending the
+gitignored `.specify/extensions/jira-sync/jira-config.yml` yourself — ending the
 manual id-hunting. Run the resolver via the Bash tool and report what was
 resolved; do NOT ask the user to run anything in their terminal.
 
@@ -45,7 +45,7 @@ After it runs, report back concisely:
   the project key isn't visible to the credential).
 
 On a successful install, unless the user passed `--no-seed`, **offer to run
-`/speckit-jira-seed`** now (they are almost always run together — seed confirms
+`/speckit-jira-sync-seed`** now (they are almost always run together — seed confirms
 the lifecycle mapping is reachable before the first reconcile). `--with-seed`
 runs it without asking.
 
