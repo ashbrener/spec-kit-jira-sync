@@ -12,7 +12,7 @@
 # Pure-FILESYSTEM — no curl-shim, no Jira. The registrar reads the manifest's
 # command name + writes YAML; it never touches the vendor-neutral reconcile
 # engine (003 neutral). Placeholder-only (Privacy IX): the dogfood `condition`
-# literal `${SPECKIT_JIRA_DOGFOOD_SAFE:-false}` is a shell expansion, not a
+# literal `${SPECKIT_JIRA_SYNC_DOGFOOD_SAFE:-false}` is a shell expansion, not a
 # coordinate.
 #
 # C-7 drives BOTH dogfood branches by toggling the NON-HALTING dogfood detector
@@ -59,9 +59,9 @@ _seed_extensions_yml() {
       echo "missing hook section ${hook}" >&2; cat "$EXT_YML" >&2; return 1
     }
   done
-  # All six carry an `extension: jira` entry with the push command + optional:false.
-  [ "$(grep -cE '^  - extension: jira$' "$EXT_YML")" -eq 6 ]
-  [ "$(grep -cE '^    command: speckit\.jira\.push$' "$EXT_YML")" -eq 6 ]
+  # All six carry an `extension: jira-sync` entry with the push command + optional:false.
+  [ "$(grep -cE '^  - extension: jira-sync$' "$EXT_YML")" -eq 6 ]
+  [ "$(grep -cE '^    command: speckit\.jira-sync\.push$' "$EXT_YML")" -eq 6 ]
   [ "$(grep -cE '^    optional: false$' "$EXT_YML")" -eq 6 ]
 }
 
@@ -79,13 +79,13 @@ _seed_extensions_yml() {
 @test "C-4: a hook pre-set enabled: false is preserved (never re-enabled) across re-run" {
   _seed_extensions_yml <<'YAML'
 installed:
-- jira
+- jira-sync
 settings:
   auto_execute_hooks: true
 hooks:
   after_specify:
-  - extension: jira
-    command: speckit.jira.push
+  - extension: jira-sync
+    command: speckit.jira-sync.push
     enabled: false
     optional: false
     prompt: Reconciling spec.md to Jira...
@@ -97,7 +97,7 @@ YAML
   # The operator-disabled after_specify entry stays disabled.
   grep -qE '^    enabled: false$' "$EXT_YML"
   # And the others were registered (enabled: true).
-  [ "$(grep -cE '^  - extension: jira$' "$EXT_YML")" -eq 6 ]
+  [ "$(grep -cE '^  - extension: jira-sync$' "$EXT_YML")" -eq 6 ]
   # after_specify is still present exactly once (no duplicate).
   [ "$(grep -cE '^  after_specify:' "$EXT_YML")" -eq 1 ]
   # The single disabled entry was not flipped to true (one enabled:false remains).
@@ -123,7 +123,7 @@ YAML
   grep -qE '^  - extension: speckit-git$' "$EXT_YML"
   grep -qE '^    command: speckit\.git\.commit$' "$EXT_YML"
   # A jira entry is added under after_specify alongside it.
-  grep -qE '^  - extension: jira$' "$EXT_YML"
+  grep -qE '^  - extension: jira-sync$' "$EXT_YML"
   # after_specify still appears once; both extensions live under it.
   [ "$(grep -cE '^  after_specify:' "$EXT_YML")" -eq 1 ]
   # The speckit-git command appears exactly once (not duplicated/churned).
@@ -135,10 +135,10 @@ YAML
   # must surface an informational message and return WITHOUT corrupting it.
   _seed_extensions_yml <<'YAML'
 installed:
-- jira
+- jira-sync
 hooks:
   after_specify:
-  - extension: jira
+  - extension: jira-sync
 YAML
   local before_sum
   before_sum="$(cksum "$EXT_YML")"
@@ -158,9 +158,9 @@ YAML
 
 @test "C-7: dogfood target ⇒ condition is the SAFE gate; normal target ⇒ condition: null" {
   # Dogfood ON (the non-halting detector returns 0): the rendered block carries
-  # the literal ${SPECKIT_JIRA_DOGFOOD_SAFE:-false} condition.
+  # the literal ${SPECKIT_JIRA_SYNC_DOGFOOD_SAFE:-false} condition.
   INSTALL_DOGFOOD_OVERRIDE=1 install::register_after_hooks
-  grep -qE '^    condition: "\$\{SPECKIT_JIRA_DOGFOOD_SAFE:-false\}"$' "$EXT_YML" || {
+  grep -qE '^    condition: "\$\{SPECKIT_JIRA_SYNC_DOGFOOD_SAFE:-false\}"$' "$EXT_YML" || {
     echo "dogfood condition gate not rendered:" >&2; cat "$EXT_YML" >&2; return 1
   }
   # No bare `condition: null` under a dogfood install.
@@ -170,14 +170,14 @@ YAML
   rm -rf "$CONSUMER/.specify"
   INSTALL_DOGFOOD_OVERRIDE=0 install::register_after_hooks
   grep -qE '^    condition: null$' "$EXT_YML"
-  ! grep -qE 'SPECKIT_JIRA_DOGFOOD_SAFE' "$EXT_YML"
+  ! grep -qE 'SPECKIT_JIRA_SYNC_DOGFOOD_SAFE' "$EXT_YML"
 }
 
 # --------------------------------------------------------------------------
 # C-8 — the hardened push one-liner runs reconcile WITH and WITHOUT .env
 # (a missing .env must not break the &&-chain so an auto-fired hook degrades
 # to reconcile's clean exit rather than a hard error). Extracts the literal
-# bash one-liner from commands/jira-push.md and runs it against a stub repo
+# bash one-liner from commands/jira-sync-push.md and runs it against a stub repo
 # whose src/reconcile.sh records that it ran.
 # --------------------------------------------------------------------------
 
@@ -205,7 +205,7 @@ SH
   _make_stub_repo "$repo"
   printf 'JIRA_BASE_URL=https://example.atlassian.net\n' >"$repo/.env"
   local runline
-  runline="$(_extract_runline "$REPO_ROOT/commands/jira-push.md")"
+  runline="$(_extract_runline "$REPO_ROOT/commands/jira-sync-push.md")"
   [ -n "$runline" ]
   ( cd "$repo" && bash -c "$runline" )
   [ -f "$repo/RECONCILE_RAN" ]
@@ -216,7 +216,7 @@ SH
   _make_stub_repo "$repo"
   [ ! -f "$repo/.env" ]
   local runline
-  runline="$(_extract_runline "$REPO_ROOT/commands/jira-push.md")"
+  runline="$(_extract_runline "$REPO_ROOT/commands/jira-sync-push.md")"
   [ -n "$runline" ]
   ( cd "$repo" && bash -c "$runline" )
   [ -f "$repo/RECONCILE_RAN" ]

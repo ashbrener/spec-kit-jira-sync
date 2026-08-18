@@ -83,25 +83,25 @@ from the same constant, so they can never drift.
 
 **Independent test**: register into a temp file, classify it back as `present`.
 
-- [ ] T008 Write the C-7 lockstep test in `tests/unit/extension_identity.bats`
+- [X] T008 Write the C-7 lockstep test in `tests/unit/extension_identity.bats`
   (RED): call `install::register_after_hooks` against a temp
   `.specify/extensions.yml`, then `hookcheck::classify` each hook and assert
   `present` — proving writer and reader agree without comparing literals.
-- [ ] T009 Update `src/install.sh` (GREEN): source `identity.sh`;
+- [X] T009 Update `src/install.sh` (GREEN): source `identity.sh`;
   `_render_hook_block` emits `- extension: ${SPECKIT_EXT_ID}` and
   `command: ${SPECKIT_EXT_PUSH_COMMAND}` (C-2 — no literal);
   `_hook_already_registered` matches on `${SPECKIT_EXT_ID}` (C-3 — no literal);
   `.specify/extensions/jira` paths → `${SPECKIT_EXT_INSTALL_DIR}`; rename the
   dogfood env var `SPECKIT_JIRA_DOGFOOD_SAFE` → `SPECKIT_JIRA_SYNC_DOGFOOD_SAFE`
   (keep the SC2016 disable on that printf).
-- [ ] T010 Update `src/hookcheck.sh` (GREEN): source `identity.sh` **directly**
+- [X] T010 Update `src/hookcheck.sh` (GREEN): source `identity.sh` **directly**
   (C-1 — never via `install.sh`, which it sources only lazily on consent);
   `classify` passes the id into awk with a **single-line**
   `awk -v want_ext="$SPECKIT_EXT_ID"` (C-4 — BSD-safe, no literal, no multi-line
   `-v`); remediation strings → `/speckit-jira-sync-install`; header comments updated.
-- [ ] T011 [P] Update `tests/helpers/hookcheck_fixtures.bash` for the new token
+- [X] T011 [P] Update `tests/helpers/hookcheck_fixtures.bash` for the new token
   (`extension: jira-sync`) and command (`speckit.jira-sync.push`).
-- [ ] T012 Update `tests/unit/{hook_registration,hookcheck,hookcheck_selfheal,reconcile_hookcheck}.bats`
+- [X] T012 Update `tests/unit/{hook_registration,hookcheck,hookcheck_selfheal,reconcile_hookcheck}.bats`
   for the new token/commands; all GREEN.
 
 **Checkpoint**: identity divergence is now a build failure, not a latent bug.

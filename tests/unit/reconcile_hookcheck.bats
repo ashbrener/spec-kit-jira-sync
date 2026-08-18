@@ -52,7 +52,7 @@ EOF
         cat '${OUT}'"
     [[ "$output" == *"SUMMARY:warned:"* ]]
     [[ "$output" == *"after_tasks"* ]]
-    [[ "$output" == *"/speckit-jira-install"* ]]
+    [[ "$output" == *"/speckit-jira-sync-install"* ]]
     [[ "$output" != *"SUMMARY:error"* ]]
     [[ "$output" == *"EXIT=0"* ]]
 }

@@ -46,7 +46,7 @@ EOF
         cat '${OUT}'"
     [[ "$output" == *"SUMMARY:warned:"* ]]
     [[ "$output" == *"after_tasks"* ]]
-    [[ "$output" == *"/speckit-jira-install"* ]]
+    [[ "$output" == *"/speckit-jira-sync-install"* ]]
 }
 
 @test "warn_once: latched — second call in the same run is silent" {

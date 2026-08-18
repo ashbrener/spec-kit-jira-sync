@@ -4,11 +4,11 @@
 # src/hookcheck.sh — auto-sync hook self-healing (spec 012-hook-self-heal).
 #
 # The only sanctioned community install/update path
-# (`specify extension add jira --from <zip> --force`) silently strips the
+# (`specify extension add jira-sync --from <zip> --force`) silently strips the
 # bridge's six `after_*` auto-sync hooks from the consumer's
 # `.specify/extensions.yml`. Auto-sync then stops firing and the Jira board
 # drifts unnoticed. This module makes the bridge SELF-REPORT its own hook
-# health on every `speckit.jira.push` (reconcile) and `speckit.jira.status`
+# health on every `speckit.jira-sync.push` (reconcile) and `speckit.jira-sync.status`
 # (reconcile --dry-run).
 #
 # Public surface (namespaced `hookcheck::*`):
@@ -62,6 +62,12 @@ readonly _HOOKCHECK_SH_LOADED=1
 
 HOOKCHECK_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The extension identity (013). Sourced DIRECTLY — never via install.sh, which
+# this module only sources lazily on an accepted self-heal. The detector must
+# know which token to match on the WARN path, where install.sh is not loaded.
+# shellcheck source=./identity.sh disable=SC1091
+source "${HOOKCHECK_SCRIPT_DIR}/identity.sh"
+
 # The six after_* hooks. MIRRORS install.sh INSTALL_AFTER_HOOK_NAMES; the
 # tests/unit/hookcheck.bats pin test fails if the two ever diverge (FR-007/R6).
 readonly -a HOOKCHECK_AFTER_HOOK_NAMES=(
@@ -84,11 +90,15 @@ declare -ga HOOKCHECK_DISABLED=()
 # -----------------------------------------------------------------------------
 # hookcheck::classify <hook> [<yml>]
 #
-# Classify one after_* hook for the `jira` extension. The awk walk mirrors
-# install::_hook_already_registered's block grammar (enter on `^  <hook>:`,
-# leave on the next 2-space `^  <key>:` line), tracking each `- extension:`
-# entry's name + enabled state so a sibling git entry's `enabled: false` never
-# bleeds onto the jira verdict.
+# Classify one after_* hook for THIS extension (${SPECKIT_EXT_ID}, from
+# src/identity.sh — the same constant install::_render_hook_block writes). The
+# awk walk mirrors install::_hook_already_registered's block grammar (enter on
+# `^  <hook>:`, leave on the next 2-space `^  <key>:` line), tracking each
+# `- extension:` entry's name + enabled state so a sibling git entry's
+# `enabled: false` never bleeds onto our verdict. An entry left behind by a
+# pre-0.6.0 install carries the OLD id, so it classifies `absent` — which is
+# exactly the state that surfaces the warn/status line and the consented
+# re-register (feature 013 migration).
 # -----------------------------------------------------------------------------
 hookcheck::classify() {
     local hook="$1"
@@ -97,15 +107,15 @@ hookcheck::classify() {
     [[ -e "$yml" ]] || { printf 'absent\n'; return 0; }
     [[ -r "$yml" ]] || return 2
 
-    awk -v want="$hook" '
+    awk -v want="$hook" -v want_ext="$SPECKIT_EXT_ID" '
         function finalize() {
-            if (cur_ext == "jira") {
-                have_jira = 1
-                if (cur_enabled == "false") jira_disabled = 1
+            if (cur_ext == want_ext) {
+                have_ext = 1
+                if (cur_enabled == "false") ext_disabled = 1
             }
         }
         function reset_entry() { cur_ext = ""; cur_enabled = "true" }
-        BEGIN { in_block = 0; have_jira = 0; jira_disabled = 0; reset_entry() }
+        BEGIN { in_block = 0; have_ext = 0; ext_disabled = 0; reset_entry() }
         $0 ~ ("^  " want ":[[:space:]]*$") { in_block = 1; reset_entry(); next }
         in_block && /^  [a-zA-Z_]+:[[:space:]]*$/ { finalize(); in_block = 0 }
         in_block && /^  - extension:[[:space:]]*/ {
@@ -119,8 +129,8 @@ hookcheck::classify() {
         in_block && /^[[:space:]]+enabled:[[:space:]]*true[[:space:]]*$/  { cur_enabled = "true" }
         END {
             if (in_block) finalize()
-            if (!have_jira)      { print "absent" }
-            else if (jira_disabled) { print "disabled" }
+            if (!have_ext)       { print "absent" }
+            else if (ext_disabled) { print "disabled" }
             else                 { print "present" }
         }
     ' "$yml"
@@ -189,7 +199,7 @@ hookcheck::warn_once() {
     case "$overall" in
         partial|none)
             summary::add warned \
-                "${#missing[@]} auto-sync hook(s) not registered (${missing[*]}); run /speckit-jira-install to restore auto-sync"
+                "${#missing[@]} auto-sync hook(s) not registered (${missing[*]}); run /speckit-jira-sync-install to restore auto-sync"
             _RECONCILE_HOOKS_WARNED=1
             ;;
         unverifiable)
@@ -225,10 +235,10 @@ hookcheck::status_line() {
             fi
             ;;
         partial)
-            printf 'Auto-sync hooks: partial — missing: %s — run /speckit-jira-install to restore\n' "${missing[*]}"
+            printf 'Auto-sync hooks: partial — missing: %s — run /speckit-jira-sync-install to restore\n' "${missing[*]}"
             ;;
         none)
-            printf 'Auto-sync hooks: none registered — run /speckit-jira-install to restore auto-sync\n'
+            printf 'Auto-sync hooks: none registered — run /speckit-jira-sync-install to restore auto-sync\n'
             ;;
         unverifiable)
             printf 'Auto-sync hooks: could not verify (%s unreadable or malformed)\n' "$HOOKCHECK_EXTENSIONS_YML"

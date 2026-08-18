@@ -141,3 +141,53 @@ PY
     [ -f "${REPO_ROOT}/${file}" ] || { echo "declared command file missing: ${file}" >&2; return 1; }
   done <<<"$output"
 }
+
+# --- C-7: registrar / detector lockstep --------------------------------------
+#
+# The single most important test in this file. `install::register_after_hooks`
+# WRITES the hook entries; `hookcheck::classify` READS them. Before feature 013
+# each carried its own literal and agreed only by coincidence. Here we register
+# into a throwaway consumer tree and classify the result back — proving the two
+# agree WITHOUT comparing literals, and that both derive from identity.sh.
+
+@test "C-7: the registrar writes the identity constant's token" {
+  local work="$BATS_TEST_TMPDIR/consumer-writes"
+  mkdir -p "$work"
+  run bash -c '
+    set -euo pipefail
+    cd "$2"
+    source "$1/src/install.sh"
+    install::register_after_hooks >/dev/null 2>&1
+    cat .specify/extensions.yml
+  ' _ "$REPO_ROOT" "$work"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "^  - extension: ${SPECKIT_EXT_ID}\$" <<<"$output")" -eq 6 ]
+  [ "$(grep -c "^    command: ${SPECKIT_EXT_PUSH_COMMAND}\$" <<<"$output")" -eq 6 ]
+}
+
+@test "C-7: what the registrar writes, the detector reads back as present" {
+  local work="$BATS_TEST_TMPDIR/consumer-lockstep"
+  mkdir -p "$work"
+  run bash -c '
+    set -euo pipefail
+    cd "$2"
+    source "$1/src/install.sh"
+    source "$1/src/hookcheck.sh"
+    install::register_after_hooks >/dev/null 2>&1
+    for h in after_specify after_clarify after_plan after_tasks after_implement after_analyze; do
+      printf "%s=%s\n" "$h" "$(hookcheck::classify "$h")"
+    done
+    hookcheck::assess_into
+    printf "overall=%s\n" "$HOOKCHECK_OVERALL"
+  ' _ "$REPO_ROOT" "$work"
+  [ "$status" -eq 0 ]
+  local hook
+  for hook in after_specify after_clarify after_plan after_tasks after_implement after_analyze; do
+    grep -qx "${hook}=present" <<<"$output" || {
+      echo "registrar/detector divergence for ${hook}:" >&2
+      echo "$output" >&2
+      return 1
+    }
+  done
+  grep -qx "overall=present" <<<"$output"
+}
