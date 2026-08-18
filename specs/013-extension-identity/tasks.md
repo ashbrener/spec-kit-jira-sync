@@ -30,17 +30,17 @@ caused by the operator's gitignored files and are green in CI — do not chase t
 `hookcheck.sh:102`, `config.sh:70`). Extract it once so writer and reader cannot
 diverge — this is the change that makes 012's FR-007 structural instead of lucky.
 
-- [ ] T001 Write `tests/unit/extension_identity.bats` (RED) — the C-6 pin +
+- [X] T001 Write `tests/unit/extension_identity.bats` (RED) — the C-6 pin +
   C-1 guard: `extension.yml`'s `extension.id` equals `SPECKIT_EXT_ID`; EVERY
   declared command name starts `speckit.${SPECKIT_EXT_ID}.`; the manifest declares
   exactly 4 commands and 6 `after_*` hooks; sourcing `src/identity.sh` twice in one
   shell is a clean no-op. Parse the manifest with PyYAML (as `manifest_hooks.bats`
   does — PyYAML is installed in CI).
-- [ ] T002 Create `src/identity.sh` (GREEN) — dependency-free, no I/O, no side
+- [X] T002 Create `src/identity.sh` (GREEN) — dependency-free, no I/O, no side
   effects, include-guarded `_IDENTITY_SH_LOADED`. Export
   `SPECKIT_EXT_ID="jira-sync"`, `SPECKIT_EXT_PUSH_COMMAND="speckit.jira-sync.push"`,
   `SPECKIT_EXT_INSTALL_DIR=".specify/extensions/jira-sync"`.
-- [ ] T003 `shellcheck --severity=style src/identity.sh` clean; T001 GREEN except
+- [X] T003 `shellcheck --severity=style src/identity.sh` clean; T001 GREEN except
   the manifest assertions (they go green in Phase 2 — note this expected interim).
 
 **Checkpoint**: one constant exists; every later phase consumes it.

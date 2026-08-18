@@ -17,6 +17,7 @@ SRC_DIR="${SRC_ROOT}/src"
 # Every shared lib that carries the include-guard idiom (NOT reconcile.sh — the
 # entrypoint; nothing sources it).
 GUARDED_LIBS=(
+    identity.sh
     config.sh
     jira_rest.sh
     install.sh
@@ -42,6 +43,7 @@ GUARDED_LIBS=(
 
 @test "each shared lib carries a matching include-guard var" {
     declare -A guard_var=(
+        [identity.sh]=_IDENTITY_SH_LOADED
         [config.sh]=_CONFIG_SH_LOADED
         [jira_rest.sh]=_JIRA_REST_SH_LOADED
         [install.sh]=_INSTALL_SH_LOADED
