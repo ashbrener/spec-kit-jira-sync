@@ -178,7 +178,7 @@ warning fires, consent re-registers under the new token; legacy config still loa
   `npx markdownlint-cli2 "specs/**/*.md" "*.md"`, and the full
   `bats --recursive tests/unit` under bash 5. All green (bar the two known
   local-only failures).
-- [ ] T027 Open a PR into `main` from `013-extension-identity` (do **NOT** merge —
+- [X] T027 Open a PR into `main` from `013-extension-identity` (do **NOT** merge —
   the operator merges). Body: the collision, the one-name fix, the migration, and
   the two upstream review findings this addresses.
 
