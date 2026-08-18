@@ -116,23 +116,23 @@ fixes it in one consented step; their resolved binding still works.
 **Independent test**: from an old-identity project, hooks read `absent`, the
 warning fires, consent re-registers under the new token; legacy config still loads.
 
-- [ ] T013 [US2] Write `tests/unit/identity_migration.bats` (RED) — the C-8
+- [X] T013 [US2] Write `tests/unit/identity_migration.bats` (RED) — the C-8
   end-to-end migration, the load-bearing claim: seed a `.specify/extensions.yml`
   with old entries (`extension: jira` / `command: speckit.jira.push`); assert
   `hookcheck::classify` → `absent`; the warn/status line fires; a consented heal
   re-registers as `extension: jira-sync` + `speckit.jira-sync.push`; and a
   pre-existing `enabled: false` entry survives untouched (VR-5/VR-6).
-- [ ] T014 [US2] Write the C-9 config-fallback test in `tests/unit/config.bats`
+- [X] T014 [US2] Write the C-9 config-fallback test in `tests/unit/config.bats`
   (RED): the new path is preferred; when only the legacy
   `.specify/extensions/jira/jira-config.yml` exists it loads and emits EXACTLY ONE
   informational line naming the new location; the legacy file is neither moved
   nor deleted.
-- [ ] T015 [US2] Update `src/config.sh` (GREEN): source `identity.sh`;
+- [X] T015 [US2] Update `src/config.sh` (GREEN): source `identity.sh`;
   `CONFIG_DEFAULT_PATH` derives from `${SPECKIT_EXT_INSTALL_DIR}`; add the legacy
   read-fallback per C-5 (read in place, one info line, never move, never delete).
-- [ ] T016 [P] [US2] Update `.gitignore` to ignore the new binding path while
+- [X] T016 [P] [US2] Update `.gitignore` to ignore the new binding path while
   KEEPING the old path ignored; update `config-template.yml`'s documented path.
-- [ ] T017 [US2] Verify T013 GREEN with no new migration machinery — the shipped
+- [X] T017 [US2] Verify T013 GREEN with no new migration machinery — the shipped
   012 self-heal carries it. If it does not, STOP and report rather than bolting on
   a bespoke migration path.
 

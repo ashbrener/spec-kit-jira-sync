@@ -145,14 +145,14 @@ seed::confirm_reachability() {
     for phase in specifying planning tasking implementing ready_to_merge merged; do
         want="${CONFIG_VALUES[phase_status.${phase}]:-}"
         if [[ -z "${want}" ]]; then
-            seed::_log "✗ phase_status.${phase} is missing from the binding (run /speckit-jira-install)."
+            seed::_log "✗ phase_status.${phase} is missing from the binding (run /speckit-jira-sync-install)."
             seed::promote_exit 2; rc=2; continue
         fi
         if [[ -n "${present[${want}]:-}" ]]; then
             seed::_log "✓ ${phase} → status ${want} reachable"
         else
             seed::_log "✗ ${phase}: status id ${want} is NOT on project ${project}'s workflow (unreachable)."
-            seed::_log "  remediation: re-run /speckit-jira-install (or --phase-status ${phase}=<statusName|id>) to map ${phase} onto an existing status."
+            seed::_log "  remediation: re-run /speckit-jira-sync-install (or --phase-status ${phase}=<statusName|id>) to map ${phase} onto an existing status."
             seed::promote_exit 2; rc=2
         fi
     done
@@ -172,7 +172,7 @@ seed::main() {
     # Load the bound config (config::load halts via _die/exit 2 if absent —
     # guard the path first so we can return our own exit code cleanly).
     if [[ ! -r "${SEED_CONFIG_PATH}" ]]; then
-        seed::_log "✗ no binding at ${SEED_CONFIG_PATH} — run /speckit-jira-install first."
+        seed::_log "✗ no binding at ${SEED_CONFIG_PATH} — run /speckit-jira-sync-install first."
         seed::promote_exit 2
         return "${SEED_EXIT_CODE}"
     fi

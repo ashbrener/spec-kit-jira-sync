@@ -3,7 +3,7 @@
 # COMMITTED PLACEHOLDER template for the spec-kit-jira-sync bridge binding.
 #
 # An operator copies this file to the GITIGNORED resolved location
-#   .specify/extensions/jira/jira-config.yml
+#   .specify/extensions/jira-sync/jira-config.yml
 # and replaces every placeholder below with the real ids read off their own
 # Jira project. The resolved copy is gitignored (see .gitignore); THIS template,
 # with placeholders only, is the only config committed to the tree.
@@ -20,10 +20,10 @@
 #
 # Shape mirrors exactly what src/config.sh `config::validate` requires
 # (data-model.md § 2). You do NOT fill these ids in by hand: run
-# `/speckit-jira-install` to resolve the project key, issue-type ids, the
+# `/speckit-jira-sync-install` to resolve the project key, issue-type ids, the
 # lifecycle phase->status map, and the story-points field id over the Jira REST
 # API and write the gitignored jira-config.yml automatically; then
-# `/speckit-jira-seed` confirms the lifecycle mapping is reachable on the
+# `/speckit-jira-sync-seed` confirms the lifecycle mapping is reachable on the
 # project's workflow. The placeholders below show the shape the install step
 # fills. See specs/008-install-seed-ceremony/ and specs/001-core-bridge/dogfood.md.
 #
@@ -131,7 +131,7 @@ jira:
     author_source: [spec_owner_line, git_first_add]
     # Path to the GITIGNORED operator identity map (email -> accountId+handle).
     # Copy jira-authors.local.yml.sample to this path and fill with real ids.
-    authors_file: ".specify/extensions/jira/jira-authors.local.yml"
+    authors_file: ".specify/extensions/jira-sync/jira-authors.local.yml"
 
   # OPTIONAL re-mode / orphan pruning (feature-004). Governs ONLY the explicit
   # `reconcile.sh --remode` destructive operation; the ordinary reconcile never

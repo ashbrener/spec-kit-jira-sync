@@ -4,7 +4,7 @@
 # every value here is fake — a neutral project key, made-up numeric status /
 # issue-type / transition ids. NO real Jira coordinates, site, account ids or
 # tokens. This file is committed; the real resolved config lives only in the
-# gitignored `.specify/extensions/jira/jira-config.yml`.
+# gitignored `.specify/extensions/jira-sync/jira-config.yml`.
 jira:
   project_key: "PROJ"
   issue_types:

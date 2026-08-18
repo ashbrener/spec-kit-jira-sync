@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 #
 # src/config.sh — loader + validator for
-# `.specify/extensions/jira/jira-config.yml`.
+# `.specify/extensions/jira-sync/jira-config.yml`.
 #
 # Sourced by other bridge scripts. Never executed directly. Public API
 # uses the `config::*` namespace per the project convention.
@@ -23,7 +23,7 @@
 #
 # Behaviour summary:
 #   config::load [path]                       — parse + populate state
-#       (default `.specify/extensions/jira/jira-config.yml`)
+#       (default `.specify/extensions/jira-sync/jira-config.yml`)
 #   config::get <dotted.key>                  — echo a scalar
 #       (e.g. `project_key`, `issue_types.story`)
 #   config::get_status_transition <phase>     — echo the target Jira
@@ -63,11 +63,27 @@
 [[ -n "${_CONFIG_SH_LOADED:-}" ]] && return 0
 readonly _CONFIG_SH_LOADED=1
 
+# The extension identity (013) — the install directory below is derived from
+# it, never typed. Dependency-free and side-effect-free, so sourcing it here is
+# safe for every caller of this lib.
+CONFIG_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./identity.sh disable=SC1091
+source "${CONFIG_SH_DIR}/identity.sh"
+
 declare -gA CONFIG_VALUES=()
 declare -g CONFIG_LOADED_PATH=""
 
-# Default resolved-config location (gitignored per Principle V/IX).
-readonly CONFIG_DEFAULT_PATH=".specify/extensions/jira/jira-config.yml"
+# Default resolved-config location (gitignored per Principle V/IX), derived
+# from the single identity constant so the binding always lives beside the
+# installed extension.
+readonly CONFIG_DEFAULT_PATH="${SPECKIT_EXT_INSTALL_DIR}/jira-config.yml"
+
+# The pre-0.6.0 location (feature 013). READ-ONLY fallback: when no binding
+# exists at CONFIG_DEFAULT_PATH but one does here, it is loaded IN PLACE and a
+# single informational line names the new location. It is never moved, never
+# deleted and never rewritten — relocating it is the operator's call, on their
+# schedule (Principle I + VIII).
+readonly CONFIG_LEGACY_PATH="${SPECKIT_EXT_LEGACY_INSTALL_DIR}/jira-config.yml"
 
 # The committed placeholder template `config::write_binding` copies from when the
 # target binding does not yet exist (feature 008). Env-overridable so tests can
@@ -340,7 +356,7 @@ config::_parse_file() {
 
 # config::load [path]
 # Parse the resolved jira-config.yml at [path] (default
-# `.specify/extensions/jira/jira-config.yml`) and populate module state.
+# `.specify/extensions/jira-sync/jira-config.yml`) and populate module state.
 # A missing / unreadable / malformed binding is a PROJECT-LEVEL config
 # error: it halts via `config::_die` (exit 2). NEVER reads secrets.
 config::load() {
@@ -348,7 +364,17 @@ config::load() {
         config::_die "config::load accepts at most one argument (path to jira-config.yml)"
     fi
 
-    local path="${1:-${CONFIG_DEFAULT_PATH}}"
+    local path="${1:-}"
+    if [[ -z "${path}" ]]; then
+        path="${CONFIG_DEFAULT_PATH}"
+        # Feature 013 legacy fallback: an operator who resolved their binding
+        # before the rename still has it under the old install directory. Read
+        # it where it lies and say so ONCE; never move it, never delete it.
+        if [[ ! -e "${path}" && -e "${CONFIG_LEGACY_PATH}" ]]; then
+            config::_warn "reading the resolved binding from its pre-0.6.0 location ${CONFIG_LEGACY_PATH} — move it to ${CONFIG_DEFAULT_PATH} when convenient (it is left untouched)"
+            path="${CONFIG_LEGACY_PATH}"
+        fi
+    fi
 
     if [[ ! -e "${path}" ]]; then
         config::_die "file not found: ${path}
@@ -684,7 +710,7 @@ config::attribution_label() {
 #   canonical default when unspecified.
 config::attribution_authors_file() {
     config::_require_loaded
-    printf '%s\n' "${CONFIG_VALUES[attribution.authors_file]:-.specify/extensions/jira/jira-authors.local.yml}"
+    printf '%s\n' "${CONFIG_VALUES[attribution.authors_file]:-${SPECKIT_EXT_INSTALL_DIR}/jira-authors.local.yml}"
 }
 
 # ===========================================================================

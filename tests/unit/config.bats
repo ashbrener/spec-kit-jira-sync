@@ -4,7 +4,7 @@
 # tests/unit/config.bats
 #
 # Unit tests for src/config.sh — the loader + validator for the gitignored
-# `.specify/extensions/jira/jira-config.yml`. PURE tests: no network, no curl,
+# `.specify/extensions/jira-sync/jira-config.yml`. PURE tests: no network, no curl,
 # no live Jira. They drive load / get / get_status_transition / validate against
 # a PLACEHOLDER fixture (project key PROJ, fake numeric ids).
 #
@@ -46,12 +46,95 @@ _run_config() {
 }
 
 @test "load: default path used when no argument given" {
-  # No such file at the default relative path from REPO_ROOT -> exit 2 naming
-  # the default location (proves the default is wired without needing a real
-  # gitignored config present).
-  _run_config 'cd "$1"; config::load' "$REPO_ROOT"
+  # Run from an EMPTY tree (neither the current nor the legacy binding present)
+  # -> exit 2 naming the default location. Proves the default is wired without
+  # depending on whichever files happen to exist in the checkout.
+  local empty="$BATS_TEST_TMPDIR/empty-consumer"
+  mkdir -p "$empty"
+  _run_config 'cd "$1"; config::load' "$empty"
   [ "$status" -eq 2 ]
-  [[ "$output" == *".specify/extensions/jira/jira-config.yml"* ]]
+  [[ "$output" == *".specify/extensions/jira-sync/jira-config.yml"* ]]
+}
+
+# --- C-9: the legacy binding path (feature 013 migration) --------------------
+#
+# v0.6.0 moves the resolved binding to `.specify/extensions/jira-sync/`. An
+# operator upgrading from an earlier install still has theirs at the old path,
+# so config::load falls back to it — READ IN PLACE, with ONE informational line
+# naming the new location. It is never moved, never deleted, never rewritten
+# (Principle I + VIII); relocating it is the operator's call, on their schedule.
+
+# Write a minimal-but-valid binding carrying a distinguishable project key.
+_seed_binding() {
+  local path="$1" key="$2"
+  mkdir -p "$(dirname "$path")"
+  cat >"$path" <<YAML
+jira:
+  project_key: "${key}"
+  issue_types:
+    epic: "10001"
+    story: "10002"
+    subtask: "10003"
+  phase_status:
+    specifying: "20001"
+    planning: "20002"
+    tasking: "20003"
+    implementing: "20004"
+    ready_to_merge: "20005"
+    merged: "20006"
+  transitions: {}
+  labels:
+    spec_prefix: "speckit-spec:"
+    repo_prefix: "speckit-repo:"
+    phase_prefix: "task-phase:"
+    lifecycle_prefix: "phase:"
+YAML
+}
+
+@test "C-9: the current binding path is preferred over the legacy one" {
+  local consumer="$BATS_TEST_TMPDIR/both"
+  _seed_binding "$consumer/.specify/extensions/jira-sync/jira-config.yml" "NEWKEY"
+  _seed_binding "$consumer/.specify/extensions/jira/jira-config.yml" "OLDKEY"
+  _run_config 'cd "$1"; config::load; config::get project_key' "$consumer"
+  [ "$status" -eq 0 ]
+  [ "$output" = "NEWKEY" ]
+}
+
+@test "C-9: a legacy-only binding loads, with EXACTLY ONE informational line" {
+  local consumer="$BATS_TEST_TMPDIR/legacy-only"
+  _seed_binding "$consumer/.specify/extensions/jira/jira-config.yml" "OLDKEY"
+  _run_config 'cd "$1"; config::load; config::get project_key' "$consumer"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OLDKEY"* ]]
+  # It names the NEW location so the operator knows where to move it.
+  [[ "$output" == *".specify/extensions/jira-sync/jira-config.yml"* ]]
+  # Exactly one such line — not one per key, not one per getter.
+  local lines
+  lines="$(grep -c 'jira-sync/jira-config.yml' <<<"$output")"
+  [ "$lines" -eq 1 ]
+}
+
+@test "C-9: the legacy binding is neither moved nor deleted nor rewritten" {
+  local consumer="$BATS_TEST_TMPDIR/untouched"
+  local legacy="$consumer/.specify/extensions/jira/jira-config.yml"
+  _seed_binding "$legacy" "OLDKEY"
+  local before
+  before="$(cksum "$legacy")"
+  _run_config 'cd "$1"; config::load; config::get project_key' "$consumer"
+  [ "$status" -eq 0 ]
+  [ -f "$legacy" ]
+  [ "$(cksum "$legacy")" = "$before" ]
+  # Nothing was written at the new location either — the move is the operator's.
+  [ ! -e "$consumer/.specify/extensions/jira-sync/jira-config.yml" ]
+}
+
+@test "C-9: an explicit path argument never triggers the legacy fallback" {
+  local consumer="$BATS_TEST_TMPDIR/explicit"
+  _seed_binding "$consumer/.specify/extensions/jira/jira-config.yml" "OLDKEY"
+  _run_config 'cd "$1"; config::load "$2"' "$consumer" \
+    "$consumer/.specify/extensions/jira-sync/jira-config.yml"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"file not found"* ]]
 }
 
 # --- config::get -------------------------------------------------------------

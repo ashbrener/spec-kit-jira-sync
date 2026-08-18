@@ -2408,7 +2408,7 @@ jira_sink::_privacy_authors_file() {
         config::attribution_authors_file
         return 0
     fi
-    printf '%s\n' ".specify/extensions/jira/jira-authors.local.yml"
+    printf '%s\n' ".specify/extensions/jira-sync/jira-authors.local.yml"
 }
 
 # jira_sink::privacy_known_values
@@ -2450,7 +2450,7 @@ jira_sink::privacy_known_values() {
 #   .env, and the authors map. The neutral scanner asserts each is untracked +
 #   ignored (FR-004).
 jira_sink::privacy_ignore_targets() {
-    local _cfg="${RECONCILE_CONFIG_PATH:-${RECONCILE_CONFIG_PATH_DEFAULT:-.specify/extensions/jira/jira-config.yml}}"
+    local _cfg="${RECONCILE_CONFIG_PATH:-${RECONCILE_CONFIG_PATH_DEFAULT:-.specify/extensions/jira-sync/jira-config.yml}}"
     printf '%s\n' "$_cfg"
     printf '%s\n' ".env"
     printf '%s\n' "$(jira_sink::_privacy_authors_file)"

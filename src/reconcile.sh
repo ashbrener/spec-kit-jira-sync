@@ -99,7 +99,7 @@ source "${SCRIPT_DIR}/hookcheck.sh"
 # Default config path. Resolved relative to PWD (the consumer repo's
 # root) rather than to the script, so the same script binary serves
 # every consumer repo's invocation.
-readonly RECONCILE_CONFIG_PATH_DEFAULT=".specify/extensions/jira/jira-config.yml"
+readonly RECONCILE_CONFIG_PATH_DEFAULT=".specify/extensions/jira-sync/jira-config.yml"
 
 # Cap on the verbatim Overview body before we truncate to the first
 # paragraph (split on `\n\n`) + ellipsis.
@@ -226,7 +226,7 @@ Options:
                    one deprecation INFO row and otherwise changes nothing.
   --quiet          Suppress per-mutation log lines. Summary still emits.
   --config PATH    Override the path to jira-config.yml
-                   (default: .specify/extensions/jira/jira-config.yml).
+                   (default: .specify/extensions/jira-sync/jira-config.yml).
   --help           Show this help.
 
 Exit codes (monotonic escalation: 0 < 1 < 3 < 2; 4 is terminal):
@@ -3078,9 +3078,9 @@ reconcile::main() {
     # bridge's own after_* hooks BEFORE the summary is emitted, so the health
     # line (dry-run) or the missing-hooks warning (push) lands in the same
     # structured summary. Covers the primary case: jira-config.yml present but
-    # the hooks stripped by `specify extension add jira --from <zip> --force`.
+    # the hooks stripped by `specify extension add jira-sync --from <zip> --force`.
     # (A fully-unbound repo with NO jira-config.yml reports the config error
-    # earlier in load_config instead — same /speckit-jira-install fix.) Guarded
+    # earlier in load_config instead — same /speckit-jira-sync-install fix.) Guarded
     # with `|| true`: hook health is informational and MUST NOT change the exit
     # disposition (never touches RECONCILE_EXIT_CODE).
     hookcheck::reconcile_check || true

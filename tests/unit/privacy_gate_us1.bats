@@ -26,17 +26,17 @@ setup() {
 
   # Build a throwaway CONSUMER git repo: a spec tree + a gitignored config + .env.
   WORKDIR="$BATS_TEST_TMPDIR/consumer"
-  mkdir -p "$WORKDIR/specs" "$WORKDIR/.specify/extensions/jira"
+  mkdir -p "$WORKDIR/specs" "$WORKDIR/.specify/extensions/jira-sync"
   cp -R "$REPO_ROOT/tests/fixtures/specs/001-sample" "$WORKDIR/specs/001-sample"
   cp "$REPO_ROOT/tests/fixtures/config/jira-config.sample.yml" \
-     "$WORKDIR/.specify/extensions/jira/jira-config.yml"
+     "$WORKDIR/.specify/extensions/jira-sync/jira-config.yml"
 
   ( cd "$WORKDIR"
     git init -q .
     git config user.email "test@example.com"
     git config user.name "Test"
     # The credential + resolved config are gitignored (the clean baseline).
-    printf '.env\n.specify/extensions/jira/jira-config.yml\n.specify/extensions/jira/jira-authors.local.yml\n' >.gitignore
+    printf '.env\n.specify/extensions/jira-sync/jira-config.yml\n.specify/extensions/jira-sync/jira-authors.local.yml\n' >.gitignore
     printf 'JIRA_API_TOKEN=placeholder-token\n' >.env
     git add specs .gitignore
     git commit -q -m seed
@@ -155,9 +155,9 @@ _block_host() {  # _block_host <leading-label>
 
 @test "US1: cwd is NOT a git repo ⇒ exit 4 + 'not a git repo' + zero writes (C-6)" {
   local nongit="$BATS_TEST_TMPDIR/plain"
-  mkdir -p "$nongit/.specify/extensions/jira"
+  mkdir -p "$nongit/.specify/extensions/jira-sync"
   cp "$REPO_ROOT/tests/fixtures/config/jira-config.sample.yml" \
-     "$nongit/.specify/extensions/jira/jira-config.yml"
+     "$nongit/.specify/extensions/jira-sync/jira-config.yml"
   cp -R "$REPO_ROOT/tests/fixtures/specs/001-sample" "$nongit/specs-001"
   cd "$nongit"
   run reconcile::main --all

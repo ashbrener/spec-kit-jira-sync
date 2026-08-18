@@ -22,16 +22,16 @@ setup() {
   export WORKSTATE_LAST_COMMIT_ISO="2026-05-31T00:00:00+00:00"
 
   WORKDIR="$BATS_TEST_TMPDIR/consumer"
-  mkdir -p "$WORKDIR/specs" "$WORKDIR/.specify/extensions/jira"
+  mkdir -p "$WORKDIR/specs" "$WORKDIR/.specify/extensions/jira-sync"
   cp -R "$REPO_ROOT/tests/fixtures/specs/001-sample" "$WORKDIR/specs/001-sample"
   cp "$REPO_ROOT/tests/fixtures/config/jira-config.sample.yml" \
-     "$WORKDIR/.specify/extensions/jira/jira-config.yml"
+     "$WORKDIR/.specify/extensions/jira-sync/jira-config.yml"
 
   ( cd "$WORKDIR"
     git init -q .
     git config user.email "test@example.com"
     git config user.name "Test"
-    printf '.env\n.specify/extensions/jira/jira-config.yml\n.specify/extensions/jira/jira-authors.local.yml\n' >.gitignore
+    printf '.env\n.specify/extensions/jira-sync/jira-config.yml\n.specify/extensions/jira-sync/jira-authors.local.yml\n' >.gitignore
     printf 'JIRA_API_TOKEN=placeholder-token\n' >.env
     git add specs .gitignore
     git commit -q -m seed )
@@ -72,12 +72,12 @@ _mutating_count() {
 @test "US2: a TRACKED resolved jira-config.yml ⇒ exit 4 + config path named + zero writes" {
   ( cd "$WORKDIR"
     # Force-add the gitignored config so it becomes tracked (the leak).
-    git add -f .specify/extensions/jira/jira-config.yml
+    git add -f .specify/extensions/jira-sync/jira-config.yml
     git commit -q -m "oops tracked config" )
   cd "$WORKDIR"
   run reconcile::main --all
   [ "$status" -eq 4 ]
-  [[ "$output" == *".specify/extensions/jira/jira-config.yml"* ]]
+  [[ "$output" == *".specify/extensions/jira-sync/jira-config.yml"* ]]
   [ "$(_mutating_count)" -eq 0 ]
 }
 
@@ -89,7 +89,7 @@ _mutating_count() {
   ( cd "$WORKDIR"
     # Drop .env from .gitignore so it is present-but-unignored (one `git add .`
     # from being committed).
-    printf '.specify/extensions/jira/jira-config.yml\n.specify/extensions/jira/jira-authors.local.yml\n' >.gitignore
+    printf '.specify/extensions/jira-sync/jira-config.yml\n.specify/extensions/jira-sync/jira-authors.local.yml\n' >.gitignore
     git add .gitignore && git commit -q -m "unignore .env" )
   cd "$WORKDIR"
   run reconcile::main --all
