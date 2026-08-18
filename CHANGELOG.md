@@ -10,6 +10,78 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-18
+
+**BREAKING — the extension has one name now: `jira-sync`.** The operator-invoked
+command names change. The manifest used to declare `extension.id: "jira"` while
+the community catalog listed this bridge as `jira-sync`, and the bare `jira` slot
+belongs to an unrelated Jira extension — so an install registered under `jira`
+and the catalog updater offered our users *their* extension as the update for
+this one. Catalog key, manifest id, command namespace, install directory and the
+hook-registration token are now the single value `jira-sync`, matching the shape
+the Linear sibling has always shipped. Nothing the bridge projects to Jira
+changes: no schema change, no mapping change, no exit-code change, and no
+constitution amendment (feature 013 *enforces* Principles VII and VIII).
+
+### Changed (BREAKING)
+
+- **Command names** — `/speckit-jira-push`, `/speckit-jira-status`,
+  `/speckit-jira-install` and `/speckit-jira-seed` become
+  `/speckit-jira-sync-push`, `/speckit-jira-sync-status`,
+  `/speckit-jira-sync-install` and `/speckit-jira-sync-seed`
+  (`speckit.jira-sync.{push,status,install,seed}` in the manifest). **No aliases
+  are possible**: an alias namespace must equal `extension.id`, and keeping
+  `speckit.jira.*` is exactly what shadowed the other extension.
+- **Manifest identity** — `extension.id` is `jira-sync`, so it now equals the
+  catalog key and the command namespace.
+- **Install directory** — the extension installs to
+  `.specify/extensions/jira-sync/`, and the resolved binding is read from
+  `.specify/extensions/jira-sync/jira-config.yml`.
+- **Dogfood gate** — the bridge's own hook `condition` variable is
+  `SPECKIT_JIRA_SYNC_DOGFOOD_SAFE` (was `SPECKIT_JIRA_DOGFOOD_SAFE`). Dev-only
+  surface.
+
+### Added
+
+- **`src/identity.sh` — the identity, declared once.** The extension id was
+  hardcoded three times (the registrar wrote it, the health check matched it,
+  the config loader pinned the install directory), so feature 012's "detection
+  and repair must agree" guarantee held only by coincidence. `install.sh`,
+  `hookcheck.sh` and `config.sh` now derive the id, the push-command name and
+  the install directory from one include-guarded, dependency-free constants lib
+  — `hookcheck.sh` sourcing it **directly**, never through the lazily-sourced
+  `install.sh`. Two new pin suites make divergence a build failure:
+  `tests/unit/extension_identity.bats` (manifest id == constant; every declared
+  command namespaced; 4 commands + 6 `after_*` hooks; registrar→detector
+  lockstep; no old-identity literal left in any live file) and
+  `tests/unit/identity_migration.bats` (the end-to-end old→new upgrade).
+- **Legacy binding read-fallback** — when no binding exists at the new path but
+  one does at `.specify/extensions/jira/jira-config.yml`, it is loaded **in
+  place** and a single informational line names the new location. The file is
+  never moved, never deleted, never rewritten (Principle I + VIII); relocating
+  it is the operator's call. `.gitignore` covers both paths.
+- **Published capability counts** — the catalog submission now reports
+  `provides {commands: 4, hooks: 6}`; the listing carried a stale `hooks: 0`
+  from v0.4.0, which genuinely shipped none.
+
+### Migration
+
+Upgrading needs **no new machinery** — it rides the self-heal shipped in v0.5.0.
+Your existing hook entries name the old extension, so they classify as
+**absent**: the push path warns once, `/speckit-jira-sync-status` shows the
+*Auto-sync hooks* health line, and at a real terminal a single `y` re-registers
+all six under the new name. Otherwise run `/speckit-jira-sync-install`. Hooks you
+deliberately set `enabled: false` stay off, and your old entries are left in
+place — surfaced, never deleted. Your resolved binding keeps working via the
+fallback above. See "Upgrading to v0.6.0" in the [README](README.md).
+
+### Fixed
+
+- **Documentation** — `.specify/memory/constitution.md` referenced
+  `speckit.jira.push`, the old config path, and a `.pull` command this bridge
+  has never shipped (inherited from the Linear sibling). Corrected as a doc fix;
+  the constitution version is unchanged (no amendment).
+
 ## [0.5.0] - 2026-08-12
 
 The automatic mirror — and a bridge that notices when it stops mirroring.
@@ -331,7 +403,8 @@ slate instead, an operator may prune the old `task-phase:*` Subtasks (or run
 - Parser phase normalization corrected in the producer half.
 - POST idempotency and feature-pin handling hardened in the foundational sink.
 
-[Unreleased]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ashbrener/spec-kit-jira-sync/compare/v0.2.1...v0.3.0

@@ -144,7 +144,7 @@ warning fires, consent re-registers under the new token; legacy config still loa
 
 **Goal**: the catalog listing's stated capabilities match what ships.
 
-- [ ] T018 [US3] Verify `scripts/publish-catalog.sh` submits
+- [X] T018 [US3] Verify `scripts/publish-catalog.sh` submits
   `provides {commands: 4, hooks: 6}` (the listing currently says `hooks: 0`,
   stale from v0.4.0 which genuinely had none) and the aligned id; adjust the
   script if it carries stale values forward.
@@ -153,27 +153,27 @@ warning fires, consent re-registers under the new token; legacy config still loa
 
 ## Phase 6: Polish, gates & release
 
-- [ ] T019 [P] Update `README.md`: all command names, the new install directory,
+- [X] T019 [P] Update `README.md`: all command names, the new install directory,
   and a **v0.6.0 BREAKING / migration** section (mirror
   `specs/013-extension-identity/quickstart.md`).
-- [ ] T020 [P] Correct `.specify/memory/constitution.md` references (~lines 202,
+- [X] T020 [P] Correct `.specify/memory/constitution.md` references (~lines 202,
   238, 242, 251, 375, 379) naming `speckit.jira.push` / the old config path, AND
   remove the bogus `.pull` command references (~242, 379) — this bridge has never
   shipped `.pull`. **DOC FIX ONLY — do NOT bump the constitution version.**
-- [ ] T021 [P] Update `CLAUDE.md` (Commands section + non-negotiables) to the new
+- [X] T021 [P] Update `CLAUDE.md` (Commands section + non-negotiables) to the new
   command names and install path.
-- [ ] T022 [P] Add a `CHANGELOG.md` `[Unreleased]` → **Changed / BREAKING** entry:
+- [X] T022 [P] Add a `CHANGELOG.md` `[Unreleased]` → **Changed / BREAKING** entry:
   the rename, the renamed commands, the migration, the dogfood env-var rename.
-- [ ] T023 Add the C-10 sweep test (in `tests/unit/extension_identity.bats`): NO
+- [X] T023 Add the C-10 sweep test (in `tests/unit/extension_identity.bats`): NO
   `speckit\.jira\.` or `extension: jira` literal remains in any LIVE file
   (`src/`, `commands/`, `.claude/commands/`, `extension.yml`, `README.md`,
   `CLAUDE.md`, `config-template.yml`, `tests/`). **Exclude `specs/001`–`012`** —
   they record what was true when written and are not rewritten.
-- [ ] T024 Verify `tests/unit/engine_vendor_neutral.bats` GREEN **untouched** and
+- [X] T024 Verify `tests/unit/engine_vendor_neutral.bats` GREEN **untouched** and
   `tests/unit/no-real-identifiers.bats` GREEN (Privacy IX).
-- [ ] T025 Bump `extension.yml` → `version: "0.6.0"` and roll `CHANGELOG.md`
+- [X] T025 Bump `extension.yml` → `version: "0.6.0"` and roll `CHANGELOG.md`
   `[Unreleased]` into `[0.6.0]` with the link refs.
-- [ ] T026 Full CI gate locally: `shellcheck --severity=style src/*.sh` (incl.
+- [X] T026 Full CI gate locally: `shellcheck --severity=style src/*.sh` (incl.
   `identity.sh`), `yamllint -d relaxed extension.yml .github/workflows/ci.yml`,
   `npx markdownlint-cli2 "specs/**/*.md" "*.md"`, and the full
   `bats --recursive tests/unit` under bash 5. All green (bar the two known

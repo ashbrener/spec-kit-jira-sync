@@ -52,6 +52,10 @@ REPO_URL="$(_yval repository)"; REPO_URL="${REPO_URL:-https://github.com/${EXT_R
 HOMEPAGE="$(_yval homepage)";   HOMEPAGE="${HOMEPAGE:-${REPO_URL}}"
 SPECKIT_REQ="$(sed -n 's/^ *speckit_version: *"\(.*\)".*/\1/p' "$MANIFEST" | head -1)"; SPECKIT_REQ="${SPECKIT_REQ:->=0.1.0}"
 CMD_COUNT="$(grep -cE '^    - name: "speckit\.' "$MANIFEST" || true)"
+# Hook entries under `provides.hooks` (the six after_* auto-sync hooks, each one
+# `      - command: "speckit.<id>.push"`). The listing carried a stale `hooks: 0`
+# from v0.4.0, which genuinely shipped none — publish what the manifest declares.
+HOOK_COUNT="$(grep -cE '^      - command: "speckit\.' "$MANIFEST" || true)"
 NOW="$(date -u +%Y-%m-%dT00:00:00Z)"
 
 echo "Filing the Extension Submission issue: ${CATALOG_ID} ${TAG} → ${UPSTREAM}"
@@ -144,7 +148,7 @@ specify extension add ${CATALOG_ID} --from ${URL}
     "changelog": "https://github.com/${EXT_REPO}/blob/main/CHANGELOG.md",
     "license": "${LICENSE}",
     "requires": { "speckit_version": "${SPECKIT_REQ}" },
-    "provides": { "commands": ${CMD_COUNT:-0}, "hooks": 0 },
+    "provides": { "commands": ${CMD_COUNT:-0}, "hooks": ${HOOK_COUNT:-0} },
     "tags": [${tags_json}],
     "verified": false,
     "downloads": 0,
@@ -155,7 +159,7 @@ specify extension add ${CATALOG_ID} --from ${URL}
 \`\`\`
 
 ### Additional Context
-Version bump of the existing \`${CATALOG_ID}\` entry; only \`version\`, \`download_url\`, \`provides.commands\`, and \`updated_at\` change. Preserve the existing \`created_at\`. Thanks for maintaining the catalog!
+Version bump of the existing \`${CATALOG_ID}\` entry; \`version\`, \`download_url\`, \`provides\` (commands + hooks), and \`updated_at\` change. As of v0.6.0 the manifest \`extension.id\` is \`${CATALOG_ID}\` — it matches this catalog key and the \`speckit.${CATALOG_ID}.*\` command namespace, so the updater resolves to this extension. Preserve the existing \`created_at\`. Thanks for maintaining the catalog!
 EOF
 
 gh issue create --repo "$UPSTREAM" \

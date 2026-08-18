@@ -49,7 +49,7 @@ CI + these tests are the **only mandatory quality gate**.
 This is a public repo. NO real Jira coordinate, workspace/company/project name,
 person name, email, site, account id, UUID, or API token may appear in any
 tracked file. Real values live only in gitignored `.env`,
-`.specify/extensions/jira/jira-config.yml`, and `tests/.private-deny`. The
+`.specify/extensions/jira-sync/jira-config.yml`, and `tests/.private-deny`. The
 privacy guard (`tests/unit/no-real-identifiers.bats`) enforces this in CI; copy
 `tests/.private-deny.example` to `tests/.private-deny` (gitignored) and fill in
 your real coordinates so it catches leaks locally before you push.

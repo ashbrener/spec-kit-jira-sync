@@ -121,7 +121,7 @@ config, not hard-code:
 ## 7. Config & secrets
 
 - `.env` (gitignored): `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`.
-- `.specify/extensions/jira/jira-config.yml` (gitignored): per-instance ids +
+- `.specify/extensions/jira-sync/jira-config.yml` (gitignored): per-instance ids +
   mapping, produced by `seed`. Committed `config-template.yml` holds placeholders.
 - Privacy guard (`tests/unit/no-real-identifiers.bats`) scans the tracked tree
   for shape-based leaks (e.g. `ATATT…` tokens) plus operator literals from the

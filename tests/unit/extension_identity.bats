@@ -191,3 +191,45 @@ PY
   done
   grep -qx "overall=present" <<<"$output"
 }
+
+# --- C-10: no old-identity literal survives ----------------------------------
+#
+# The rename is only finished if nothing still writes, matches or documents the
+# retired id. Every LIVE surface is swept; `specs/` is deliberately excluded —
+# those documents record what was true when they were written and are not
+# rewritten (the historical CHANGELOG entries and release notes likewise).
+
+@test "C-10: no retired-identity literal remains in any live file" {
+  cd "$REPO_ROOT"
+  # Build the patterns from the constant so this test cannot self-match.
+  local old="$SPECKIT_EXT_LEGACY_ID"
+  local -a targets=(
+    src commands .claude/commands tests
+    extension.yml README.md CLAUDE.md config-template.yml
+  )
+  run grep -rInE "speckit\.${old}\.|extension: ${old}([^-]|\$)" "${targets[@]}"
+  [ "$status" -ne 0 ] || {
+    echo "a retired-identity literal survives in a live file:" >&2
+    echo "$output" >&2
+    return 1
+  }
+}
+
+# The command surface only. README.md/CLAUDE.md legitimately NAME the retired
+# commands in the v0.6.0 migration table — telling an upgrading operator what
+# their old commands became is the whole point — so prose is out of scope here.
+@test "C-10: no live file names the retired command surface" {
+  cd "$REPO_ROOT"
+  local old="$SPECKIT_EXT_LEGACY_ID"
+  local -a targets=(
+    src commands .claude/commands
+    extension.yml config-template.yml
+  )
+  # `/speckit-jira-<sub>` with no `-sync` — the retired slash-command surface.
+  run grep -rInE "/speckit-${old}-(push|status|install|seed)" "${targets[@]}"
+  [ "$status" -ne 0 ] || {
+    echo "a retired slash command survives in a live file:" >&2
+    echo "$output" >&2
+    return 1
+  }
+}
