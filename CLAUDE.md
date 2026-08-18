@@ -38,7 +38,23 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **012-hook-self-heal** (active) — the second half of the auto-mirror story
+- **013-extension-identity** (active) — BREAKING identity realignment: `extension.id`
+  `jira` → `jira-sync` so catalog key == manifest id == command namespace == install
+  dir == hook token, mirroring the Linear sibling. FORCED by a maintainer review
+  holding our v0.5.0 catalog bump (github/spec-kit PR #4168): an UNRELATED extension
+  (mbachorik/spec-kit-jira) owns the `jira` slot, so installs registered under `jira`
+  and the updater offered OUR users THEIR extension. Commands become
+  `speckit.jira-sync.{push,status,install,seed}` (`/speckit-jira-sync-*`); NO aliases
+  are possible (upstream requires alias namespace == id). Real architecture: the id
+  is hardcoded TWICE today (install.sh:324 writes `extension: jira`; hookcheck.sh:102
+  matches it) → NEW `src/identity.sh` single constant both consume + a pin test, so
+  012's "writer and reader agree" stops being coincidence. Migration rides 012's
+  self-heal (old entries classify `absent` → warn → consented re-register); config
+  gains a legacy read-fallback (surfaced, never moved/deleted). Ships v0.6.0.
+  Engine untouched (003 green); NO schema/exit-code change; Privacy IX; NO amendment
+  (constitution/CLAUDE.md doc-fix only, incl. a bogus `.pull` ref). Spec+plan done.
+  Plan: `specs/013-extension-identity/plan.md`
+- **012-hook-self-heal** — the second half of the auto-mirror story
   (011=register / 012=keep-registered): detect + repair the six after_* hooks when
   `specify extension add jira --from <zip> --force` silently strips them. Direct
   port of the Linear sibling's shipped spec-014. NEW `src/hookcheck.sh`
@@ -51,9 +67,8 @@ internally. This repo is also the independent second consumer that proves
   (remediation `/speckit-jira-install`); the y/N heal reuses 011's idempotent
   `install::register_after_hooks`. Plan flags the include-guard task: add idempotent
   guards to the shared libs so the heal can source install.sh without readonly
-  double-declare. Sink/config-side — engine untouched (003 green; hookcheck:: +
-  reconcile::main are un-audited); NO schema/exit-code change; Privacy IX; NO
-  amendment (enforces VII/VIII). Spec+clarify+plan done.
+  double-declare. Sink/config-side — engine untouched (003 green). Merged to main (PR #27);
+  shipped in v0.5.0 (tag) alongside 011.
   Plan: `specs/012-hook-self-heal/plan.md`
 - **011-hook-auto-registration** — made sk-jira an AUTOMATIC mirror (implemented
   Principle VII, which the bridge never built — it registered ZERO hooks). Declares
