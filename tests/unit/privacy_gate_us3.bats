@@ -87,13 +87,13 @@ _run_gate_summary() {
 
 @test "US3: a tracked-config violation names the path + remediation" {
   ( cd "$WORKDIR"
-    mkdir -p .specify/extensions/jira
-    printf 'jira:\n  project_key: PROJ\n' >.specify/extensions/jira/jira-config.yml
-    git add -f .specify/extensions/jira/jira-config.yml
+    mkdir -p .specify/extensions/jira-sync
+    printf 'jira:\n  project_key: PROJ\n' >.specify/extensions/jira-sync/jira-config.yml
+    git add -f .specify/extensions/jira-sync/jira-config.yml
     git commit -q -m "tracked config" )
   # The gate resolves the default config path via RECONCILE_CONFIG_PATH.
-  RECONCILE_CONFIG_PATH=".specify/extensions/jira/jira-config.yml"
+  RECONCILE_CONFIG_PATH=".specify/extensions/jira-sync/jira-config.yml"
   run _run_gate_summary
-  [[ "$output" == *".specify/extensions/jira/jira-config.yml"* ]]
+  [[ "$output" == *".specify/extensions/jira-sync/jira-config.yml"* ]]
   [[ "$output" == *"scrub"* || "$output" == *"placeholder"* ]]
 }

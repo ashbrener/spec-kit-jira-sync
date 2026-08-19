@@ -39,5 +39,5 @@ After it runs, summarize concisely:
 The filesystem is the source of truth; Jira is a read-only mirror, and this
 command never writes to either.
 
-The dotted `/speckit.jira.status` is the spec-kit branding; the in-harness
-command identifier is hyphenated (`speckit-jira-status`).
+The dotted `/speckit.jira-sync.status` is the spec-kit branding; the in-harness
+command identifier is hyphenated (`speckit-jira-sync-status`).

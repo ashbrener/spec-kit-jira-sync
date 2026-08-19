@@ -56,7 +56,7 @@ and gets abandoned; auto-firing on every transition is what earns the bridge its
 toolchain slot.
 
 How it works: install registers the six `after_*` hooks into your
-`.specify/extensions.yml`, each firing `speckit.jira.push` with
+`.specify/extensions.yml`, each firing `speckit.jira-sync.push` with
 `optional: false`. An `after_*` hook fires **after** the lifecycle command has
 already completed, so the mirror can never retroactively fail your command:
 
@@ -241,7 +241,7 @@ attribution:
   enabled: true          # default OFF — absent/false = byte-identical to today
   assignee: true         # set the create-time assignee when the author maps
   label: true            # stamp the always-on author:<handle> label
-  authors_file: ".specify/extensions/jira/jira-authors.local.yml"
+  authors_file: ".specify/extensions/jira-sync/jira-authors.local.yml"
 ```
 
 Then copy `jira-authors.local.yml.sample` to the gitignored
@@ -388,30 +388,76 @@ Once the extension is listed in the catalog, the short form works:
 specify extension add jira-sync
 ```
 
-> **Naming** — the *catalog* id is `jira-sync` (the bare `jira` slot is taken by
-> an unrelated extension), but the extension installs under
-> `.specify/extensions/jira/` and its commands are namespaced `speckit.jira.*`.
+> **Naming** — one name, everywhere: the catalog id, the manifest
+> `extension.id`, the install directory (`.specify/extensions/jira-sync/`) and
+> the command namespace (`speckit.jira-sync.*`) are all `jira-sync`. The bare
+> `jira` slot belongs to an unrelated extension. Before v0.6.0 this bridge
+> declared `extension.id: "jira"` — see [Upgrading to v0.6.0](#upgrading-to-v060-breaking).
 
-Install copies the bridge into your repo's `.specify/extensions/jira/`,
-registers its reconcile commands (`speckit.jira.push`, `speckit.jira.status`,
-`speckit.jira.install`, `speckit.jira.seed`), and — if your project was
+Install copies the bridge into your repo's `.specify/extensions/jira-sync/`,
+registers its reconcile commands (`speckit.jira-sync.push`, `speckit.jira-sync.status`,
+`speckit.jira-sync.install`, `speckit.jira-sync.seed`), and — if your project was
 initialised with `--ai-skills` — generates a `SKILL.md` per command. Like the
 [Linear sibling](https://github.com/ashbrener/spec-kit-linear-sync), it also
 **auto-registers the six `after_*` lifecycle hooks** into your
 `.specify/extensions.yml`, so every `/speckit-*` command mirrors the spec state
 to Jira automatically — the [automatic mirror](#the-automatic-mirror) is the
-primary path (Principle VII). The on-demand `/speckit-jira-push` is the
+primary path (Principle VII). The on-demand `/speckit-jira-sync-push` is the
 escape-hatch for when you want to force a sync by hand.
 
 Install does **not** scaffold your credentials. After installing, add your
-gitignored `.env` (below), then run **`/speckit-jira-install`** to resolve the
+gitignored `.env` (below), then run **`/speckit-jira-sync-install`** to resolve the
 binding — it reads the project over the Jira REST API and writes
-`.specify/extensions/jira/jira-config.yml` (project key, issue-type ids, the
+`.specify/extensions/jira-sync/jira-config.yml` (project key, issue-type ids, the
 lifecycle phase→status map, and the story-points field id) automatically, so you
-never read an id off Jira by hand. Then **`/speckit-jira-seed`** confirms the
+never read an id off Jira by hand. Then **`/speckit-jira-sync-seed`** confirms the
 lifecycle mapping is reachable on the project's workflow. Both are idempotent
 (a re-run is a byte-identical no-op) and fail-closed (exit 2 = missing input,
 exit 3 = Jira unreadable).
+
+### Upgrading to v0.6.0 (BREAKING)
+
+**v0.6.0 renames the extension from `jira` to `jira-sync` — the commands you
+type change.** The catalog listed this bridge as `jira-sync` while it installed
+itself as `jira`, a name owned by a different, unrelated Jira extension; the
+updater could therefore offer you *their* extension as the update for this one.
+One name is now used everywhere, matching the Linear sibling.
+
+| Before | After |
+|--------|-------|
+| `/speckit-jira-push` | `/speckit-jira-sync-push` |
+| `/speckit-jira-status` | `/speckit-jira-sync-status` |
+| `/speckit-jira-install` | `/speckit-jira-sync-install` |
+| `/speckit-jira-seed` | `/speckit-jira-sync-seed` |
+| installs to `.specify/extensions/jira/` | `.specify/extensions/jira-sync/` |
+| dev gate `SPECKIT_JIRA_DOGFOOD_SAFE` | `SPECKIT_JIRA_SYNC_DOGFOOD_SAFE` |
+
+The old command names cannot be kept as aliases — that namespace belongs to the
+other extension, and keeping it is what caused the problem.
+
+**Nothing in Jira changes.** Your issues, labels and their contents are
+untouched; what the bridge mirrors, and how, is exactly the same.
+
+To upgrade:
+
+1. Install v0.6.0 as usual.
+2. Run any spec-kit command, or `/speckit-jira-sync-status`. Your auto-sync
+   hooks still name the old extension, so the bridge reports them as missing:
+
+   ```text
+   Auto-sync hooks: none registered — run /speckit-jira-sync-install to restore auto-sync
+   ```
+
+3. Restore them either by running **`/speckit-jira-sync-install`**, or — at a
+   real terminal — by answering `y` to the one-line offer. Hooks you
+   deliberately set `enabled: false` stay off.
+
+Your resolved binding keeps working: the bridge prefers
+`.specify/extensions/jira-sync/jira-config.yml` but **still reads** the old
+`.specify/extensions/jira/jira-config.yml`, telling you once where to move it.
+It never moves or deletes the file — that is your call. The same goes for the
+leftover `.specify/extensions/jira/` directory and any old hook entries: they
+are pointed out, never removed.
 
 ## Quick start
 
@@ -435,10 +481,10 @@ JIRA_EMAIL=<you@example.com>
 JIRA_API_TOKEN=<atlassian-api-token>   # never commit; .env is gitignored
 ```
 
-`.specify/extensions/jira/jira-config.yml` — the resolved per-project binding
+`.specify/extensions/jira-sync/jira-config.yml` — the resolved per-project binding
 (project key, issue-type / status / transition ids). You do **not** write this
-by hand: run **`/speckit-jira-install`** to resolve every id over the Jira REST
-API and write this gitignored file, then **`/speckit-jira-seed`** to confirm the
+by hand: run **`/speckit-jira-sync-install`** to resolve every id over the Jira REST
+API and write this gitignored file, then **`/speckit-jira-sync-seed`** to confirm the
 lifecycle mapping is reachable. The committed placeholder
 [`config-template.yml`](config-template.yml) shows the shape the install step
 fills. (The manual route — copy the template and read the ids off the project via
@@ -486,13 +532,13 @@ harness, the slash commands run the engine without dropping to a terminal:
 
 | Command | Maps to | What it does |
 |---|---|---|
-| `/speckit-jira-push` | `reconcile.sh [--all\|--spec NNN] [--dry-run] [--on-drift=abort\|proceed]` | **Write** path — force a reconcile (the same path the `after_*` hooks fire). |
-| `/speckit-jira-status` | `reconcile.sh --dry-run` | **Read-only** preview — plans every write, issues none. |
-| `/speckit-jira-install` | the install ceremony | Resolve + write the gitignored binding; also (re)registers the `after_*` hooks. |
-| `/speckit-jira-seed` | the seed gate | Validate the labels + confirm every lifecycle status is reachable. |
+| `/speckit-jira-sync-push` | `reconcile.sh [--all\|--spec NNN] [--dry-run] [--on-drift=abort\|proceed]` | **Write** path — force a reconcile (the same path the `after_*` hooks fire). |
+| `/speckit-jira-sync-status` | `reconcile.sh --dry-run` | **Read-only** preview — plans every write, issues none. |
+| `/speckit-jira-sync-install` | the install ceremony | Resolve + write the gitignored binding; also (re)registers the `after_*` hooks. |
+| `/speckit-jira-sync-seed` | the seed gate | Validate the labels + confirm every lifecycle status is reachable. |
 
-`/speckit-jira-push` is the write path the hooks also fire;
-`/speckit-jira-status` is the read-only drift/sync preview (it computes the same
+`/speckit-jira-sync-push` is the write path the hooks also fire;
+`/speckit-jira-sync-status` is the read-only drift/sync preview (it computes the same
 diff a live push would perform, then stops). There is intentionally no `pull`:
 the filesystem is the single source of truth and Jira is a unidirectional,
 read-only mirror, so there is nothing to pull back.
@@ -500,14 +546,14 @@ read-only mirror, so there is nothing to pull back.
 #### If auto-sync stops firing: hook self-healing
 
 Reinstalling or upgrading the extension with
-`specify extension add jira --from <zip> --force` **silently strips the six
+`specify extension add jira-sync --from <zip> --force` **silently strips the six
 `after_*` auto-sync hooks** from your `.specify/extensions.yml` — auto-sync then
 stops firing and the board can drift unnoticed. The bridge now **self-reports**
-this: every `/speckit-jira-push` warns (once) when hooks are missing and names
-them, `/speckit-jira-status` shows a first-class *Auto-sync hooks* health line
+this: every `/speckit-jira-sync-push` warns (once) when hooks are missing and names
+them, `/speckit-jira-sync-status` shows a first-class *Auto-sync hooks* health line
 in every state, and — at a real terminal — either surfaces a single `y/N` prompt
 to re-register all of them at once. The one-line fix in any case is to re-run
-**`/speckit-jira-install`**, which idempotently restores the hooks (preserving
+**`/speckit-jira-sync-install`**, which idempotently restores the hooks (preserving
 any you deliberately set `enabled: false`). The check is non-blocking and never
 writes to Jira.
 
@@ -590,10 +636,10 @@ real Jira instance** (see *Live-dogfood-proven* below).
   layered idempotency, kept free of any Jira specifics.
 - **`workstate` schema gate** — every emitted record validated against the
   published schema (under `uv`, PEP 668-safe) before any write.
-- **Install + seed ceremony** — `/speckit-jira-install` resolves the binding
+- **Install + seed ceremony** — `/speckit-jira-sync-install` resolves the binding
   (project key, issue-type ids, lifecycle phase→status map, story-points field)
   over the Jira REST API and writes the gitignored `jira-config.yml`; no more
-  hand-editing ids. `/speckit-jira-seed` validates the labels + confirms every
+  hand-editing ids. `/speckit-jira-sync-seed` validates the labels + confirms every
   lifecycle status is reachable on the project's workflow. Idempotent
   (byte-identical re-run), fail-closed (exit 2/3), Privacy IX.
 
@@ -611,7 +657,7 @@ catch**, each fixed and regression-guarded:
 
 **True zero-churn idempotency is now verified on real Jira** (fresh mirror →
 immediate re-run = 0 created / 0 updated). In-session slash commands
-`/speckit-jira-push` (write) and `/speckit-jira-status` (read-only `--dry-run`
+`/speckit-jira-sync-push` (write) and `/speckit-jira-sync-status` (read-only `--dry-run`
 preview) drive it.
 
 ### Roadmap

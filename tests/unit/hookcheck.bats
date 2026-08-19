@@ -129,13 +129,13 @@ _assess() {  # <yml>
     run bash -c "source '${HOOKCHECK_SH}'; hookcheck::status_line partial after_tasks after_implement --"
     [[ "$output" == *"partial"* ]]
     [[ "$output" == *"after_tasks"* ]]
-    [[ "$output" == *"/speckit-jira-install"* ]]
+    [[ "$output" == *"/speckit-jira-sync-install"* ]]
 }
 
 @test "status_line: none → none registered + remediation" {
     run bash -c "source '${HOOKCHECK_SH}'; hookcheck::status_line none --"
     [[ "$output" == *"none registered"* ]]
-    [[ "$output" == *"/speckit-jira-install"* ]]
+    [[ "$output" == *"/speckit-jira-sync-install"* ]]
 }
 
 @test "status_line: present → all present" {

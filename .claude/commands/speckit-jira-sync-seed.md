@@ -16,7 +16,7 @@ one of the 6 configured `phase_status` ids is reachable on the project's workflo
 (`GET project/<key>/statuses`); and captures/confirms the ids into the binding.
 It never creates labels and never mutates the admin-scoped workflow.
 
-Run seed AFTER `/speckit-jira-install` has written the binding.
+Run seed AFTER `/speckit-jira-sync-install` has written the binding.
 
 Arguments the user passed (may be empty): `$ARGUMENTS`
 
@@ -38,7 +38,7 @@ After it runs, report back concisely:
 - the per-phase reachability (each of the 6 lifecycle phases → its status id),
 - that seed is idempotent (a healthy re-run is a byte-identical no-op),
 - if it exited `2`, the exact unreachable lifecycle step + remediation (re-run
-  `/speckit-jira-install`, or `--phase-status <phase>=<statusName|id>`); if `3`,
+  `/speckit-jira-sync-install`, or `--phase-status <phase>=<statusName|id>`); if `3`,
   Jira was unreadable.
 
 Seed reads the project's workflow over direct Jira REST and never mutates it. The

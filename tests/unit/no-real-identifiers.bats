@@ -97,7 +97,7 @@ _private_patterns() {
   # privacy guard actually covers it) and carry only neutral placeholders — no
   # real email/account id, and a non-PII handle (never an email/local-part).
   cd "$REPO_ROOT"
-  local sample=".specify/extensions/jira/jira-authors.local.yml.sample"
+  local sample=".specify/extensions/jira-sync/jira-authors.local.yml.sample"
   git ls-files --error-unmatch -- "$sample" >/dev/null 2>&1 || {
     echo "untracked (the privacy guard would not scan it): $sample" >&2
     return 1
@@ -109,7 +109,7 @@ _private_patterns() {
   grep -q 'accountId: null' "$sample"
   # The RESOLVED map (real PII) must be gitignored — never tracked.
   if git ls-files --error-unmatch -- \
-      ".specify/extensions/jira/jira-authors.local.yml" >/dev/null 2>&1; then
+      ".specify/extensions/jira-sync/jira-authors.local.yml" >/dev/null 2>&1; then
     echo "the resolved authors map (real PII) is TRACKED — it must be gitignored" >&2
     return 1
   fi
@@ -155,8 +155,8 @@ _private_patterns() {
   cd "$REPO_ROOT"
   local f
   for f in \
-    commands/jira-install.md commands/jira-seed.md \
-    .claude/commands/speckit-jira-install.md .claude/commands/speckit-jira-seed.md \
+    commands/jira-sync-install.md commands/jira-sync-seed.md \
+    .claude/commands/speckit-jira-sync-install.md .claude/commands/speckit-jira-sync-seed.md \
     src/install.sh src/seed.sh; do
     git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || {
       echo "untracked (the privacy guard would not scan it): $f" >&2
@@ -169,9 +169,9 @@ _private_patterns() {
   local site_re hits
   site_re="$(jira_sink::privacy_shapes | awk -F'\t' '$2=="site"{print $3}')"
   hits="$(grep -lIiE -- "$site_re" \
-            commands/jira-install.md commands/jira-seed.md \
-            .claude/commands/speckit-jira-install.md \
-            .claude/commands/speckit-jira-seed.md \
+            commands/jira-sync-install.md commands/jira-sync-seed.md \
+            .claude/commands/speckit-jira-sync-install.md \
+            .claude/commands/speckit-jira-sync-seed.md \
             src/install.sh src/seed.sh 2>/dev/null || true)"
   if [ -n "$hits" ]; then
     echo "a non-example .atlassian.net host leaked into a committed 008 file:" >&2
@@ -185,7 +185,7 @@ _private_patterns() {
   # so a public repo never leaks the operator's resolved coordinates. We assert
   # the DEFAULT binding path is git-ignored and never tracked.
   cd "$REPO_ROOT"
-  local binding=".specify/extensions/jira/jira-config.yml"
+  local binding=".specify/extensions/jira-sync/jira-config.yml"
   # The path is declared in .gitignore.
   git check-ignore -q -- "$binding" || {
     echo "the resolved binding path is NOT gitignored: $binding" >&2

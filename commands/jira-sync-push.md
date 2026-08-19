@@ -1,5 +1,5 @@
 ---
-name: speckit.jira.push
+name: speckit.jira-sync.push
 description: Reconcile (push) the consumer repo's specs → Jira — idempotent, drift-aware, fail-closed; the only path that mutates Jira
 arguments:
   - name: all
@@ -16,7 +16,7 @@ arguments:
     optional: true
 ---
 
-# `/speckit.jira.push`
+# `/speckit.jira-sync.push`
 
 ## Summary
 
@@ -61,7 +61,7 @@ clean exit-2/3 warning instead of a broken `&&` chain.
 - if it exited non-zero, frame it as a **gentle warning** (this push may have
   auto-fired from a lifecycle hook — the spec-kit command itself still
   succeeded; the mirror just couldn't run this time):
-  - exit `2` = missing or invalid `jira-config.yml` → run `/speckit-jira-install`
+  - exit `2` = missing or invalid `jira-config.yml` → run `/speckit-jira-sync-install`
     to bind this repo (or check `.env` is present and exported);
   - exit `3` = Jira unreadable → check the `JIRA_API_TOKEN` in `.env`,
     auth/network, or whether the issue was deleted.
@@ -75,11 +75,11 @@ read-only mirror.
 
 The reconcile now self-reports the health of its own six `after_*` auto-sync
 hooks (feature 012). Reinstalling with
-`specify extension add jira --from <zip> --force` **silently strips** those
+`specify extension add jira-sync --from <zip> --force` **silently strips** those
 hooks from `.specify/extensions.yml`, so auto-sync stops firing. When hooks are
 missing, this push emits **one** named WARNING (`… auto-sync hook(s) not
-registered … run /speckit-jira-install to restore auto-sync`); at a real
+registered … run /speckit-jira-sync-install to restore auto-sync`); at a real
 terminal it also offers a single `y/N` to re-register them all at once. The
-restore path is **`/speckit-jira-install`** (or accept the interactive offer).
+restore path is **`/speckit-jira-sync-install`** (or accept the interactive offer).
 The check is non-blocking and never mutates Jira — relay the warning as-is
 without alarm.

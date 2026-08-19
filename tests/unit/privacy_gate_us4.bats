@@ -25,20 +25,20 @@ setup() {
   export WORKSTATE_LAST_COMMIT_ISO="2026-05-31T00:00:00+00:00"
 
   WORKDIR="$BATS_TEST_TMPDIR/consumer"
-  mkdir -p "$WORKDIR/specs" "$WORKDIR/.specify/extensions/jira"
+  mkdir -p "$WORKDIR/specs" "$WORKDIR/.specify/extensions/jira-sync"
   cp -R "$REPO_ROOT/tests/fixtures/specs/001-sample" "$WORKDIR/specs/001-sample"
   # Strip the only broad-shape signal in the fixture (the Owner: email) so the
   # tree carries NEITHER a BLOCK nor a WARN match — a genuinely clean tree.
   grep -v '@' "$WORKDIR/specs/001-sample/spec.md" >"$WORKDIR/specs/001-sample/spec.md.clean"
   mv "$WORKDIR/specs/001-sample/spec.md.clean" "$WORKDIR/specs/001-sample/spec.md"
   cp "$REPO_ROOT/tests/fixtures/config/jira-config.sample.yml" \
-     "$WORKDIR/.specify/extensions/jira/jira-config.yml"
+     "$WORKDIR/.specify/extensions/jira-sync/jira-config.yml"
 
   ( cd "$WORKDIR"
     git init -q .
     git config user.email "test@example.com"
     git config user.name "Test"
-    printf '.env\n.specify/extensions/jira/jira-config.yml\n.specify/extensions/jira/jira-authors.local.yml\n' >.gitignore
+    printf '.env\n.specify/extensions/jira-sync/jira-config.yml\n.specify/extensions/jira-sync/jira-authors.local.yml\n' >.gitignore
     printf 'TOKEN=placeholder\n' >.env
     git add specs .gitignore
     git commit -q -m seed )

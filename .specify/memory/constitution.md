@@ -199,7 +199,7 @@ for the resource's lifetime; the only failure mode is hard deletion, which the
 bridge surfaces as an explicit error rather than silent drift.
 
 **Rules**:
-- The resolved binding (`.specify/extensions/jira/jira-config.yml`) holds real
+- The resolved binding (`.specify/extensions/jira-sync/jira-config.yml`) holds real
   coordinates and is GITIGNORED (Principle IX). Only a placeholder
   `config-template.yml` is committed.
 - The seed/install step MUST capture every status id, transition id, and the
@@ -235,12 +235,13 @@ radius.
 
 ### VII. Memory-Just-Works, Escape Hatches Beside It
 
-At `specify extension add jira` time the bridge MUST auto-register every
+At `specify extension add jira-sync` time the bridge MUST auto-register every
 relevant `after_*` hook (`after_specify`, `after_clarify`, `after_plan`,
 `after_tasks`, `after_implement`, `after_analyze`) with `optional: false`.
 Default UX: run a spec-kit command, Jira updates. On-demand commands
-(`speckit.jira.push`, `.pull`, `.status`) ship as **escape hatches** for
-recovery, ad-hoc inspection, and incident response — NOT as the primary path.
+(`speckit.jira-sync.push`, `.status`, `.install`, `.seed`) ship as **escape
+hatches** for recovery, ad-hoc inspection, and incident response — NOT as the
+primary path.
 
 **Rationale**: A bridge whose primary UI is "remember to run sync" drifts and
 gets abandoned. Auto-firing on every lifecycle transition is what earns the
@@ -360,7 +361,7 @@ ordinary reconcile, or onto operator-created issues) is a MAJOR amendment.
 
 ## Operational Workflow
 
-**Install** (per consumer repo): `specify extension add jira` → resolve the
+**Install** (per consumer repo): `specify extension add jira-sync` → resolve the
 Jira project key, issue-type ids, status + transition ids, and story-points
 field id → write the gitignored `jira-config.yml` → register `after_*` hooks
 with `optional: false` → offer the GitHub Action and guide `JIRA_EMAIL` +
@@ -372,12 +373,13 @@ with `optional: false` → offer the GitHub Action and guide `JIRA_EMAIL` +
 lifecycle needs, capture every id, and write them into config. Safe to re-run.
 
 **Sync**: auto on every `after_*` hook; available on-demand via
-`speckit.jira.push`. Idempotent. Writes from any worktree (Principle IV,
+`speckit.jira-sync.push`. Idempotent. Writes from any worktree (Principle IV,
 drift-aware); on backward-drift it surfaces a warning and — interactively —
 prompts proceed/abort, but never blocks the write outright.
 
-**Recovery**: on-demand commands (`speckit.jira.push`, `.pull`, `.status`) are
-the documented path for missed hooks, drift inspection, and post-incident audit.
+**Recovery**: on-demand commands (`speckit.jira-sync.push`, `.status`,
+`.install`, `.seed`) are the documented path for missed hooks, drift
+inspection, and post-incident audit.
 
 ## Governance
 

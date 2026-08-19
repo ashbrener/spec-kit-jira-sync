@@ -108,11 +108,11 @@ BASE
 @test "attribution::authors_file: returns the configured path, else the default" {
   _load_with "  attribution:
     enabled: true
-    authors_file: \".specify/extensions/jira/custom-authors.yml\""
+    authors_file: \".specify/extensions/jira-sync/custom-authors.yml\""
   run bash -c 'source "$1"; config::load "$2"; config::attribution_authors_file' \
     _ "${REPO_ROOT}/src/config.sh" "$CONF"
   [ "$status" -eq 0 ]
-  [ "$output" = ".specify/extensions/jira/custom-authors.yml" ]
+  [ "$output" = ".specify/extensions/jira-sync/custom-authors.yml" ]
 }
 
 @test "attribution::authors_file: defaults to the canonical gitignored path" {
@@ -121,5 +121,5 @@ BASE
   run bash -c 'source "$1"; config::load "$2"; config::attribution_authors_file' \
     _ "${REPO_ROOT}/src/config.sh" "$CONF"
   [ "$status" -eq 0 ]
-  [ "$output" = ".specify/extensions/jira/jira-authors.local.yml" ]
+  [ "$output" = ".specify/extensions/jira-sync/jira-authors.local.yml" ]
 }

@@ -1,5 +1,5 @@
 ---
-name: speckit.jira.seed
+name: speckit.jira-sync.seed
 description: Validate the phase:* / task-phase:N labels and confirm every lifecycle status is reachable on the project's workflow — never mutates the workflow; idempotent
 arguments:
   - name: dry-run
@@ -7,7 +7,7 @@ arguments:
     optional: true
 ---
 
-# `/speckit.jira.seed`
+# `/speckit.jira-sync.seed`
 
 ## Summary
 
@@ -24,7 +24,7 @@ project's workflow (`GET project/<key>/statuses`); and captures/confirms the ids
 into the binding. It **never** creates labels and **never** mutates the
 admin-scoped workflow statuses/transitions.
 
-Run seed AFTER `/speckit-jira-install` has written the binding.
+Run seed AFTER `/speckit-jira-sync-install` has written the binding.
 
 Arguments the user passed (may be empty): `$ARGUMENTS`
 
@@ -47,7 +47,7 @@ cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && bash
   reachable or not),
 - that seed is idempotent (a healthy re-run is a byte-identical no-op),
 - if it exited **2**, the exact lifecycle step that is unreachable + the
-  remediation (re-run `/speckit-jira-install`, or
+  remediation (re-run `/speckit-jira-sync-install`, or
   `--phase-status <phase>=<statusName|id>`, to map that phase onto an existing
   status); if **3**, Jira was unreadable (bad token in `.env` or the project's
   workflow isn't visible to the credential).

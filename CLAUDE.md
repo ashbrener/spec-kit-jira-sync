@@ -10,9 +10,13 @@ internally. This repo is also the independent second consumer that proves
 - **Privacy (Principle IX)**: NO real Jira coordinates/PII in any tracked file —
   no workspace/company/project names, person names, emails, sites, account ids,
   cloudIds/UUIDs, or tokens. Real values live ONLY in gitignored `.env`,
-  `jira-config.yml`, and `tests/.private-deny`. The privacy guard
-  (`tests/unit/no-real-identifiers.bats`) gates CI.
+  `.specify/extensions/jira-sync/jira-config.yml`, and `tests/.private-deny`. The
+  privacy guard (`tests/unit/no-real-identifiers.bats`) gates CI.
 - **No AI-attribution trailers** in commit messages.
+- **One name, everywhere (013)**: the extension id is `jira-sync` — catalog key
+  == manifest `extension.id` == `speckit.jira-sync.*` == `.specify/extensions/jira-sync/`
+  == the hook token. `src/identity.sh` is the ONLY place it is written; consumers
+  derive it (no literals). `tests/unit/extension_identity.bats` pins it.
 - **Tests are the gate**; run the exact CI locally before pushing.
 - **Engine stays vendor-neutral**: Jira specifics live only in the sink + config
   (the engine is copied from spec-kit-linear, pending later extraction).
@@ -27,9 +31,10 @@ internally. This repo is also the independent second consumer that proves
 ## Commands
 
 - Reconcile: `src/reconcile.sh --all [--dry-run] [--on-drift=abort]`
-- Slash (write): `/speckit-jira-push` →
+- Slash (write): `/speckit-jira-sync-push` →
   `reconcile.sh [--all|--spec NNN] [--dry-run] [--on-drift=abort|proceed]`
-- Slash (read-only preview): `/speckit-jira-status` → `reconcile.sh --dry-run`
+- Slash (read-only preview): `/speckit-jira-sync-status` → `reconcile.sh --dry-run`
+- Install / seed: `/speckit-jira-sync-install`, `/speckit-jira-sync-seed`
 - Tests: `bats --recursive tests/unit`
 - Lint (CI parity): `shellcheck --severity=style src/*.sh`,
   `yamllint -d relaxed .github/workflows/ci.yml`,
@@ -38,7 +43,23 @@ internally. This repo is also the independent second consumer that proves
 ## Active feature
 
 <!-- SPECKIT START -->
-- **012-hook-self-heal** (active) — the second half of the auto-mirror story
+- **013-extension-identity** (active) — BREAKING identity realignment: `extension.id`
+  `jira` → `jira-sync` so catalog key == manifest id == command namespace == install
+  dir == hook token, mirroring the Linear sibling. FORCED by a maintainer review
+  holding our v0.5.0 catalog bump (github/spec-kit PR #4168): an UNRELATED extension
+  (mbachorik/spec-kit-jira) owns the `jira` slot, so installs registered under `jira`
+  and the updater offered OUR users THEIR extension. Commands become
+  `speckit.jira-sync.{push,status,install,seed}` (`/speckit-jira-sync-*`); NO aliases
+  are possible (upstream requires alias namespace == id). Real architecture: the id
+  was hardcoded TWICE (install.sh wrote the bare-`jira` hook token; hookcheck.sh
+  matched its own copy of it) → NEW `src/identity.sh` single constant both consume + a pin test, so
+  012's "writer and reader agree" stops being coincidence. Migration rides 012's
+  self-heal (old entries classify `absent` → warn → consented re-register); config
+  gains a legacy read-fallback (surfaced, never moved/deleted). Ships v0.6.0.
+  Engine untouched (003 green); NO schema/exit-code change; Privacy IX; NO amendment
+  (constitution/CLAUDE.md doc-fix only, incl. a bogus `.pull` ref). Spec+plan done.
+  Plan: `specs/013-extension-identity/plan.md`
+- **012-hook-self-heal** — the second half of the auto-mirror story
   (011=register / 012=keep-registered): detect + repair the six after_* hooks when
   `specify extension add jira --from <zip> --force` silently strips them. Direct
   port of the Linear sibling's shipped spec-014. NEW `src/hookcheck.sh`
@@ -51,13 +72,12 @@ internally. This repo is also the independent second consumer that proves
   (remediation `/speckit-jira-install`); the y/N heal reuses 011's idempotent
   `install::register_after_hooks`. Plan flags the include-guard task: add idempotent
   guards to the shared libs so the heal can source install.sh without readonly
-  double-declare. Sink/config-side — engine untouched (003 green; hookcheck:: +
-  reconcile::main are un-audited); NO schema/exit-code change; Privacy IX; NO
-  amendment (enforces VII/VIII). Spec+clarify+plan done.
+  double-declare. Sink/config-side — engine untouched (003 green). Merged to main (PR #27);
+  shipped in v0.5.0 (tag) alongside 011.
   Plan: `specs/012-hook-self-heal/plan.md`
 - **011-hook-auto-registration** — made sk-jira an AUTOMATIC mirror (implemented
   Principle VII, which the bridge never built — it registered ZERO hooks). Declares
-  the six after_* hooks in `extension.yml provides.hooks` → `speckit.jira.push`
+  the six after_* hooks in `extension.yml provides.hooks` → the push command
   (optional:false; CLI registers on add) + an idempotent install-side
   `install::register_after_hooks` (mirrors the Linear sibling; honours enabled:false;
   dogfood-gated `condition`). Non-blocking (structural — the skill fires the hook

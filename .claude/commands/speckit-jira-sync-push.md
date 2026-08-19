@@ -38,20 +38,20 @@ After it runs, report back concisely:
 - if it exited non-zero, frame it as a **gentle warning** (this push may have
   auto-fired from a lifecycle hook — the spec-kit command itself still
   succeeded; the mirror just couldn't run this time):
-  - exit `2` = missing or invalid `jira-config.yml` → run `/speckit-jira-install`
+  - exit `2` = missing or invalid `jira-config.yml` → run `/speckit-jira-sync-install`
     to bind this repo (or check `.env` is present and exported);
   - exit `3` = Jira unreadable → check the `JIRA_API_TOKEN` in `.env`,
     auth/network, or whether the issue was deleted.
   Never present a hook-fired failure as alarming or as a blocker.
 
-This is the same Jira-REST reconcile engine the `/speckit.jira.push` consumer
+This is the same Jira-REST reconcile engine the `/speckit.jira-sync.push` consumer
 surface wraps — the Atlassian MCP is not involved (the sync is direct REST by
 design). The filesystem is the source of truth; Jira is a read-only mirror.
 
 Auto-sync hook health (feature 012): the reconcile self-reports the health of
 its six `after_*` auto-sync hooks. Reinstalling with
-`specify extension add jira --from <zip> --force` **silently strips** them from
+`specify extension add jira-sync --from <zip> --force` **silently strips** them from
 `.specify/extensions.yml`, so auto-sync stops firing. On a stripped set this
 push emits one named WARNING and (at a real terminal) offers a single `y/N` to
-re-register them all; the restore path is **`/speckit-jira-install`**. It is
+re-register them all; the restore path is **`/speckit-jira-sync-install`**. It is
 non-blocking and never writes to Jira — relay the warning without alarm.

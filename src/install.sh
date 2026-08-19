@@ -7,7 +7,7 @@
 # binding (project key, issue-type ids, the 6 lifecycle phase→status ids, and
 # the best-effort story-points field id) by reading the project over the Jira
 # REST API — the SAME transport the sink uses (`jira_rest::get`) — and writes
-# the gitignored `.specify/extensions/jira/jira-config.yml` via the new
+# the gitignored `.specify/extensions/jira-sync/jira-config.yml` via the new
 # `config::write_binding` writer. It reuses `mapping::detect_available_types`
 # as the issue-type probe. It NEVER touches the vendor-neutral engine path, so
 # the 003 neutrality gate is unaffected (install:: is not an audited engine
@@ -37,6 +37,10 @@ readonly _INSTALL_SH_LOADED=1
 
 INSTALL_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The single source of truth for the extension id / push command / install
+# directory (013). Sourced FIRST so every literal below is derived, never typed.
+# shellcheck source=./identity.sh disable=SC1091
+source "${INSTALL_SH_DIR}/identity.sh"
 # shellcheck source=./jira_rest.sh disable=SC1091
 source "${INSTALL_SH_DIR}/jira_rest.sh"
 # shellcheck source=./config.sh disable=SC1091
@@ -64,7 +68,7 @@ declare -ga INSTALL_PHASE_OVERRIDES=()
 # registers the six `after_*` lifecycle hooks into the consumer's
 # `.specify/extensions.yml` so every `/speckit-*` command auto-mirrors the spec
 # state to Jira. INSTALL_AFTER_HOOK_NAMES all fire the same command
-# (`speckit.jira.push`) because reconcile is the single convergent operation.
+# (`speckit.jira-sync.push`) because reconcile is the single convergent operation.
 # Mirrors the Linear sibling's block grammar exactly so a future hook-health
 # detector (feature 012) and this registrar agree on what "present" means.
 # ---------------------------------------------------------------------------
@@ -105,7 +109,7 @@ install::promote_exit() {
 
 # install::_log <message…> — stderr only, never a credential.
 install::_log() {
-    printf 'spec-kit-jira install: %s\n' "$*" >&2
+    printf 'spec-kit-jira-sync install: %s\n' "$*" >&2
 }
 
 # ---------------------------------------------------------------------------
@@ -132,17 +136,17 @@ install::guard_source_target() {
 
     if [[ "${source_root}" == "${target_root}" ]]; then
         install::_log "refusing to install: the target is the bridge's own checkout (${target_root})."
-        install::_log "remediation: run /speckit-jira-install from your CONSUMER repo, not the bridge's source tree."
+        install::_log "remediation: run /speckit-jira-sync-install from your CONSUMER repo, not the bridge's source tree."
         return 2
     fi
 
     # Defensive: the bridge ships its own specs/008-install-seed-ceremony etc.;
     # if the target tree carries the bridge's manifest it is the bridge itself.
     if [[ -f "${target_root}/extension.yml" ]] \
-        && grep -q 'id: "jira"' "${target_root}/extension.yml" 2>/dev/null \
+        && grep -q "id: \"${SPECKIT_EXT_ID}\"" "${target_root}/extension.yml" 2>/dev/null \
         && [[ -f "${target_root}/src/install.sh" ]]; then
         install::_log "refusing to install: the target tree looks like the bridge's own source (carries extension.yml + src/install.sh)."
-        install::_log "remediation: run /speckit-jira-install from your CONSUMER repo."
+        install::_log "remediation: run /speckit-jira-sync-install from your CONSUMER repo."
         return 2
     fi
 
@@ -185,7 +189,7 @@ install::_is_dogfood_target() {
     [[ "${source_root}" == "${target_root}" ]] && return 0
     # Defensive: the target tree carrying the bridge's own manifest is the bridge.
     if [[ -f "${target_root}/extension.yml" ]] \
-        && grep -q 'id: "jira"' "${target_root}/extension.yml" 2>/dev/null \
+        && grep -q "id: \"${SPECKIT_EXT_ID}\"" "${target_root}/extension.yml" 2>/dev/null \
         && [[ -f "${target_root}/src/install.sh" ]]; then
         return 0
     fi
@@ -214,23 +218,23 @@ install::register_after_hooks() {
 }
 
 # install::_create_minimal_extensions_yml — write the minimal consumer file when
-# absent: `installed:` (with jira), `settings: { auto_execute_hooks: true }`
+# absent: `installed:` (with this extension), `settings: { auto_execute_hooks: true }`
 # (required for the skills to auto-EXECUTE the hook), and an empty `hooks:`.
 install::_create_minimal_extensions_yml() {
     mkdir -p "$(dirname "$INSTALL_EXTENSIONS_YML")"
-    cat >"$INSTALL_EXTENSIONS_YML" <<'YAML'
-installed:
-- jira
-settings:
-  auto_execute_hooks: true
-hooks:
-YAML
+    {
+        printf 'installed:\n'
+        printf -- '- %s\n' "${SPECKIT_EXT_ID}"
+        printf 'settings:\n'
+        printf '  auto_execute_hooks: true\n'
+        printf 'hooks:\n'
+    } >"$INSTALL_EXTENSIONS_YML"
     install::_log "created ${INSTALL_EXTENSIONS_YML}"
 }
 
 # install::_register_one_hook <hook_name>
 #
-# Idempotently insert the `jira` entry under <hook_name>. Re-registration
+# Idempotently insert the extension entry under <hook_name>. Re-registration
 # honours any existing `enabled: false` the operator chose (Principle VII / VIII)
 # — a present entry is PRESERVED untouched.
 install::_register_one_hook() {
@@ -245,7 +249,7 @@ install::_register_one_hook() {
     block="$(install::_render_hook_block "$hook")"
 
     # Two append paths:
-    #   (a) the `<hook>:` key already exists — append the jira block under it
+    #   (a) the `<hook>:` key already exists — append our block under it
     #       (alongside any other extension's entries, untouched).
     #   (b) the `<hook>:` key is missing — create the section with the block.
     if grep -qE "^[[:space:]]{2}${hook}:[[:space:]]*$" "$INSTALL_EXTENSIONS_YML"; then
@@ -257,13 +261,15 @@ install::_register_one_hook() {
 
 # install::_hook_already_registered <hook_name>
 #
-# Returns 0 iff the named after_* hook already has a `jira` extension entry. The
-# match is anchored on `extension: jira` appearing inside the `^  <hook>:` block
-# (single-line awk vars only — BSD-awk safe).
+# Returns 0 iff the named after_* hook already has an entry for THIS extension.
+# The match is anchored on `extension: ${SPECKIT_EXT_ID}` appearing inside the
+# `^  <hook>:` block — the id comes from src/identity.sh (013), the same
+# constant hookcheck::classify matches, so writer and reader cannot diverge.
+# Single-line awk vars only — BSD-awk safe.
 install::_hook_already_registered() {
     local hook="$1"
     [[ -f "$INSTALL_EXTENSIONS_YML" ]] || return 1
-    awk -v want="$hook" '
+    awk -v want="$hook" -v want_ext="$SPECKIT_EXT_ID" '
         BEGIN { in_block = 0; found = 0 }
         $0 ~ "^  " want ":" {
             in_block = 1
@@ -272,7 +278,7 @@ install::_hook_already_registered() {
         in_block && /^  [a-zA-Z_]+:[[:space:]]*$/ {
             in_block = 0
         }
-        in_block && /extension:[[:space:]]*jira/ {
+        in_block && $0 ~ ("extension:[[:space:]]*" want_ext "[[:space:]]*$") {
             found = 1
             exit
         }
@@ -282,9 +288,9 @@ install::_hook_already_registered() {
 
 # install::_render_hook_block <hook_name>
 #
-# Emit the YAML for a single `jira` entry under a hook block. On a DOGFOOD target
+# Emit the YAML for a single extension entry under a hook block. On a DOGFOOD target
 # (install::_is_dogfood_target ⇒ 0), the `condition` is the LITERAL
-# `${SPECKIT_JIRA_DOGFOOD_SAFE:-false}` (host-evaluated at fire time — the
+# `${SPECKIT_JIRA_SYNC_DOGFOOD_SAFE:-false}` (host-evaluated at fire time — the
 # bridge's own dev does not auto-push unless the operator opts in); else `null`.
 install::_render_hook_block() {
     local hook="$1"
@@ -321,18 +327,18 @@ install::_render_hook_block() {
     esac
 
     {
-        printf '  - extension: jira\n'
-        printf '    command: speckit.jira.push\n'
+        printf '  - extension: %s\n' "${SPECKIT_EXT_ID}"
+        printf '    command: %s\n' "${SPECKIT_EXT_PUSH_COMMAND}"
         printf '    enabled: true\n'
         printf '    optional: false\n'
         printf '    prompt: %s\n' "$prompt"
         printf '    description: %s\n' "$description"
         if install::_is_dogfood_target; then
-            # SC2016 suppressed: the `${SPECKIT_JIRA_DOGFOOD_SAFE:-false}` text is
+            # SC2016 suppressed: the `${SPECKIT_JIRA_SYNC_DOGFOOD_SAFE:-false}` text is
             # written VERBATIM into the YAML; the host agent (not us) evaluates it
             # at hook-fire time. We want literal text, not bash expansion here.
             # shellcheck disable=SC2016
-            printf '    condition: "${SPECKIT_JIRA_DOGFOOD_SAFE:-false}"\n'
+            printf '    condition: "${SPECKIT_JIRA_SYNC_DOGFOOD_SAFE:-false}"\n'
         else
             printf '    condition: null\n'
         fi
@@ -798,7 +804,7 @@ install::main() {
             seed::main --config "${INSTALL_CONFIG_PATH}" || install::promote_exit "$?"
         fi
     elif (( INSTALL_OFFER_SEED == 1 )); then
-        install::_log "next: run /speckit-jira-seed to confirm the lifecycle mapping is reachable."
+        install::_log "next: run /speckit-jira-sync-seed to confirm the lifecycle mapping is reachable."
     fi
 
     return "${INSTALL_EXIT_CODE}"

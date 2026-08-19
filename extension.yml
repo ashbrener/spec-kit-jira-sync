@@ -2,12 +2,12 @@
 # spec-kit-jira-sync — spec-kit extension manifest
 # =============================================================================
 #
-# This file is the installation contract read by `specify extension add jira`
+# This file is the installation contract read by `specify extension add jira-sync`
 # (the specify-cli extensions installer). The CLI validates this manifest,
-# copies the repo into the consumer's `.specify/extensions/jira/`, registers
+# copies the repo into the consumer's `.specify/extensions/jira-sync/`, registers
 # any hooks below into the consumer's `.specify/extensions.yml`, and (if the
 # consumer initialised with `--ai-skills`) auto-generates one SKILL.md per
-# command under `.claude/skills/spec-kit-jira-<sub>/`.
+# command under `.claude/skills/spec-kit-jira-sync-<sub>/`.
 #
 # Field shape mirrors the sibling extension `spec-kit-linear-sync`
 # (extension.yml) exactly for every field the framework cares about. This bridge
@@ -20,7 +20,7 @@
 # Privacy (constitution Principle IX): this manifest is committed to a PUBLIC
 # repo and MUST stay free of real Jira coordinates/PII — no site, project key,
 # account ids, cloudIds, or tokens. Real binding values live ONLY in the
-# gitignored `.specify/extensions/jira/jira-config.yml` and `.env`.
+# gitignored `.specify/extensions/jira-sync/jira-config.yml` and `.env`.
 # =============================================================================
 
 # Manifest schema version. The CLI hard-requires "1.0"; any other value aborts
@@ -36,26 +36,33 @@ schema_version: "1.0"
 extension:
   # Lowercase-kebab id used throughout the framework and as the directory name
   # under `.specify/extensions/`. MUST match ^[a-z0-9-]+$. Command names below
-  # are required to start with `speckit.<id>.` — i.e. `speckit.jira.`.
+  # are required to start with `speckit.<id>.` — i.e. `speckit.jira-sync.`.
   #
-  # NOTE: the framework id is `jira` (the install directory + command
-  # namespace). The COMMUNITY CATALOG id is `jira-sync` — the bare `jira`
-  # catalog slot is taken by an unrelated prompt-file extension, so the listing
-  # uses `jira-sync` while the installed extension lives under
-  # `.specify/extensions/jira/`.
-  id: "jira"
+  # ONE NAME, EVERYWHERE (feature 013, v0.6.0 — BREAKING): the framework id,
+  # the COMMUNITY CATALOG key, the command namespace and the install directory
+  # are all `jira-sync`. Before v0.6.0 this manifest declared `id: "jira"`
+  # while the catalog listed `jira-sync`, so the updater resolved our users to
+  # the unrelated extension that owns the bare `jira` slot. The id below is the
+  # single published identity; `src/identity.sh` is its runtime twin, and
+  # `tests/unit/extension_identity.bats` pins the two together.
+  id: "jira-sync"
 
   # Human-readable name surfaced in `specify extension list` and the catalog.
   name: "spec-kit-jira-sync"
 
-  # PEP 440 version. v0.5.0 adds feature 011 (auto-registered `after_*` hooks —
+  # PEP 440 version. v0.6.0 (BREAKING) lands feature 013 — extension identity
+  # realignment: the manifest id, the catalog key, the command namespace and the
+  # install directory are one value (`jira-sync`), so the catalog updater can no
+  # longer resolve this bridge to the unrelated extension holding the `jira`
+  # slot. Operator-invoked command names change; nothing the bridge projects to
+  # Jira does. v0.5.0 added feature 011 (auto-registered `after_*` hooks —
   # the automatic mirror, implementing Principle VII) and feature 012 (hook
   # self-healing — detect + consented repair of stripped auto-sync hooks) on top
   # of the v0.4.0 baseline (006 privacy guard + 008 install/seed ceremony + 009
   # title source ladder + 010 lifecycle→subtask cascade, over the v0.3.0 core:
   # 001 bridge + 002 mapping + 003 engine + 004 re-mode + 005 ADR + 007
   # attribution).
-  version: "0.5.0"
+  version: "0.6.0"
 
   # One-line description — matches the catalog entry + README cover.
   description: "An idempotent, drift-aware, fail-closed reconcile engine that mirrors spec-kit specs into Jira (Epic per repo, Story per spec, Subtask per phase)."
@@ -80,7 +87,7 @@ requires:
   # NOTE: Jira base URL, Basic-auth token (JIRA_BASE_URL / JIRA_EMAIL /
   # JIRA_API_TOKEN), and `jira-config.yml` validity are NOT declarable in
   # `requires:`. They are resolved from the gitignored `.env` /
-  # `.specify/extensions/jira/jira-config.yml` and checked at reconcile time.
+  # `.specify/extensions/jira-sync/jira-config.yml` and checked at reconcile time.
 
 # ---------------------------------------------------------------------------
 # `provides:` — what this extension contributes to the consumer repo.
@@ -96,12 +103,12 @@ provides:
   # `commands:` — the slash-command surface area of this extension.
   #
   # Naming convention enforced by the CLI: each `name` MUST match
-  # `speckit.<extension.id>.<sub>` — i.e. `speckit.jira.<sub>`.
+  # `speckit.<extension.id>.<sub>` — i.e. `speckit.jira-sync.<sub>`.
   #
   # `file` is the path RELATIVE TO this extension's root and points at the
   # Markdown body the host agent (Claude Code, etc.) executes when the operator
   # runs the corresponding slash command. These two files are the installable
-  # twins of the dev-layout `.claude/commands/speckit-jira-*.md` and carry the
+  # twins of the dev-layout `.claude/commands/speckit-jira-sync-*.md` and carry the
   # identical behaviour — they only differ in frontmatter shape (manifest-style
   # `name:` + `arguments:`) so the installer can register them.
   # -------------------------------------------------------------------------
@@ -111,35 +118,35 @@ provides:
     # state for every `specs/NNN-feature/` directory and pushes whatever Jira
     # needs to converge. Idempotent, drift-aware, fail-closed. The ONLY path
     # that mutates Jira.
-    - name: "speckit.jira.push"
-      file: "commands/jira-push.md"
+    - name: "speckit.jira-sync.push"
+      file: "commands/jira-sync-push.md"
       description: "Reconcile filesystem spec state -> Jira for every spec (or one --spec NNN) in the consumer repo. Idempotent; drift-aware; the only path that mutates Jira."
 
     # Read-only visibility: runs the reconcile engine in --dry-run, planning
     # every write but issuing none. Mutates neither Jira nor the filesystem.
-    - name: "speckit.jira.status"
-      file: "commands/jira-status.md"
+    - name: "speckit.jira-sync.status"
+      file: "commands/jira-sync-status.md"
       description: "Read-only sync status / drift preview: what would be created/updated/transitioned, plus any backward-drift (Jira ahead of disk). Never mutates."
 
     # The install on-ramp (feature 008). Resolves the per-repo binding (project
     # key, issue-type ids, the 6 lifecycle phase→status ids, story-points field
     # id) over the Jira REST API and writes the gitignored jira-config.yml —
     # ending the hand-edit. Idempotent (byte-identical re-run); fail-closed.
-    - name: "speckit.jira.install"
-      file: "commands/jira-install.md"
+    - name: "speckit.jira-sync.install"
+      file: "commands/jira-sync-install.md"
       description: "Resolve the per-repo Jira binding (project key, issue-type ids, phase->status map, story-points field) over REST and write the gitignored jira-config.yml. No more hand-editing ids. Idempotent; fail-closed (exit 2/3)."
 
     # The seed trust gate (feature 008). Validates the phase:* / task-phase:N
     # label conventions and confirms every lifecycle status is reachable on the
     # project's workflow before the first real reconcile. Never mutates the
     # admin-scoped workflow; safe to re-run.
-    - name: "speckit.jira.seed"
-      file: "commands/jira-seed.md"
+    - name: "speckit.jira-sync.seed"
+      file: "commands/jira-sync-seed.md"
       description: "Validate the phase:* / task-phase:N labels and confirm every lifecycle status is reachable on the project's workflow. Never mutates the workflow; idempotent; fail-closed (exit 2)."
 
   # -------------------------------------------------------------------------
   # `hooks:` — auto-registered into the consumer's `.specify/extensions.yml`
-  # by the CLI at `specify extension add jira` time (and idempotently
+  # by the CLI at `specify extension add jira-sync` time (and idempotently
   # repaired by the install ceremony's `install::register_after_hooks`, the
   # parity/self-heal path).
   #
@@ -157,7 +164,7 @@ provides:
   #
   # NO `before_*` hooks: this extension never pre-empts a lifecycle step — it
   # only mirrors AFTER each transition. All six point at the same command
-  # (`speckit.jira.push`) because reconcile is the single convergent operation
+  # (`speckit.jira-sync.push`) because reconcile is the single convergent operation
   # (one sync path; idempotent; zero-churn on unchanged state).
   # -------------------------------------------------------------------------
   hooks:
@@ -165,7 +172,7 @@ provides:
     # After /speckit-specify — the spec Story is created in Jira at its initial
     # status (the board entry for the new spec appears).
     after_specify:
-      - command: "speckit.jira.push"
+      - command: "speckit.jira-sync.push"
         description: "Reconcile after /speckit-specify so the new spec Story exists in Jira with the correct initial status."
         prompt: "Reconciling spec.md to Jira..."
         optional: false
@@ -174,7 +181,7 @@ provides:
     # After /speckit-clarify — ratified Q/A appears as comments on the spec
     # Story; no status change.
     after_clarify:
-      - command: "speckit.jira.push"
+      - command: "speckit.jira-sync.push"
         description: "Reconcile after /speckit-clarify so ratified clarifications appear as comments on the spec Story."
         prompt: "Reconciling clarification rounds to Jira comments..."
         optional: false
@@ -183,7 +190,7 @@ provides:
     # After /speckit-plan — the spec Story advances to the planning status and
     # plan summaries / ADR decisions mirror as comments.
     after_plan:
-      - command: "speckit.jira.push"
+      - command: "speckit.jira-sync.push"
         description: "Reconcile after /speckit-plan so the spec Story advances to the planning status and plan/ADR summaries appear as comments."
         prompt: "Reconciling plan.md to Jira..."
         optional: false
@@ -192,7 +199,7 @@ provides:
     # After /speckit-tasks — each lifecycle phase becomes a Subtask of the spec
     # Story with the right checklist.
     after_tasks:
-      - command: "speckit.jira.push"
+      - command: "speckit.jira-sync.push"
         description: "Reconcile after /speckit-tasks so each lifecycle phase becomes a Jira Subtask of the spec Story with the right checklist."
         prompt: "Reconciling tasks.md to Jira subtasks..."
         optional: false
@@ -201,7 +208,7 @@ provides:
     # After /speckit-implement — checklist completion state and the lifecycle
     # status roll up in Jira.
     after_implement:
-      - command: "speckit.jira.push"
+      - command: "speckit.jira-sync.push"
         description: "Reconcile after /speckit-implement so checklist completion and the lifecycle status roll up in Jira."
         prompt: "Reconciling implementation progress to Jira..."
         optional: false
@@ -210,7 +217,7 @@ provides:
     # After /speckit-analyze — analyze findings mirror as comments on the spec
     # Story.
     after_analyze:
-      - command: "speckit.jira.push"
+      - command: "speckit.jira-sync.push"
         description: "Reconcile after /speckit-analyze so analyze findings appear as comments on the spec Story."
         prompt: "Reconciling analyze findings to Jira comments..."
         optional: false
@@ -220,14 +227,14 @@ provides:
   # `config:` — INFORMATIONAL. The CLI does NOT auto-scaffold this file on
   # install. The runtime binding `jira-config.yml` is produced by copying the
   # committed `config-template.yml` into
-  # `.specify/extensions/jira/jira-config.yml` and filling in the real ids
+  # `.specify/extensions/jira-sync/jira-config.yml` and filling in the real ids
   # (project key, issue-type ids, phase->status ids). The resolved copy is
   # gitignored; only the placeholder template is committed.
   # -------------------------------------------------------------------------
   config:
     - name: "jira-config.yml"
       template: "config-template.yml"
-      description: "Per-repo Jira binding: project_key, issue_types (epic/story/subtask), phase_status map, label prefixes, optional configurable mapping. Copied from config-template.yml into .specify/extensions/jira/ and filled with the project's real ids. Gitignored (Principle IX)."
+      description: "Per-repo Jira binding: project_key, issue_types (epic/story/subtask), phase_status map, label prefixes, optional configurable mapping. Copied from config-template.yml into .specify/extensions/jira-sync/ and filled with the project's real ids. Gitignored (Principle IX)."
       required: true
 
 # ---------------------------------------------------------------------------

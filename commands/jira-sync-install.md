@@ -1,5 +1,5 @@
 ---
-name: speckit.jira.install
+name: speckit.jira-sync.install
 description: Resolve the per-repo Jira binding (project key, issue-type ids, phase→status map, story-points field) over REST and write the gitignored jira-config.yml — no more hand-editing ids
 arguments:
   - name: project
@@ -19,12 +19,12 @@ arguments:
     optional: true
 ---
 
-# `/speckit.jira.install`
+# `/speckit.jira-sync.install`
 
 ## Summary
 
 Resolve this consumer repo's Jira binding and write the gitignored
-`.specify/extensions/jira/jira-config.yml` — ending the manual id-hunting. You
+`.specify/extensions/jira-sync/jira-config.yml` — ending the manual id-hunting. You
 (the agent) run the resolver via the Bash tool and report what was resolved. Do
 NOT ask the user to run anything in their terminal.
 
@@ -74,7 +74,7 @@ cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && bash
 ## Offer to run seed (FR-013)
 
 On a successful install, unless the user passed `--no-seed`, **offer to run
-`/speckit-jira-seed`** now (install and seed are almost always run together — seed
+`/speckit-jira-sync-seed`** now (install and seed are almost always run together — seed
 confirms the lifecycle mapping is actually reachable on the project's workflow
 before the first real reconcile). If they accept, run the seed command;
 declining leaves seed as a separate explicit step. (`--with-seed` runs it

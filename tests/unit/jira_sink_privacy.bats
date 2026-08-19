@@ -155,12 +155,12 @@ YAML
 # =============================================================================
 
 @test "privacy_ignore_targets: prints config path, .env, and the authors map" {
-  RECONCILE_CONFIG_PATH=".specify/extensions/jira/jira-config.yml" \
+  RECONCILE_CONFIG_PATH=".specify/extensions/jira-sync/jira-config.yml" \
     run jira_sink::privacy_ignore_targets
   [ "$status" -eq 0 ]
-  [[ "$output" == *".specify/extensions/jira/jira-config.yml"* ]]
+  [[ "$output" == *".specify/extensions/jira-sync/jira-config.yml"* ]]
   [[ "$output" == *".env"* ]]
-  [[ "$output" == *".specify/extensions/jira/jira-authors.local.yml"* ]]
+  [[ "$output" == *".specify/extensions/jira-sync/jira-authors.local.yml"* ]]
 }
 
 @test "privacy_ignore_targets: honours an overridden --config path" {
